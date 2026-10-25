@@ -61,6 +61,120 @@
   }
   #turnBox button { padding: 5px 11px; font-size: 12px; font-weight: 600; border-radius: 7px; }
   #turnBox button:active { transform: translateY(1px); }
+  /* 顶栏「维修」上的角标：有几处失修就亮几个点（>99 显示 99+）。
+     没有失修时整个隐藏 —— 平时不占视线，出事才跳出来。 */
+  #turnBox button .nbadge {
+    display: none; margin-left: 5px; padding: 0 4px; border-radius: 6px;
+    background: #b0492f; color: #fff; font-size: 10px; font-style: normal;
+    font-weight: 700; line-height: 14px; vertical-align: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  #turnBox button .nbadge.on { display: inline-block; }
+  #repBtn.open { background: #24292e; border-color: #24292e; color: #fff; }
+  #repBtn.open .nbadge { background: #fff; color: #b0492f; }
+
+  /* ---------------- 维修面板（右上角浮层） ----------------
+   * 从顶栏正下方展开，max-height 撑到视口底部；三块各自滚动，
+   * 这样 1100 个省的失修清单也不会把这面板顶到屏幕外面去。
+   * 底色用实色而不是半透明：面板底下压着省份卡的一角，透过去会看成"两层卡叠着"。 */
+  #repPanel {
+    position: fixed; top: 60px; right: 14px; z-index: 13;
+    width: 430px; max-height: calc(100vh - 86px);
+    display: none; flex-direction: column; gap: 6px;
+    padding: 10px 12px 12px; border-radius: 10px;
+    background: #fcfaf6; border: 1px solid var(--line);
+    box-shadow: 0 10px 34px rgba(16, 22, 28, .24);
+    font-size: 12px; color: var(--ink-2); overflow: hidden;
+  }
+  #repPanel.on { display: flex; }
+  /* 三块内容放进可滚动区：优先档表 + 失修清单都可能很长，
+   * 让它们自己滚，头部（标题/范围/关闭）和国库条永远留在原位。 */
+  #rpBody { display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; }
+  #rpHead { display: flex; align-items: center; gap: 8px; }
+  #rpHead b { font-size: 13px; font-weight: 650; color: var(--ink); letter-spacing: .3px; }
+  #rpWho { font-size: 11px; color: #a8b0b7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #rpHead .segs { flex: none; width: 96px; margin-left: auto; }
+  #rpHead .segs button { padding: 3px 0; font-size: 11px; }
+  #rpHead button.ghost2 {
+    flex: none; width: 22px; height: 22px; padding: 0; border: 0; background: transparent;
+    font-size: 15px; line-height: 1; color: #98a1a9;
+  }
+  #rpHead button.ghost2:hover { background: rgba(20,26,32,.06); color: var(--ink); }
+
+  /* 国库条：铁 / 金 + 本回合剩余拨款 —— 玩家调档前要先看见"家里还有多少" */
+  #rpTreasury {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 6px 8px; border-radius: 7px; background: rgba(20, 26, 32, .035);
+    font-size: 11.5px; font-variant-numeric: tabular-nums;
+  }
+  #rpTreasury b { color: var(--ink); font-weight: 650; }
+  #rpTreasury .warn { color: #b0492f; }
+  #rpTreasury .ok { color: #2f7d4f; }
+
+  .rpSec { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+  .rpSec .gph {
+    display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap;
+    padding: 2px 2px 4px; font-size: 11px; color: #8b959d;
+  }
+  .rpSec .gph b { font-size: 12px; font-weight: 650; color: #4b565f; letter-spacing: .2px; }
+  .rpSec .gph span { font-variant-numeric: tabular-nums; }
+  /* 说明文字单独占一整行：挤在标题右边会被压成三行（430px 宽不够摆两句中文） */
+  .rpSec .gph em {
+    font-style: normal; flex: 1 0 100%; font-size: 10.5px; color: #a8b0b7; line-height: 1.45;
+  }
+
+  /* 优先档表：类别 / 已建 / 失修 / 四档按钮。grid 固定，四档并排不换行 */
+  .rpPrioHead, .rprow {
+    display: grid; align-items: center; gap: 6px;
+    grid-template-columns: minmax(70px, 1fr) 34px 34px 154px;
+    padding: 3px 6px; border-radius: 6px;
+  }
+  .rpPrioHead { font-size: 10px; color: #a8b0b7; letter-spacing: .3px; }
+  .rpPrioHead span:nth-child(2), .rpPrioHead span:nth-child(3) { text-align: right; }
+  .rprow:nth-child(even) { background: rgba(20, 26, 32, .022); }
+  .rprow:hover { background: rgba(209, 161, 90, .10); }
+  #rpPrioList { max-height: 236px; overflow-y: auto; }
+  .rprow .rn { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ink); }
+  .rprow .rn i.i { width: 7px; height: 7px; border-radius: 2px; flex: none; border: 1px solid rgba(0,0,0,.15); }
+  .rprow .rn .tg {
+    flex: none; font-size: 9.5px; padding: 0 3px; border-radius: 3px;
+    background: rgba(176, 73, 47, .12); color: #a8523b;
+  }
+  .rprow .nc { text-align: right; font-variant-numeric: tabular-nums; }
+  .rprow .nc.bad { color: #b0492f; font-weight: 650; }
+  .rprow .segs { flex: none; }
+  .rprow .segs button { padding: 2px 0; font-size: 10.5px; border-radius: 5px; }
+  .rprow .segs button.on[data-p="p1"] { background: #a8523b; border-color: #a8523b; }
+  .rprow .segs button.on[data-p="p2"] { background: #b98b2f; border-color: #b98b2f; }
+  .rprow .segs button.on[data-p="p3"] { background: #7a8791; border-color: #7a8791; }
+  .rprow .segs button.on[data-p="p0"] { background: #c9ccd0; border-color: #c9ccd0; color: #3c464f; }
+
+  .segs.wide { width: 100%; }
+  .segs.wide button { padding: 4px 0; font-size: 11px; }
+  .segs button:disabled { opacity: .35; cursor: default; }
+
+  /* 失修清单：一行一处（省名 · 类别 · 状态 · 修价 · 两个按钮） */
+  #rpBadList { max-height: 216px; overflow-y: auto; border-top: 1px solid rgba(20,26,32,.08); }
+  .rpbad {
+    display: grid; align-items: center; gap: 6px;
+    grid-template-columns: minmax(64px, 1fr) 52px 56px 1fr auto auto;
+    padding: 4px 6px; border-radius: 6px; font-size: 11.5px;
+  }
+  .rpbad:nth-child(even) { background: rgba(20, 26, 32, .022); }
+  .rpbad .pn2 {
+    display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rpbad .pn2 i { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+  .rpbad .pk { color: #3c464f; }
+  .rpbad .pc { font-variant-numeric: tabular-nums; color: #a8523b; }
+  .rpbad .pc.mute { color: #b0b8be; }
+  .rpbad button { padding: 2px 7px; font-size: 11px; border-radius: 5px; }
+  .rpbad button.go { border-color: rgba(176,73,47,.45); color: #a8523b; font-weight: 600; }
+  .rpbad button.go:hover { background: rgba(176,73,47,.10); }
+  .rpbad button.go:disabled { opacity: .35; cursor: default; }
+  .rpbad button.stop.on { background: rgba(20,26,32,.06); color: #5a6570; }
+  .rpEmpty { padding: 14px 6px; font-size: 11.5px; color: #9aa3ab; line-height: 1.7; }
   #turnBox.flash { animation: turnFlash .5s ease; }
   @keyframes turnFlash {
     0% { box-shadow: 0 0 0 0 rgba(120, 150, 130, .55); }
@@ -216,6 +330,19 @@
   }
   .reslist .rr .add:hover:not(:disabled) { background: #eef4ef; border-color: #8fb59b; color: #2f7a6b; }
   .reslist .rr .add:disabled { opacity: .35; cursor: default; }
+  /* 「改建熔旧坊」：铁矿脉枯竭之后，那一行的 ＋ 变成这个钮。
+     比 ＋ 宽一点（要写字），墨色偏炉火 —— 它是这一行下半辈子的唯一动作，
+     不该长得像"再加一座矿场"。置灰时退回灰纸色（理由写在 title 上）。 */
+  .reslist .rr .add.smelt {
+    width: auto; padding: 0 6px; font-size: 10.5px; letter-spacing: .2px;
+    color: #7a4a2c; border-color: #d8bda4; background: #fdf6ee;
+  }
+  .reslist .rr .add.smelt:hover:not(:disabled) {
+    background: #f7e6d3; border-color: #c9a17a; color: #8a4a1f;
+  }
+  .reslist .rr .add.smelt:disabled {
+    opacity: 1; color: #9aa3ab; background: #f4f1ec; border-color: #d9d5cc;
+  }
   .reslist .rr .sp { flex: 1; }
   .reslist .rr .dot { width: 6px; height: 6px; border-radius: 50%; background: #d3dade; flex: none; }
   .reslist .rr .dot.on { background: #4f9d78; box-shadow: 0 0 0 2px rgba(79,157,120,.18); }
@@ -1142,6 +1269,19 @@
   .otag.plain { background: #fff; border: 1px solid rgba(20,26,32,.18); color: #4b565f; }
   .otag.bad { background: #f7e4dd; color: #a8523b; }
   .otag.gold { background: #fbf0d8; color: #8a5a1f; border: 1px solid rgba(201,168,111,.6); }
+  /* 资历星 / 怨气小标（v11）：和 otag 同一行，扫一眼就知道"这个官是老人还是怨吏" */
+  .ork {
+    display: inline-block; margin-left: 3px; font-size: 9px; line-height: 15px;
+    font-style: normal; color: #b98b2f; letter-spacing: -1px;
+  }
+  .ogv {
+    display: inline-block; margin-left: 4px; padding: 0 3px; border-radius: 3px;
+    font-size: 9px; line-height: 15px; font-style: normal;
+    background: #eef1f4; color: #8b959d; font-variant-numeric: tabular-nums;
+  }
+  .ogv.bad { background: #f7e4dd; color: #a8523b; font-weight: 650; }
+  .prow .pgo.rew { border-color: #d8c3a0; background: #fdf7ec; color: #8a5a1f; }
+  .prow .pgo.rew:hover:not(:disabled) { background: #f7ead2; border-color: #c9a86f; color: #6b4522; }
   .prow .pgo {
     padding: 2px 0; font-size: 10.5px; border-radius: 5px; line-height: 1.6;
     border: 1px solid #c6d0d7; background: #fff; color: #4b6b7a; cursor: pointer;
@@ -1192,6 +1332,15 @@
   #iOfficial.none { color: #a8b0b7; font-size: 11.5px; }
   /* 市场 ? 面板里的买货格：和卖货同一套骨架，只换按钮配色 */
   .reslist .qinfo .sellbox.buy .srow > button { color: #8a5a1f; border-color: #d8c3a0; }
+  /* 外国货源（外交 v9）：卖家名字要挤在资源名后面 —— 34px 的标签列装不下，
+     所以这一节单独放宽到 96px，放不下就省略号（title 里有全名和产地） */
+  .reslist .qinfo .sellbox.fbuy .srow > span {
+    width: 96px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .reslist .qinfo .sellbox.fbuy .srow > span i {
+    font-style: normal; color: #b3ab9c; font-size: 10px; margin-left: 3px;
+  }
+  .reslist .qinfo .sellbox.fbuy .srow > button { color: #2f6f5e; border-color: #b9d0c4; }
   .reslist .qinfo .sellbox.buy .srow > button:hover:not(:disabled) {
     background: #fdf7ec; border-color: #c9a86f; color: #6b4522;
   }
@@ -1331,6 +1480,9 @@
   /* 「群龙无首」这种四个字的标签不能被挤成两行 —— 标签列一律不换行 */
   .govbox .gvrow > span:first-child { white-space: nowrap; flex: none; }
   .govbox .gvrow em.none { color: #a8b0b7; font-style: normal; }
+  /* 性格（识人也是情报战）：一句"军国 · 苛税"要能一眼读到，
+     所以给它一点墨色重量 —— 它是判断这个国下一步要干什么的钥匙 */
+  .govbox .gvrow em.pv { color: #6b4a2c; font-weight: 650; letter-spacing: .3px; }
   .govbox .wtag {
     display: inline-block; padding: 0 5px; margin-right: 3px; border-radius: 4px;
     background: #fbeee8; color: #a8523b; font-size: 10.5px;
@@ -1344,6 +1496,87 @@
   .diplobtns .warbtn.peace { border-color: #bcd3c4; background: #f0f6f1; color: #2f7a6b; }
   .diplobtns .warbtn:disabled { opacity: .45; cursor: default; }
   .diplobtns em.none { font-style: normal; font-size: 11px; color: #a8b0b7; }
+  /* ---- 外交层（v9）：关系值五档 / 条约 / 战争分条 / 缔约钮 ---- */
+  /* 关系值的档位各有各的墨色：敌对偏赭、亲睦偏青，中间两档几乎不染色 ——
+     "普通"就不该有存在感。 */
+  .govbox .gvrow em.rel { font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+  .govbox .gvrow em.rel.foe    { color: #a8523b; }
+  .govbox .gvrow em.rel.cold   { color: #8a6d34; }
+  .govbox .gvrow em.rel.friend { color: #4b7f6a; }
+  .govbox .gvrow em.rel.kin    { color: #2f6f5e; font-weight: 650; }
+  .govbox .gvrow em.pact { color: #2f6f5e; font-weight: 650; letter-spacing: .3px; }
+  .govbox .gvrow em.ws { font-variant-numeric: tabular-nums; }
+  /* 「vs 对手名」那一小段：只是注解，别抢数字的注意力 */
+  .govbox .gvrow em.ws i.vs {
+    font-style: normal; font-size: 10.5px; color: #a8a094; margin-left: 5px; letter-spacing: .2px;
+  }
+  /* 战争分对比条：左我方（墨绿）、右对方（赭红），和上面的数字同一顺序 */
+  .wsbar {
+    display: flex; height: 5px; margin: 1px 0 3px; border-radius: 3px; overflow: hidden;
+    background: #e8e2d4; border: 1px solid rgba(32, 42, 52, .10);
+  }
+  .wsbar i { display: block; height: 100%; }
+  .wsbar .wsA { background: #6f9a86; }
+  .wsbar .wsB { background: #c08a72; }
+  .diplobtns .warbtn.pact { border-color: #bcd3c4; background: #f0f6f1; color: #2f6f5e; }
+  .diplobtns .warbtn.pact:hover:not(:disabled) { background: #e3efe6; }
+  .diplobtns .warbtn.talk { border-color: #cfc4a8; background: #faf5e9; color: #7a6432; }
+  .diplobtns .warbtn.talk:hover:not(:disabled) { background: #f3ecd8; }
+
+  /* ---- 谈判桌（v9）：照 #eventModal 的居中小卡语汇 ----
+     不复用 #eventModal 本体：那张卡归事件系统（EPEND / evtReopen）管，
+     谈判桌要能随时关掉、而且不该在回合刷新时被事件逻辑重画。 */
+  #talkModal {
+    position: fixed; inset: 0; z-index: 62; display: none; place-items: center;
+    background: radial-gradient(70% 65% at 50% 46%, rgba(28, 36, 44, .20), rgba(28, 36, 44, .40));
+  }
+  #talkModal.on { display: grid; }
+  #talkModal .evcard {
+    position: relative; width: 430px; max-width: calc(100vw - 48px);
+    padding: 20px 22px 16px; border-radius: 3px;
+    background: linear-gradient(#fdfbf5, #f8f2e6);
+    border: 1px solid rgba(32, 42, 52, .48);
+    box-shadow: 0 26px 64px rgba(20, 26, 32, .34);
+    color: var(--ink); animation: evIn .16s ease-out;
+  }
+  #talkModal .evcard::after {
+    content: ""; position: absolute; inset: 3px; border-radius: 2px;
+    border: 1px solid rgba(32, 42, 52, .16); pointer-events: none;
+  }
+  #talkModal .evcat {
+    position: absolute; right: 14px; top: 11px; font-size: 14px; line-height: 1;
+    color: #b3a48b; cursor: help; letter-spacing: 1px;
+  }
+  #talkModal h2 { margin: 0 0 3px; font-size: 19px; font-weight: 650; letter-spacing: .8px; }
+  #talkModal .evwhere {
+    font-size: 11px; color: #8b959d; letter-spacing: .3px; margin-bottom: 9px;
+    font-variant-numeric: tabular-nums;
+  }
+  #talkModal p { margin: 0 0 14px; font-size: 12.5px; line-height: 1.9; color: #3d4750; }
+  #talkModal .evopts { display: flex; flex-direction: column; gap: 8px; }
+  #talkModal .evopt {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    text-align: left; padding: 8px 12px 9px; border-radius: 7px; cursor: pointer;
+    background: #fffdf8; border: 1px solid rgba(20, 26, 32, .22);
+    transition: transform .1s, border-color .1s, box-shadow .1s;
+  }
+  #talkModal .evopt b { font-size: 12.5px; font-weight: 650; letter-spacing: .3px; }
+  #talkModal .evopt em { font-style: normal; font-size: 11px; color: #9a8f7c; }
+  #talkModal .evopt:hover:not(:disabled) {
+    border-color: #24292e; background: #fff; transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(20, 26, 32, .12);
+  }
+  #talkModal .evopt:disabled { opacity: .45; cursor: default; }
+  #talkModal .evopt:focus { outline: none; }
+  #talkModal .evcard:focus { outline: none; }
+  /* 谈判卡里的战争分对比条（比国卡里那条粗一档：这里是要读数的） */
+  #talkModal .tkbar {
+    display: flex; height: 9px; margin: 0 0 12px; border-radius: 4px; overflow: hidden;
+    background: #e8e2d4; border: 1px solid rgba(32, 42, 52, .12);
+  }
+  #talkModal .tkbar i { display: block; height: 100%; }
+  #talkModal .tkbar .tkA { background: #6f9a86; }
+  #talkModal .tkbar .tkB { background: #c08a72; }
 
   /* 选国浮层 */
   #pickPanel {
@@ -1597,7 +1830,7 @@
     <div class="col bld-col">
       <div class="sec" title="通用设施：不绑在某一种资源上。学校产科研点（攒满解锁科技树）；市场把资源换成金（手动卖）；建造坊让工地能冲刺工期 —— 它停产，这个省的冲刺钮就消失；粮仓给粮/渔加库存上限（每座 +100，3 座封顶）；大学每回合 +6 科研点、+2 人才点（要累计教育 60）">通用</div>
       <div class="reslist bldlist" id="iSchoolList"></div>
-      <div class="sec" title="＋ 建造：先从本省库存扣，不够向中央申请，中央再从富裕省份调拨（有调拨损耗）。建造要花几个回合，货运等级越高工期越短；每座建筑每回合还要吃铁+金维护，付不起就停产">建筑</div>
+      <div class="sec" title="＋ 建造：先从本省库存扣，不够向中央申请，中央再从富裕省份调拨（有调拨损耗）。建造要花几个回合，货运等级越高工期越短；每座建筑每回合还要吃铁+金维护，付不起就停产。铁矿脉枯竭之后，那一行的 ＋ 会变成「改建熔旧坊」（木材 10 · 金 14，2 回合；每座 0.5~0.6 铁/回合，金耗 = 产量 × 0.5，1 铁 = 0.5 金锁死）">建筑</div>
       <div class="reslist bldlist" id="iBldList"></div>
       <div class="bldmsg" id="bldMsg"></div>
       <!-- 军备（v3）：五种装备厂 + 本省驻军。兵营征兵、军械坊产军械、驯马场产战马、铸炮厂产炮、造船厂产舰 -->
@@ -1650,7 +1883,7 @@
   <div class="sec" title="科研：学校每回合产科研点；攒满解锁科技树，之后花科研点+国库资源研究。研究完的建筑可以盖/升 Lv2">科技</div>
   <div id="cTech" class="techbox"></div>
   <!-- 治理：和「科技」并排的一节 —— 科技管国家工程，治理管人和钱（税率 / 民心 / 官员） -->
-  <div class="sec" title="治理：税率三档（税入 ↔ 民心）· 学校产人才点 → 开科取士 → 派官员上任。人口税进省库（本省金锭库存），生产抽税进中央国库，两本账不混"><img
+  <div class="sec" title="治理：税率三档（税入 ↔ 民心）· 学校产人才点 → 开科取士 → 派官员上任。人口税进省库（本省金锭库存 + 民间铁器熔缴的少量铁锭），生产抽税进中央国库，两本账不混"><img
       class="seci" src="assets/res/item-official.png" alt=""
       onerror="this.style.display='none'">治理</div>
   <div id="cGovern" class="govbox"></div>
@@ -1678,6 +1911,8 @@
   <button id="techBtn" class="ghost" title="科技树：花科研点研究，解锁建筑 Lv2">科技</button>
   <button id="govBtn" class="ghost" title="治理：税率 / 官员 / 民心 / 各省税入（全屏总览）">治理</button>
   <button id="warBtn" class="ghost" title="军务：将领 / 军队 / 命令与战术 / 战报（和治理同一块面板的第二个页签）">军务</button>
+  <!-- 维修（19-repair.js）：谁能吃中央的维护钱由这里定。徽标上的红点 = 有几处失修 -->
+  <button id="repBtn" class="ghost" title="维修：给每一类建筑定维护优先档（高/中/低/停），选维修队，逐个手动「修」/「停修」">维修<i class="nbadge" id="repBadge"></i></button>
   <button id="chronoBtn" class="ghost" title="编年史：这一局的年表 / 三张地图 / 终局数据与称号。随时可开，随时可定稿">编年史</button>
   <button id="playBtn" class="ghost" title="选一个国家开始游戏：别国的省卡与面板会置灰，你只能操作自己的国">开始游戏</button>
   <button id="nextTurn" class="primary" title="结算本回合，进入下一回合（空格）">下一回合 ▸</button>
@@ -1833,7 +2068,55 @@
   </div>
 </div>
 
+<!-- 谈判桌（外交 v9）：交战国卡上的「求和」打开。
+     白和永远可选（现状承认），赔款要战争分领先；AI 答不答应看它自己的战况与民心。 -->
+<div id="talkModal" role="dialog" aria-modal="true" aria-labelledby="tkTitle">
+  <div class="evcard" tabindex="-1">
+    <span class="evcat" title="谈判桌">§</span>
+    <h2 id="tkTitle"></h2>
+    <div class="evwhere" id="tkWhere"></div>
+    <div class="tkbar" id="tkBar"></div>
+    <p id="tkText"></p>
+    <div class="evopts" id="tkOpts"></div>
+  </div>
+</div>
+
 <div id="toast"></div>
+
+<!-- 维修面板（19-repair.js 的界面）：从右上角顶栏「维修」打开，挂在顶栏下面。
+     三块：① 维护优先档（每一类建筑一行，四档单选）② 维修队 ③ 失修清单（逐个修/停）。
+     做成**浮层小卡**而不是全屏：调优先级是回合中的高频小操作，
+     铺满一屏会让玩家找不到刚才在看的那块地。 -->
+<div id="repPanel" role="dialog" aria-label="维修">
+  <header id="rpHead">
+    <b>维修</b>
+    <span id="rpWho"></span>
+    <div class="segs" id="rpScope" title="作用范围：只改选中的省，还是全国同一类建筑">
+      <button type="button" data-scope="prov" class="on">本省</button>
+      <button type="button" data-scope="all">全国</button>
+    </div>
+    <button id="rpClose" type="button" class="ghost2" title="关闭（ESC）">×</button>
+  </header>
+  <div id="rpTreasury"></div>
+  <div id="rpBody">
+  <div class="rpSec">
+    <div class="gph"><b>维护优先档</b><span id="rpPrioN"></span>
+      <em>高/中档吃中央的维护钱；低/停只吃本省库存 —— 钱不够时先保谁</em></div>
+    <div class="rpPrioHead"><span>类别</span><span>已建</span><span>失修</span><span>优先档</span></div>
+    <div id="rpPrioList"></div>
+  </div>
+  <div class="rpSec">
+    <div class="gph"><b>维修队</b><span id="rpCrewTip"></span>
+      <em>每回合自动修最便宜的几处（只修失修的）</em></div>
+    <div class="segs wide" id="rpCrew"></div>
+  </div>
+  <div class="rpSec">
+    <div class="gph"><b>失修清单</b><span id="rpBadN"></span>
+      <em>「修」= 一次性掏钱修好；「停」= 不再自动缴费，攒的铁金留给别人</em></div>
+    <div id="rpBadList"></div>
+  </div>
+  </div>
+</div>
 
 <!-- 选国浮层（开始游戏）：列表就是现有的国家卡数据 —— 世界不动，只挑一个位置坐下。
      「上帝工坊模式」= 不选国（PLAYER=0），所有国家的按钮都能按，兼容原来的玩法。 -->
@@ -1872,6 +2155,10 @@
 <script src="js/14-labels.js"></script>
 <script src="js/10-render.js"></script>
 <script src="js/11-ui.js"></script>
+<!-- 维护与维修（19）：11-ui 结算时调它的钩子（repStep / repPayMaint），
+     它反过来读 11-ui 递出的内部件，所以必须排在 11-ui 之后。
+     和 18-ai 一样是"后挂上去的一层"，11-ui 里只留几行转发。 -->
+<script src="js/19-repair.js"></script>
 <!-- 敌国内政 AI（v7）：只读 AO.res* 与 11-ui.js 的 resDebug 出口，
      所以必须排在 11-ui.js 之后；它自己往 settleTurn 挂的钩子由 11-ui.js 调。 -->
 <script src="js/18-ai.js"></script>

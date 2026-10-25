@@ -243,6 +243,61 @@
   };
   AO.UNIVERSITY = UNIVERSITY;
 
+  /* =============================================================
+   * 熔旧坊（SMELT）—— 枯竭铁矿场的再就业
+   *
+   * 铁矿的 cool = 0（采空即永久枯竭），那一行从此只剩一个灰掉的 ×N。
+   * 熔旧坊是**唯一**的出路：把省里的旧铁器（锅、刀、犁）回炉重炼，换一条涓流。
+   *
+   * 三条纪律：
+   *   1) **不新增建筑行** —— 它就长在铁矿场那一行里（n>0 时行内变身）。
+   *      理由：省卡右栏已经六行军备 + 七行资源 + 五通用 + 货运，
+   *      再插一行"熔旧坊"会让"铁矿场"和"熔旧坊"看起来是两处无关的产业。
+   *   2) 唯一入口是**矿脉枯竭之后**那个 ＋ 钮（变成「改建」）——
+   *      没枯的矿不许改建（矿还在，去炼旧锅是亏本生意）。
+   *   3) 金耗锁死 = 产量 × goldPerIron。真矿约 0.1 金/铁
+   *      （维护 0.2 铁 + 0.2 金 出 2 铁），熔旧坊贵 5 倍是**故意的**：
+   *      矿是命脉，这是枯竭后的活路，不是替代品。
+   * ============================================================= */
+  var SMELT = {
+    key: 'smelt', cn: '熔旧坊', en: 'Old-Iron Smeltery',
+    cost: { timber: 10, gold: 14 },   // 改建价：拆矿架、砌炉膛、收旧铁
+    turns: 2,                         // 改建工期（回合）
+    maxPer: 2,                        // 每省封顶 2 座（再多就是纯堆数值）
+    needEdu: 15,                      // 累计教育门槛（和工厂同一档）
+    /* 每座每回合的铁产量 = min(perCap, perBase + 人口/ironUnit × perPop)。
+     * 人口项极缓（200 万一档），所以现实里一座就是 0.5~0.6 铁/回合，
+     * perCap 只是防止某个超级大省把它堆成矿场。 */
+    perBase: 0.5, perCap: 2.5, perPop: 0.5,
+    goldPerIron: 0.5,                 // 1 铁 = 0.5 金，锁死
+    perAt: function (pop) {
+      var v = SMELT.perBase + (pop || 0) / GOV.ironUnit * SMELT.perPop;
+      return Math.min(SMELT.perCap, v);
+    },
+    /* 账目一句话：行 title 和 ? 面板共用，只此一份 */
+    note: '1 铁 = 0.5 金锁死汇率；真矿约 0.1 金/铁——矿是命脉，这是枯竭后的活路'
+  };
+
+  /* 能不能改建 —— 和 FACTORY.check 同一套写法：＋钮的 title 与真改建读同一份规则。
+   * ctx = { bag, smeltN, site, edu } */
+  SMELT.check = function (prov, ctx) {
+    if (!prov) return { ok: false, why: '没有这个省' };
+    var s = ctx && ctx.bag && ctx.bag.iron;
+    /* 没有铁矿资源的省：连这一行都没有，自然也开不了炉 */
+    if (!s) return { ok: false, why: '本省没有铁矿脉，开不了炉' };
+    if (!s.gone) return { ok: false, why: '矿脉还没枯竭 —— 熔旧坊是枯竭后的活路，不是矿场的替代' };
+    if ((ctx.site | 0) > 0) return { ok: false, why: '还有一座在改建（剩 ' + (ctx.site | 0) + ' 回合）' };
+    if ((ctx.smeltN | 0) >= SMELT.maxPer) {
+      return { ok: false, why: '每省封顶 ' + SMELT.maxPer + ' 座熔旧坊（已建 ' + (ctx.smeltN | 0) + ' 座）' };
+    }
+    if ((ctx.edu || 0) < SMELT.needEdu) {
+      return { ok: false, why: '改建熔旧坊要累计教育 ' + SMELT.needEdu + '（现在 ' +
+        Math.floor(ctx.edu || 0) + '）—— 建学校、等人才点慢慢攒' };
+    }
+    return { ok: true };
+  };
+  AO.SMELT = SMELT;
+
   /* 三档教育门槛。key 只给"有建筑要解锁"的两档：
    *   15 factory    —— 军备新建筑「工厂」（工业化：本省军械产出 ×2）
    *   35 （无 key） —— 「火炮」：铸炮厂的门槛从 15 提到 35，见 FACTORY.foundry
@@ -362,12 +417,47 @@
      * 想回到"每 200 万人"的口径：把 popUnit 改成 2000000 即可（公式一行都不用动）。 */
     popUnit: 100000,
     goldPerUnit: [0.5, 1, 2],                 // 每单位人口每回合收多少金（小数攒整）
+    /* 民间铁器熔缴（人口铁税）：**每 200 万人**每回合 ironPer2M 铁。
+     * 单位和金税不是一个：金是 popUnit=10 万人（为了能发得出俸禄），
+     * 铁是 200 万人 —— 这一笔本来就是"涓流量级"的象征性收入
+     * （锅碗瓢盆回炉），一个中位省一回合只有 0.01 铁，要几十回合才攒出 1 块，
+     * 靠 IRONACC 攒整落袋。它**不构成军备产能**：军备的铁仍然只能来自
+     * 矿场与熔旧坊。三档与金税同档，系数同样乘 happyTaxMul。 */
+    ironUnit: 2000000,
+    ironPer2M: [0.1, 0.2, 0.4],
     happyHit: [0, -4, -12],                   // 税率对幸福度的压力
 
     /* --- 人才 --- */
     talentPerSchool: 0.5,                     // 每座在校（不停课）每回合人才点
     examCost: 10,                             // 抽一位官员花的人才点
     salary: 1,                                // 官员俸禄（金/回合，省库发；发不起欠着不罚）
+
+    /* --- 官员资历与怨气（v11） ---
+     * 派下去的不是一枚棋子，是一个人：干得久会升（rank 0→3），
+     * 待得久、民心差、还欠着饷会生怨（griev 0→100）。
+     * 两者合起来给一个**连续**的效果倍率（没有死区 —— 怨气 59 和 61 不一样）：
+     *   m = (1 + rank × rankFx) × (1 − griev × grievFx)
+     * 满资历 +45%，怨气满 −50%，两端相乘就是"能臣"与"怨吏"的差距。
+     * 玩家侧与 AI 侧读同一份（tooltip 上显示的就是结算真正乘的那个数）。 */
+    rankMax: 3,
+    rankFx: 0.15,                             // 每级资历：效果 × (1 + rank×0.15)
+    grievFx: 0.005,                           // 每点怨气：效果 × (1 − griev×0.005)
+    rankPay: [1, 1.25, 1.5, 2],               // 俸禄倍率（接 owed 欠饷机制）
+    rankCn: ['初任', '干吏', '能臣', '柱国'],  // 资历的四个说法（tooltip / 纪要）
+    griev: {
+      base: 12,                               // 每 base 回合 +1（民心正常时）
+      lowHappy: 45,                           // 民心低于它 → 改成每 lowEvery 回合 +1
+      lowEvery: 6,
+      owedPer: 2,                             // 欠饷：每回合再 +2
+      rollEvery: 24,                          // 每 24 回合掷一次去留
+      promote: 0.45,                          //   45% 擢升（rank+1，封顶 3）
+      idle: 0.45,                             //   45% 无事
+      resentAdd: 20,                          //   10% 怨望（griev+20）
+      warn: 60,                               // 首次 ≥60 →「怨望」红字 + 纪要一次
+      steal: 90,                              // ≥90 → 每回合从省库侵吞 1 金
+      reward: 15,                             // 赏赐价（中央金）
+      rewardCut: 25                           // 赏赐降多少怨气
+    },
 
     /* --- 收税系数 --- */
     noOfficerMul: 0.6,                        // 无官员省份的裸税系数
@@ -399,13 +489,16 @@
     /* --- 显示用的人话（别让玩家自己换算 popUnit） --- */
     popCn: function () {
       var u = GOV.popUnit;
-      return (u >= 10000 ? (u / 10000) + ' 万' : String(u)) + ' 人';
+      return (u >= 10000 ? (u / 10000) + ' 万' : String(u)) + '人';
     },
     /* 某一档税率的完整说明 —— 面板 tooltip / 国家卡 / 省卡都从这里取，
-     * 免得三处各写一遍、改一个数漏两处 */
+     * 免得三处各写一遍、改一个数漏两处。
+     * 金按 popCn()（10 万人）写，铁按 200 万人写：两个单位不同，
+     * 混成一句"每 X 万人 1 金 · 0.2 铁"会让玩家手算时差 20 倍。 */
     rateDesc: function (r) {
       return GOV.rateCn[r] + '：每 ' + GOV.popCn() + ' ' + GOV.goldPerUnit[r] +
-        ' 金/回合，民心压力 ' + (GOV.happyHit[r] > 0 ? '+' : '') + GOV.happyHit[r];
+        ' 金 · 每 200 万人 ' + GOV.ironPer2M[r] + ' 铁（民间铁器熔缴）' +
+        '，民心压力 ' + (GOV.happyHit[r] > 0 ? '+' : '') + GOV.happyHit[r];
     }
   };
   AO.GOV = GOV;
@@ -822,12 +915,17 @@
    * 调平衡时只看这一块，不用翻 18-ai.js 那三百行决策。
    *
    *   personas     性格与权重（生成时按 seed+cid 的散列掷，随档存）
-   *   buildOrder   三种性格的建造优先级（kind 用的是 UNIV / RESOURCES 的键）
+   *   personaGov   政体 → 性格权重的乘数（王室偏军国、商民偏经营）
+   *   quirk        个体怪癖系数的范围（buildBias / taxBias / researchBias / warBias）
+   *   buildJitter  buildBias 对建造表项的挪格幅度（底色不变，顺序各国略有差异）
+   *   researchPick 研究时从"最便宜的几条"里按 researchBias 加权掷
+   *   buildOrder   三种性格的建造优先级（kind 用的是 UNIV / RESOURCES 的键 + smelt）
    *   actPerTurn   每国每回合最多几个动作
    *   buildPerTurn 其中"建造"最多几座 —— 不加这道闸，一回合两座能把国库抽干
    *   goldReserve  建之前中央金必须 ≥ cost.gold + 它（防抽干国库）
    *   schoolQuotaDiv 经营：全国学校 < 省数 / 它 才继续盖（扫盲，不是每省一座）
-   *   tax*         调税阈值（经营/均衡降档 45、升回常规 80；军国 30 / 35）
+   *   tax*         调税阈值（经营/均衡降档 45、升回常规 80；军国 30 / 35）——
+   *                所有**金钱阈值**再 × 该国的 taxBias（手松的加税晚、手紧的加税早）
    *   examMul      人才点 ≥ examCost × 它 才开科（和玩家同价，只是更谨慎）
    *   graft*       贪墨官上任几回合内、多大几率被 AI 自己撤换 */
   var AIECON = {
@@ -836,15 +934,42 @@
       { key: 'balanced', cn: '均衡', w: 50 },
       { key: 'mil',      cn: '军国', w: 20 }
     ],
+    /* --- 政体修正：乘在上面那三个基础权重上 ---
+     * key 用 08b-society 的政体键（GOV 表）：王室一侧（kingdom/empire/grandduchy/
+     * duchy）偏军功，汗国最极端；商民一侧（republic/federation/league）偏经营。
+     * 表里没写的政体按 1 倍（= 不动）。这样"军事政体显著更常出军国人格"
+     * 是**生成规则**保证的，不是碰运气。 */
+    personaGov: {
+      kingdom:    { mil: 1.9, econ: 0.65, balanced: 1.00 },
+      empire:     { mil: 2.2, econ: 0.55, balanced: 0.95 },
+      grandduchy: { mil: 1.8, econ: 0.75, balanced: 1.00 },
+      duchy:      { mil: 1.7, econ: 0.85, balanced: 1.00 },
+      khanate:    { mil: 2.6, econ: 0.45, balanced: 0.80 },
+      republic:   { mil: 0.45, econ: 2.10, balanced: 1.10 },
+      federation: { mil: 0.45, econ: 2.00, balanced: 1.10 },
+      league:     { mil: 0.55, econ: 2.20, balanced: 1.00 }
+    },
+    /* --- 个体怪癖：每国再掷三个 0.8~1.2 的系数 ---
+     *   buildBias    建设狂热：只用来给建造优先级表做"轻微重排"（底色不变）
+     *   taxBias      手紧/手松：所有**金钱阈值** × 它（>1 = 手松、加税晚）
+     *   researchBias 科研偏执：取最便宜的两条时，贵的那条权重 = 它（>1 = 硬啃贵的）
+     * 另掷一个 warBias（下一批 AI 互战的宣战激进值）—— 本批**只存不用**。 */
+    quirk: { lo: 0.8, hi: 1.2, n: 3 },
+    /* buildBias 对建造表项的**挪格幅度**：偏移 = (buildBias − 1) × 它（格）。
+     * 6 → 极端国家（1.2）挪 1.2 格：够让同性格的两国换位，不够把底色翻过来。 */
+    buildJitter: 6,
+    researchPick: 2,         // 研究：从最便宜的几条里掷（任务书：两条）
     buildOrder: {
-      /* 经营：先扫盲（学校）→ 换金口（市场）→ 冲工期（建造坊）→ 存粮（粮仓，
-       *       粮/渔库存上限 +100/座）→ 军械坊只在有铁矿的省会落地（need = iron）。 */
-      econ:     ['school', 'market', 'builder', 'granary', 'armory'],
-      /* 均衡：学校 → 市场 → 建造坊 → 兵营 → 军械坊。
-       * 兵营在交战中会被 18-ai.js 临时提到最前面（"兵营（交战中优先）"）。 */
-      balanced: ['school', 'market', 'builder', 'barracks', 'armory'],
-      /* 军国：兵营 → 军械坊 → 学校 → 市场。税重兵多，科研垫底。 */
-      mil:      ['barracks', 'armory', 'school', 'market']
+      /* 经营：先扫盲（学校）→ 换金口（市场）→ 冲工期（建造坊）→ 存粮（粮仓）
+       *       → 大学（教育 ≥ 60）→ 工厂（教育 ≥ 15，挑已有军械坊的省）
+       *       → 军械坊 → 熔旧坊（**经营排最后**：先顾活人，再顾旧铁）。 */
+      econ:     ['school', 'market', 'builder', 'granary', 'university', 'factory',
+                 'armory', 'smelt'],
+      /* 均衡：学校 → 市场 → 建造坊 → 兵营（交战中优先）→ 工厂 → 熔旧坊 → 军械坊。
+       * 熔旧坊排在军械坊**之前**：矿枯了还硬盖军械坊是白扔料。 */
+      balanced: ['school', 'market', 'builder', 'barracks', 'factory', 'smelt', 'armory'],
+      /* 军国：兵营 → 熔旧坊 → 军械坊 → 工厂 → 学校 → 市场。税重兵多，科研垫底。 */
+      mil:      ['barracks', 'smelt', 'armory', 'factory', 'school', 'market']
     },
     actPerTurn: 2,
     buildPerTurn: 1,
@@ -856,9 +981,50 @@
     milTaxHappy: 35,
     examMul: 1.5,
     graftTurns: 3,
-    graftChance: 0.3
+    graftChance: 0.3,
+
+    /* --- 吏部巡查（v11）：AI 对自家官员的赏 / 撤 ---
+     * 一个官不是派下去就不管了：怨气涨上来要么给钱（赏赐），要么换人（撤换）。
+     * 三条线都按资历分档 —— 资历越高越值钱，也越难伺候：
+     *   rewardByRank  怨气到这条线就赏（rank0 永不赏：新手还没攒够本钱）
+     *   fireByRank    怨气到这条线就撤（越老的官越给它机会）
+     *   personaAdj    性格修正线值：经营心软（−10，早赏）、军国心硬（+10，晚赏）
+     * 赏赐花的是**中央金**（和玩家点「赏」同一个函数），撤换之后从候选池补人。 */
+    gov: {
+      rewardByRank: [null, 50, 50, 45],      // rank0 永不赏
+      fireByRank: [70, 80, 80, 90],
+      personaAdj: { econ: -10, balanced: 0, mil: 10 },
+      rewardCd: 12,                          // 同一位官 12 回合内不重复赏
+      minCentral: 30,                        // 中央金 < 它就不赏（国库比面子要紧）
+      warMinRank: 2                          // 战时赏赐只保 rank ≥ 2
+    }
   };
   AO.AIECON = AIECON;
+
+  /* ---------------- 怪癖文案（性格可见用） ----------------
+   * 三档情报各显示什么：
+   *   0 档  "？？"（连性格都不给）
+   *   1 档  只给性格词（经营 / 均衡 / 军国）
+   *   2 档  性格 + **主导怪癖**（偏得最狠的那一项）→ "军国 · 苛税"
+   * 文案集中在这里，18-ai 只负责挑"哪一项偏得最狠"，不写文案。
+   *   hi = 系数偏大那一侧的说法，lo = 偏小那一侧 */
+  var PERSONA_TXT = {
+    build: {
+      hi: '营造狂', lo: '惜工',
+      hiD: '见省就盖，中央的钱留不住', loD: '能凑合就凑合，工地开得少'
+    },
+    tax: {
+      hi: '手松', lo: '苛税',
+      hiD: '宁可省着花也不加税', loD: '缺钱就加税，先保住国库'
+    },
+    research: {
+      hi: '好高骛远', lo: '急用先学',
+      hiD: '专挑贵的硬啃', loD: '捡便宜的，快点毕业'
+    },
+    /* 情报不足时那一行 */
+    unknown: '？？'
+  };
+  AO.PERSONA_TXT = PERSONA_TXT;
 
   var BATTLE = {
     diceLo: 0.85, diceHi: 1.15,      // 骰子：每方独立摇一次
@@ -956,6 +1122,205 @@
     aiReserve: 25
   };
   AO.INTEL = INTEL;
+
+  /* ---------------- 外交（v9）：关系驱动 / 条约 / 战争分 / 谈判桌 / 跨国贸易 ----------------
+   * 这一层**不改 REL 的本体**（REL 仍是 -100~100 的无序对表，键还是 warKey），
+   * 只在它上面做两件事：
+   *   ① 给 REL 加**驱动**（结盟、毁约、互不侵犯、跨国贸易、和谈赔款、会战败仗）
+   *      和**缓释**（无事件的回合向 0 走 1，同盟有 60 的地板托着）；
+   *   ② 在它上面长出条约（同盟 / 互不侵犯）、战争分、谈判桌与外国货源。
+   *
+   * 数值全部集中在这里；AI 只留一个评估接口 AO.aiDiploEval（消费在 18-ai.js 的下一批）。
+   * 这一批**不碰** 18-ai.js 的任何一行。 */
+  var DIPLO = {
+    /* REL 的驱动表。正数抬关系、负数压关系；缓释 drift 每回合把关系往 0 拉一格。
+     * 为什么缓释要"无事件时才走"：一回合里刚结的盟（+40）不该当场被扣回 39，
+     * 那会让"结盟"这条消息和面板上的数字对不上。 */
+    rel: {
+      ally: 40,                     // 结盟
+      breakAlly: -50,               // 毁盟（背信）
+      nap: 20,                      // 互不侵犯
+      napEnd: -20,                  // 互不侵犯作废
+      trade: 0.5,                   // 每一笔跨国贸易
+      tradeCap: 20,                 // 贸易累计的上限（再多也只是生意，不是交情）
+      peacePay: 10,                 // 和谈赔款
+      battleLoss: -5,               // 会战败仗
+      drift: 1,                     // 每回合向 0 走多少
+      allyFloor: 60,                // 同盟的地板：盟友之间关系不会掉到 60 以下
+      /* 五档词（面板上"关系值 42 · 友好"里的那个词）。
+       * 从高到低排，取第一个 v >= min 的档；-100 兜底成"敌对"。 */
+      tiers: [
+        { min: 60,   key: 'kin',    cn: '亲睦' },
+        { min: 25,   key: 'friend', cn: '友好' },
+        { min: -24,  key: 'plain',  cn: '普通' },
+        { min: -60,  key: 'cold',   cn: '冷淡' },
+        { min: -100, key: 'foe',    cn: '敌对' }
+      ]
+    },
+    /* 两条条约：门槛是"关系值"，冷却只给"被拒"那一种（答应了当然不用等）。 */
+    ally: { need: 60, cd: 10 },
+    nap:  { need: 20, cd: 10 },
+    /* AI 评估：REL + 性格权重 + 共同敌人，≥ accept 才答应。
+     * 性格权重是"这个国家天生多疑还是好说话"：军国 −10（谁都不信）、
+     * 经营 +10（和气生财）、均衡 0。所以关系刚好压线时，军国总是差一口气。 */
+    eval: {
+      accept: 30,
+      commonEnemy: 15,              // 有共同的敌人：多给 15 分（敌人的敌人）
+      persona: { mil: -10, balanced: 0, econ: 10 }
+    },
+    /* 战争分（'a|b' → { a, b }，宣战时清零）。这是"这一仗谁打赢了"的唯一账本：
+     * 谈判桌的条款、AI 愿不愿意停，全读它。 */
+    score: {
+      occupy: 10,                   // 占领一座省
+      battle: 5,                    // 会战获胜
+      siege: 8,                     // 围城陷城（比硬攻便宜，分也少一点）
+      capital: 30,                  // 首都易手（额外加，和"占领省"叠加）
+      bombard: 1                    // 轰击见效（小胜）
+    },
+    /* 谈判桌：白和永远可选；赔款要求己方分领先 payLead，档位两档。
+     * 赔款走中央国库（不是省库）—— 那是国家掏钱，不是某省的私房钱。 */
+    talk: {
+      payLead: 20,                  // 己方战争分领先多少才能提赔款
+      payTiers: [50, 150],          // 两档赔款额（金）
+      cd: 5,                        // 被拒后的冷却（回合）
+      relPeace: -30,                // 停战后关系重置到（makePeace 用的就是 FOG.relPeace）
+      /* AI 的"要价"：领先 20 分只是**够格开口**，还得再多出这么多分它才肯点头。
+       * 这一项是必要的 —— 没有它，"领先 ≥20 才可提赔款"和"对方分 − 己方分 ≥ 0
+       * 就接受"这两条叠在一起，任何能提的赔款都会被接受，拒绝分支永远走不到
+       * （冷却 5 回合就成了死代码）。有了 15 分的要价：军国（−10）在刚好领先 20
+       * 时还要看民心（压力 +5 才勉强点头），经营（+10）则爽快得多。 */
+      demand: 15,
+      /* AI 愿不愿意停：对方分 − 己方分 + 性格 + 民心压力 − 要价 ≥ 0
+       * 民心压力 = max(0, (happyRef − 民心) / happyPer)，封顶 happyMax。
+       * 也就是"百姓快活不下去了"能顶掉一点战况优势 —— 饿着肚子打仗打不久。 */
+      happyRef: 55,
+      happyPer: 5,
+      happyMax: 10
+    },
+    /* 跨国贸易：只和 REL ≥ minRel 的存续外国做生意，溢价 premium 倍。
+     * 出口侧 v1 不做（AI 不会来买你的货）。 */
+    trade: { minRel: 20, premium: 1.8 }
+  };
+  AO.DIPLO = DIPLO;
+
+  /* ---------------- AI 互战 / 迷雾消费 / 性格×外交（v10） ----------------
+   * 路线图的最后一块：AI 从"会过日子的县长"变成"会打仗、也会算账的邻居"。
+   * 决策全在 18-ai.js 的 warTick；这里只放数值。
+   *
+   * 三条设计前提（和 18-ai 的老纪律一致）：
+   *   ① 只在 PLAYER > 0 时运行（工坊模式 AI 全静止）；
+   *   ② AI 只用**自己**的数据：军力比看自家兵 + 自己探过的敌军，
+   *      行军目标只从自己的已探集里挑（AIKNOW）—— 和玩家吃同一套迷雾；
+   *   ③ 一律 silent：不写 bldMsg、不弹提示条。唯一的例外是「世界纪要」，
+   *      那是玩家该知道的远方大事（每回合最多 newsPerTurn 条）。 */
+  var AIWAR = {
+    /* ---- ① 宣战 ----
+     * 每国每 every 回合评估一次（用 (turnNo + cid) % every 错开，
+     * 免得 36 国同一回合一起动手，纪要一屏刷完）。 */
+    every: 6,
+    /* 宣战分 = QUIRK.war × wWar + 性格权重 + 敌意 + 趁火打劫
+     *   典型值：军国（war 1.0）20 + 15 = 35；均衡 20；经营 20 − 15 = 5
+     *   阈值 30 的校准（跑出来的，不是拍的）：
+     *     军国 31~39 —— 全都够（这一型天生要打）；
+     *     均衡 16~24 —— 要一条加成（敌意或趁火打劫 → 26~34）才够；
+     *     经营  1~ 9 —— 上限 29，**正好比阈值低 1 分**：
+     *                   哪怕关系烂到底、对方正在挨打，经营也**永远**不主动开战。
+     *                   这 1 分是刻意的，"经营太平"要是规则保证，不能靠运气。
+     *   为什么不是 38：关系值每回合向 0 缓释，开局全在 ±10，
+     *   敌意（< −40）和趁火打劫（对方在打）都不是开局就有的 ——
+     *   阈值定太高，第一场仗永远打不起来，世界会一直和平到终局。 */
+    score: {
+      wWar: 20,                              // QUIRK.war（0.8~1.2）× 它 → 16~24
+      persona: { mil: 15, balanced: 0, econ: -15 },
+      hostileRel: -40, hostileAdd: 10,       // 关系烂到 −40 以下
+      busyAdd: 10                            // 对方正陷战争（趁火打劫）
+    },
+    threshold: 30,
+    powerRatio: 0.7,                         // 军力比一票否决（打不过就别打）
+    maxWars: 2,                              // 已在打 2 场就不再开新战场（防全图乱战）
+    peaceCd: 20,                             // 停战之后多少回合内不重新宣战
+    powPerProv: 300,                         // 敌国"规模估计"：每省按这么多兵算
+
+    /* ---- ② 进攻 ----
+     * 机动军比例按 QUIRK.war 归一化后取档（0.8~1.2 → 0~1）。
+     * 任务书给的是 0.5 / 0.3 两个阈值，那套数按 warBias ∈ 0~1 写的；
+     * 我们的 warBias 是 0.8~1.2，所以先把 (war − lo) / (hi − lo) 归一化再用同一套阈值 ——
+     * 效果：war ≥ 1.0 转 30%、0.92~1.0 转 15%、其余不动。 */
+    attack: {
+      high: 0.5, highPct: 0.30,
+      mid: 0.3, midPct: 0.15,
+      maxArmies: 2,                          // 一国最多几支机动军（防抽空边防）
+      retreatLoss: 0.5,                      // 兵损过半 → 回撤补员
+      tactic: { mil: 'assault', balanced: 'siege' }   // 经营不进攻
+    },
+
+    /* ---- ④ 求和 ----
+     * 战争分落后 ≥ behind 且连续 turns 回合 → 主动求和（败方掏钱，胜方点头）。
+     * payWeight：赔款折成分数（每 1 金 = 1/payWeight 分）。
+     * 为什么 AI-AI 这一路把赔款折成分数、玩家谈判桌那一路不折：
+     *   玩家那边赔款是"买面子"（要价 15 分是门槛，钱不抵分）；
+     *   AI 这边赔款是"买命"（败方只剩钱这一张牌）。
+     * 两边共用 AO.aiPeaceEval 的四个输入（战况 / 性格 / 民心 / 要价），
+     * 只是 AI 这一路把"要价"换成"赔款"。 */
+    peace: {
+      behind: 30, turns: 5, pay: 50, payWeight: 2, cd: 5,
+      /* 赢家的"胃口上限"：落后分超过它之后，多赢的分数不再增加停战难度。
+       * 没有这条，一旦把对方打崩（落后 200+），任何赔款都换不来和平 ——
+       * 战争就只能以灭国收场，世界会在一两百回合内被吃干。
+       * 45 ≈ 1.5 档：拿下四五座省之后，再往前的多是焦土（占领省产出 ×0.6、
+       * 民心 −10），边际价值不如一笔现钱。 */
+      deficitCap: 45
+    },
+
+    /* ---- ⑤ 世界纪要：每回合最多报几条（防刷屏） ---- */
+    newsPerTurn: 2,
+
+    /* ---- ⑥ 平衡护栏 ----
+     * AI 没有真正的"军饷"（征兵一次性扣钱，之后只吃粮），所以这里用**名义军费**
+     * 做决策护栏：men/1000 × upkeepGoldPerK 当作这一国每回合的军费，
+     * 和它上回合的实际金收入比。超过 milShare 就削减：
+     *   ① 机动军全部转驻防（先停进攻，最省事）
+     *   ② 非军备建筑降档（AO.rep.setPrio → p3：只吃本省库存，不动中央）
+     * 超过 hardShare 再全类降档 + 全面转驻防。 */
+    guard: {
+      milShare: 0.6, hardShare: 0.9,
+      upkeepGoldPerK: 0.5,
+      lowPrio: 'p3',
+      keepKinds: ['barracks', 'armory', 'stable', 'foundry', 'shipyard', 'wall', 'factory']
+    },
+
+    /* ---- 阻尼（防雪崩）----
+     * 任一 AI 灭国后 afterDeath 回合内，若全球战争数 ≥ wars，
+     * 所有 AI 的宣战门槛 +add —— 打完一个大国之后世界该喘口气。 */
+    damp: { afterDeath: 10, wars: 6, add: 15 },
+
+    /* ---- ⑧ 战时经济换挡（v11）----
+     * 宣战后一回合内换挡，停战恢复。三件事：
+     *   ① 维修优先档：军备类升「高」、资源类留「中」（口粮不能断）、民用降「低」
+     *   ② 建造只留军备类（兵营 / 军械坊 / 熔旧坊）—— 战时盖学校是白扔料
+     *   ③ 官员俸禄照付不欠：省库发不出时从中央补（不加薪，欠饷惩罚已有）
+     * 和军费护栏的关系：**护栏优先**。换挡先发生，护栏随后还能把它压到 p3；
+     * 换挡本身不征兵、不动军费 —— 那件事归 guard（军费 ≤ 收入 60%）。 */
+    warEcon: {
+      milKinds: ['barracks', 'armory', 'foundry', 'stable', 'shipyard', 'wall'],
+      resKinds: ['grain', 'fish', 'salt', 'timber', 'horse', 'iron', 'gold'],
+      civKinds: ['market', 'builder', 'school', 'university', 'granary', 'factory'],
+      milPrio: 'p1', resPrio: 'p2', civPrio: 'p3',
+      build: ['barracks', 'armory', 'smelt'],   // 战时只许盖这三类
+      topUpReserve: 20,                          // 中央补俸禄后至少留这么多金
+      grace: 1                                   // 宣战后第几回合内完成换挡（1 = 当回合）
+    },
+
+    /* ---- ⑦ 贸易（AI 内政买货走外国货源）----
+     * 按性格分频次：经营每 3 回合看一次、均衡 6、军国 12（军国宁可直接盖厂）。
+     * 只在"这种资源全国库存 < minStock 且手里有金"时才买。 */
+    trade: {
+      every: { econ: 3, balanced: 6, mil: 12 },
+      minStock: 30, minGold: 60,
+      keys: ['iron', 'timber', 'grain']
+    }
+  };
+  AO.AIWAR = AIWAR;
 
   /* ---------------- 将领词条（武科抽卡池） ----------------
    * 和官员词条（TRAITS）是**两套池子**：文官管钱粮，武官管打仗，抽卡消耗同一种人才点。
