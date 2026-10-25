@@ -1282,6 +1282,62 @@
   .ogv.bad { background: #f7e4dd; color: #a8523b; font-weight: 650; }
   .prow .pgo.rew { border-color: #d8c3a0; background: #fdf7ec; color: #8a5a1f; }
   .prow .pgo.rew:hover:not(:disabled) { background: #f7ead2; border-color: #c9a86f; color: #6b4522; }
+
+  /* 内阁（v12）：宰相卡 + 四项权限开关 */
+  .cabrow { padding: 2px 0 4px; }
+  .chcard {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 8px;
+    background: #fbf6ea; border: 1px solid rgba(201, 168, 111, .55);
+    max-width: 760px;
+  }
+  .chcard.g4 { background: #f8ece6; border-color: rgba(168, 82, 59, .45); }
+  .chcard.paused { opacity: .82; }
+  .chcard .chav {
+    width: 30px; height: 30px; flex: none; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: #efe0c4; color: #8a5a1f; font-weight: 700; font-size: 14px;
+  }
+  .chcard.g4 .chav { background: #f0d8ce; color: #a8523b; }
+  .chcard .chm { min-width: 0; flex: 1 1 auto; }
+  .chcard .chn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .chcard .chn b { font-size: 13px; color: #3c464f; }
+  .chcard .cht {
+    font-size: 10px; padding: 0 5px; border-radius: 3px; line-height: 15px;
+    background: #efe0c4; color: #8a5a1f; font-style: normal;
+  }
+  .chcard .chst { font-size: 10px; color: #2f7a6b; font-style: normal; }
+  .chcard .chst.bad { color: #a8523b; font-weight: 650; }
+  .chcard .chd { margin-top: 3px; font-size: 10.5px; color: #7b858d; line-height: 1.5; }
+  .chcard .chw { margin-top: 3px; font-size: 10.5px; color: #a8523b; }
+  .chbtn { flex: none; min-width: 46px; padding: 3px 8px; font-size: 10.5px;
+    border-radius: 5px; border: 1px solid #c6d0d7; background: #fff; color: #4b6b7a; cursor: pointer; }
+  .chbtn:hover { background: #eef4ef; border-color: #8fb59b; color: #2f7a6b; }
+  .chbtn.out { border-color: #d8c3a0; background: #fdf7ec; color: #8a5a1f; }
+  .chbtn.out:hover { background: #f7ead2; border-color: #c9a86f; color: #6b4522; }
+  .chlist { display: flex; flex-direction: column; gap: 4px; max-width: 760px; }
+  .chcand {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 9px; border-radius: 7px;
+    background: #fff; border: 1px solid rgba(20, 26, 32, .12);
+  }
+  .chcand b { font-size: 12px; color: #3c464f; flex: none; }
+  .chcand em { flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: #9aa3ab;
+    font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chempty {
+    max-width: 760px; padding: 8px 10px; border-radius: 7px;
+    background: rgba(20, 26, 32, .03); font-size: 11px; color: #8b959d; line-height: 1.6;
+  }
+  .cabperm { display: flex; align-items: center; gap: 5px; padding: 5px 0 7px; flex-wrap: wrap; }
+  .cabperm .pl { font-size: 10px; color: #a8b0b7; letter-spacing: .3px; margin-right: 2px; }
+  .cabperm .permtog {
+    padding: 2px 9px; font-size: 10.5px; border-radius: 5px; line-height: 1.6;
+    border: 1px solid #c6d0d7; background: #fff; color: #8b959d; cursor: pointer;
+  }
+  .cabperm .permtog.on { background: #2f7a6b; border-color: #2f7a6b; color: #fff; font-weight: 600; }
+  .cabperm .permtog:disabled { opacity: .42; cursor: default; }
+  .cabperm em { font-size: 10px; color: #a8b0b7; font-style: normal; }
+  .cabperm em.pbad { color: #a8523b; font-weight: 650; }
   .prow .pgo {
     padding: 2px 0; font-size: 10.5px; border-radius: 5px; line-height: 1.6;
     border: 1px solid #c6d0d7; background: #fff; color: #4b6b7a; cursor: pointer;
@@ -2026,6 +2082,14 @@
             onerror="this.style.display='none'"><b>候选官员</b><span id="gpPoolN"></span>
           <em>点一位官员选中 → 再点下面省行的「派」上任</em></div>
         <div class="pool" id="gpPool"></div>
+      </section>
+      <!-- 内阁（v12）：宰相 / 副总统 / 摄政 / 总理 —— 拜相之后每回合代劳你还没做的事。
+           放在候选官员之后：先看有哪些人，再决定谁进内阁。 -->
+      <section class="gpSec cabSec" id="gpCabSec">
+        <div class="gph"><b>内阁</b><span id="gpCabN"></span>
+          <em>他只做你还没做的事，不会推翻你的决定 · 俸禄从国库出，欠饷即停摆</em></div>
+        <div class="cabrow" id="gpCabRow"></div>
+        <div class="cabperm" id="gpCabPerm"></div>
       </section>
       <section class="gpSec listSec">
         <div class="gph"><b>省份</b><span id="gpProvN"></span>

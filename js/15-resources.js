@@ -509,7 +509,8 @@
    *     turnCut 工期减回合    prodMul  按资源键乘产量
    * rar 稀有度（只影响显示边色 / 头像底色，不影响数值）：
    *     gray 平平无奇 · plain 一技之长 · bad 贪墨（红边）· gold 治世能臣（金边）
-   * 权重合计 100，抽一位就是一次线性扫描 —— 不用建累积表。 */
+   * 权重合计 114.3（七条文官 110 + 四条宰相级 4.3），抽一位就是一次线性扫描 ——
+   * 不用建累积表。所以宰相级出现的概率是 4.3 / 114.3 ≈ 3.8%。 */
   var TRAITS = [
     { key: 'plain',    cn: '平平无奇', w: 45, rar: 'gray',  fx: {},
       desc: '没什么本事，但好歹是个官' },
@@ -524,12 +525,75 @@
     { key: 'greedy',   cn: '贪墨成性', w: 5,  rar: 'bad',   fx: { taxMul: 1.4, happyAdd: -10 },
       desc: '税 +40%，幸福度 −10' },
     { key: 'sage',     cn: '治世能臣', w: 5,  rar: 'gold',  fx: { taxMul: 1.25, happyAdd: 6 },
-      desc: '税 +25% 且幸福度 +6' }
+      desc: '税 +25% 且幸福度 +6' },
+
+    /* --- 宰相级（v12）：超稀有，合计 4.3 / 114.3 ≈ 3.8% ---
+     * 这四条**既是省官也是宰相候选人**：
+     *   · 抽到之后放在省里，就是一位属性不错的官（fx 比同级文官小一号）；
+     *   · 只有它们能「拜相」（治理面板「内阁」节，见 AO.CHANCELLOR_LV）。
+     * 为什么不给"宰相专用池"：开科取士只有一张池子，抽到谁全靠运气 ——
+     * 拜相的机会本身就是一次抽卡，这样"贤相"才值得等。
+     * grade 就是宰相等级（1 守成 / 2 干练 / 3 贤相 / 4 权臣）。
+     * 权倾朝野没有 happyAdd：它的代价写在 CHANCELLOR_LV[4] 里（偷金/常驻 −3/弹劾），
+     * 不重复扣在词条上 —— 否则"当省官"和"当宰相"会各扣一次。 */
+    { key: 'ch_keep',  cn: '守成之才', w: 2,   rar: 'gold', grade: 1, isChancellor: true,
+      fx: { taxMul: 1.05 }, desc: '守成有余，开创不足（可拜相）' },
+    { key: 'ch_able',  cn: '干练能臣', w: 1.2, rar: 'gold', grade: 2, isChancellor: true,
+      fx: { taxMul: 1.1 }, desc: '庶务精熟，能替君主分劳（可拜相）' },
+    { key: 'ch_great', cn: '一代贤相', w: 0.8, rar: 'gold', grade: 3, isChancellor: true,
+      fx: { taxMul: 1.15, happyAdd: 2 }, desc: '经纬之才，可托国政（可拜相）' },
+    { key: 'ch_power', cn: '权倾朝野', w: 0.3, rar: 'gold', grade: 4, isChancellor: true,
+      fx: { taxMul: 1.25 }, desc: '能臣亦是权臣 —— 用他，得付代价（可拜相）' }
   ];
   AO.TRAITS = TRAITS;
   var TRAIT_BY_KEY = Object.create(null);
   for (var tr = 0; tr < TRAITS.length; tr++) TRAIT_BY_KEY[TRAITS[tr].key] = TRAITS[tr];
   AO.traitOf = function (key) { return TRAIT_BY_KEY[key] || TRAITS[0]; };
+
+  /* ---------------- 宰相（v12）：四级规则 ----------------
+   * 玩家自己的"AI 政府"：拜相之后，每回合结算尾由他代劳你还没做的事。
+   * 四级不是"数值大小"，而是**权限与代价**的组合（见 DESIGN-AI.md v12）：
+   *
+   *   grade 1 守成之才  1 动作 · 只会 build+research（tax/officials 开关点了也不生效）· 俸禄 ×1
+   *   grade 2 干练能臣  2 动作 · 四项全能 · 降税线 ×0.8（更敢收）· 俸禄 ×2
+   *   grade 3 一代贤相  3 动作 · 会看账调税 · 每 10 回合进言 · 幸福 <40 撂挑子 · 俸禄 ×4
+   *   grade 4 权倾朝野  3 动作 · **无视权限开关** · 可横征 · 每回合偷 3 金 · 全国幸福 −3
+   *                     · 10% 弹劾 · 俸禄 ×1
+   *
+   * 三条硬边界（和 §2 的资历/怨气互不渗透）：
+   *   ① 宰相不进 OFFICIAL 表 —— 所以 §4 的 AI 吏部巡查、怨气、偷金、卸任规则都碰不到他；
+   *   ② 他不推玩家的操作：只做"你还没做的"，不撤销、不改你刚设的税率；
+   *   ③ 俸禄从**中央**出（他是国家级官员），欠一次就停摆（自动化暂停），补上才复工。 */
+  var CHANCELLOR_LV = {
+    1: { cn: '守成之才', acts: 1, pay: 1, taxMul: 1,
+      perms: { build: 1, research: 1, tax: 0, officials: 0 },
+      desc: '每回合 1 个动作，只会盖房与研科技 —— 税率与人事他一概不碰（开关点了也不生效）' },
+    2: { cn: '干练能臣', acts: 2, pay: 2, taxMul: 0.8,
+      perms: { build: 1, research: 1, tax: 1, officials: 1 },
+      desc: '每回合 2 个动作，四项全能；降税线比常人低两成（更敢收，也更晚松手）' },
+    3: { cn: '一代贤相', acts: 3, pay: 4, taxMul: 0.8, smartTax: true,
+      adviseEvery: 10, strikeHappy: 40, resumeHappy: 45,
+      perms: { build: 1, research: 1, tax: 1, officials: 1 },
+      desc: '每回合 3 个动作，会看账调税；每 10 回合进言一条；国民幸福度 <40 会撂挑子' },
+    4: { cn: '权倾朝野', acts: 3, pay: 1, taxMul: 0.8, ignorePerms: true, forceMax: true,
+      grab: 3, happy: -3, impeach: 0.1,
+      perms: { build: 1, research: 1, tax: 1, officials: 1 },
+      desc: '每回合 3 个动作，**无视你的权限开关**（他自作主张）；可以横征暴敛；' +
+        '每回合从国库拿 3 金；全国幸福度 −3；有 10% 概率被谏官弹劾' }
+  };
+  AO.CHANCELLOR_LV = CHANCELLOR_LV;
+  /* 头衔随政体（08b-society 的政体键）。表里没有的政体一律「宰相」。 */
+  AO.CH_TITLE = {
+    kingdom: '宰相', grandduchy: '宰相', duchy: '宰相',
+    empire: '摄政', republic: '副总统', federation: '总理',
+    league: '执政官', khanate: '断事官'
+  };
+  /* 权限开关的四个键（顺序就是「内阁」节里的按钮顺序） */
+  AO.CH_PERMS = [
+    { key: 'build', cn: '营造' }, { key: 'research', cn: '科研' },
+    { key: 'tax', cn: '税赋' }, { key: 'officials', cn: '人事' }
+  ];
+
   /* 稀有度的中文名（面板上写"一技之长"比写 plain 好看） */
   AO.RAR_CN = { gray: '平平无奇', plain: '一技之长', bad: '贪墨', gold: '治世能臣' };
 

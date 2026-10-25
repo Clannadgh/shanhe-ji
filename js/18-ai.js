@@ -9,13 +9,16 @@
  * 远方有国家在打、在亡，而玩家会在纪要里读到"别处的历史"。
  * v11 补的是**当家人**的那一半：官员会升迁、会积怨、会被赏、会被换；
  * 一打仗，钱袋子的优先级自己换挡（军备升档、民用停建、俸禄不欠）。
+ * v12 把决策核心抽成 `aiDecide(owner, perms)` —— 玩家拜的**宰相**走同一段代码，
+ * 只是权限（perms）与动作格（slots）按等级收窄；AI 行为一字未改。
  *
  * 文件结构：
  *   一~四  内政（v7/v8）：性格 / 怪癖 / 建造 / 研究 / 调税 / 人事
  *   五    吏部（v11）：资历怨气带来的赏赐 / 撤换 / 补人
  *   六    战时经济（v11）：维修档位换挡 / 建造只留军备 / 俸禄照付不欠
  *   七    战争（v10）：军费护栏 → 回撤 → 求和 → 进攻 → 宣战 → 贸易
- *   八    存档（性格 + 怪癖；战争 / 吏部 / 换挡都是运行时状态，不进档）
+ *   八    决策核心 aiDecide（v12）：AI 与玩家宰相共用
+ *   九    存档（性格 + 怪癖；战争 / 吏部 / 换挡都是运行时状态，不进档）
  *
  * 为什么单独一个文件而不是并进 11-ui.js 的「十二、敌国 AI」：
  *   决策层（性格 / 优先级 / 阈值）只读 AO.res* 那一套导出，不碰 DOM，
@@ -578,18 +581,33 @@
    * "升档"那一条为什么要求民心已经回升：两条规则同时成立的话
    * （民心 40、中央金 100），升一档下回合又降一档，面板上就是一根
    * 每回合上下横跳的税率 —— 加一个"民心先回来"的门槛，规则才稳定。
-   * 只在**真要变**的时候算一个动作 —— 每回合都"确认了一下税率"不该吃掉格子。 */
-  function tryTax(cid, persona) {
+   * 只在**真要变**的时候算一个动作 —— 每回合都"确认了一下税率"不该吃掉格子。
+   *
+   * v12：多一个 opt（宰相用），三档变体：
+   *   opt.taxMul    降档线 × 它（干练/贤相 0.8：更耐得住，也更晚松手）
+   *   opt.smartTax  贤相"会看账"：降档线 50、升档线 60 且国库 <100×taxBias
+   *   opt.forceMax  权相：无视性格，直接走"横征"那一支（§14.3 的 debuff）
+   *   opt.noMaxTax  宰相（1~3 级）永不横征 —— 那是权相的"特权"
+   * 注意 taxMul 只缩**降档线**：升回常规仍要民心 ≥45。
+   * 缩升档线的话，"干练能臣"会在民心 36 的时候把税加回去，那不是能干，是乱来。 */
+  function tryTax(cid, persona, opt) {
     var E = AO.AIECON, cur = AO.resTaxRateOf(cid), want = cur;
     var h = AO.resCountryHappy(countryOf(cid));
     var cen = AO.resDebug.ensureCentral(cid);
     var gold = cen.gold || 0;
     var tb = quirkOf(cid).tax || 1;
-    if (persona === 'mil') {
+    var O = opt || {};
+    var mil = persona === 'mil' && !O.noMaxTax;
+    if (O.forceMax) mil = true;
+    if (O.smartTax) {
+      if (h < 50 && cur > 0) want = cur - 1;
+      else if (h >= 60 && gold < 100 * tb && cur < 1) want = 1;
+    } else if (mil) {
       if (h < (E.milTaxHappy || 35) && cur > 0) want = cur - 1;
       else if (h >= (E.milTaxHappy || 35) && gold < (E.milTaxGold || 30) * tb && cur < 2) want = 2;
     } else {
-      if (h < (E.taxDownHappy || 45) && cur > 0) want = cur - 1;
+      var down = (E.taxDownHappy || 45) * (O.taxMul || 1);
+      if (h < down && cur > 0) want = cur - 1;
       else if (h >= (E.taxDownHappy || 45) && gold > (E.taxUpGold || 80) * tb && cur < 1) want = 1;
     }
     if (want === cur) return false;
@@ -1314,26 +1332,50 @@
   }
   AO.aiWarTick = warTick;
 
-  /* ---------------- 一回合：一国最多 actPerTurn 个动作 ---------------- */
-  function aiCountry(c) {
-    var E = AO.AIECON, cid = c.id, per = personaOf(cid);
+  /* ---------------- aiDecide：经济决策核心（v12 抽取） ----------------
+   * 一个"动作格"循环，**AI 国与玩家宰相共用同一份**（§13）。
+   *
+   *   perms = { build, research, tax, officials } 四布尔
+   *           不许可的格子直接跳过 —— 这就是"宰相权限"的唯一落点：
+   *           守成之才只有 build+research，所以他的税赋/人事两格永远不会被执行。
+   *   opt   = { slots, taxMul, smartTax, forceMax, noMaxTax }
+   *           slots    这一回合有几个动作格（AI 2 个 / 宰相按等级 1~3 个）
+   *           其余四项原样传给 tryTax（见那里的注释）
+   *
+   * 内置护栏不在这里：中央金 ≥ cost+5、同省同 kind 只建一座、教育门槛、矿脉不枯 ——
+   * 全部在 tryBuild / tryResearch / tryTax / tryOfficers 里，两条路径共享同一套闸门。
+   * 这是"抽取"而不是"重写"的意义：AI 与宰相不可能各有一套账。
+   *
+   * 行为等价性：AI 国传全 true + slots=actPerTurn，和 v11 的 aiCountry 逐格一致
+   * （连"建造每回合最多 buildPerTurn 座"的计数都原样保留）。 */
+  function aiDecide(owner, perms, opt) {
+    var E = AO.AIECON, cid = owner | 0, per = personaOf(cid);
+    var P = perms || {};
+    var O = opt || {};
     var did = Object.create(null);
+    var slots = Math.max(1, O.slots || E.actPerTurn || 2);
     var n = 0;
-    for (var slot = 0; slot < (E.actPerTurn || 2); slot++) {
+    for (var slot = 0; slot < slots; slot++) {
       var acted = false;
       /* 建造：每回合最多 buildPerTurn 座（默认 1）—— 这一格不做，第二格再试 */
-      if (!did.build && n < (E.buildPerTurn || 1) && tryBuild(cid, per)) {
+      if (P.build && !did.build && n < (E.buildPerTurn || 1) && tryBuild(cid, per)) {
         did.build = true; acted = true; n++;
-      } else if (!did.research && tryResearch(cid)) {
+      } else if (P.research && !did.research && tryResearch(cid)) {
         did.research = true; acted = true;
-      } else if (!did.tax && tryTax(cid, per)) {
+      } else if (P.tax && !did.tax && tryTax(cid, per, O)) {
         did.tax = true; acted = true;
-      } else if (!did.off && tryOfficers(cid, per)) {
+      } else if (P.officials && !did.off && tryOfficers(cid, per)) {
         did.off = true; acted = true;
       }
       if (!acted) break;          // 这一格什么都做不了 → 后面的格子更做不了
     }
     return n;
+  }
+  var ALL_PERMS = { build: true, research: true, tax: true, officials: true };
+
+  /* ---------------- 一回合：一国最多 actPerTurn 个动作 ---------------- */
+  function aiCountry(c) {
+    return aiDecide(c.id, ALL_PERMS, { slots: (AO.AIECON && AO.AIECON.actPerTurn) || 2 });
   }
 
   /* 每回合一次，挂在战争段之后 / 情报 tick 之后（11-ui.js 的 settleTurn ⓫ 前） */
@@ -1520,6 +1562,9 @@
   }
 
   AO.aiEconTick = tick;
+  /* v12：决策核心对外只留这一个入口 —— 玩家宰相（11-ui.js 的 chancellorAct）走它，
+   * 所以"宰相与 AI 用同一套规则"是代码结构保证的，不是口头约定。 */
+  AO.aiDecide = aiDecide;
   AO.aiEconSave = saveState;
   AO.aiEconLoad = loadState;
   AO.aiPersonaView = personaView;
@@ -1581,6 +1626,9 @@
     research: tryResearch,
     tax: tryTax,
     officers: tryOfficers,
+    /* v12：决策核心（玩家宰相走这里；AI 走 aiCountry → 同一个函数） */
+    decide: aiDecide,
+    allPerms: ALL_PERMS,
     rollWith: rollPersonaWith,
     tick: tick,
     country: aiCountry,

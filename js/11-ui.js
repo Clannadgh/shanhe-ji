@@ -94,6 +94,8 @@
     for (var xk in TAXRATE) delete TAXRATE[xk];
     for (var hk2 in HAPPY) delete HAPPY[hk2];
     for (var ak in TAXACC) delete TAXACC[ak];
+    /* v12：宰相也是"这一局"的 —— 不清的话新世界的 1 号国直接继承上一局的宰相 */
+    for (var ck in CHANCELLOR) delete CHANCELLOR[ck];
     GOV_ID = 1;
     /* 战争层（v3）：军队、将领、围城、封锁都是按 pid / cid 挂的 ——
      * 不清的话，上一局的 3 万大军会"驻扎"在新世界的同一个省上。
@@ -470,6 +472,200 @@
   AO.resOffMul = offMul;
   AO.resOffFx = offFx;
   AO.resSalaryOf = salaryOf;
+
+  /* ---------------- 宰相（v12）：玩家自己的"AI 政府" ----------------
+   *   CHANCELLOR[owner] = { id, name, traitKey, grade, perms, owed, paused, since, adviseAt }
+   *
+   * 三条硬边界 —— 这一层的全部设计就在这里：
+   *   ① **不进 OFFICIAL 表**。§2 的资历/怨气按 OFFICIAL 遍历、§4 的 AI 吏部巡查
+   *      也是遍历 OFFICIAL —— 两套状态天然碰不到他，不需要任何特判。
+   *      他的 id 沿用候选池里那位官员的 id，但不占任何省的官位。
+   *   ② **只做"你还没做的"**。动作走 18-ai.js 的 aiDecide（和 AI 国同一个函数），
+   *      每格每回合最多一次；你手动做完的事它自然做不了（闸门都在原函数里），
+   *      所以"宰相不会推翻你"是结构保证的，不是靠礼貌。
+   *   ③ 俸禄从**中央**出（他是国家级官员，食的是国库不是某省的省库），
+   *      欠一次就停摆（paused='owed'），补上才复工。
+   *
+   * 四级规则在 AO.CHANCELLOR_LV（15-resources.js）：1 守成 / 2 干练 / 3 贤相 / 4 权臣。
+   * 等级不是"数值大小"，是**权限与代价**的组合 —— 4 级最强也最贵（偷金/民心/弹劾）。 */
+  var CHANCELLOR = Object.create(null);
+  /* 玩家上一次**手动**改税率的回合（owner -> turn）。
+   * 宰相的三条边界里有一条"你手动做的他绝不推翻" —— 落点就在这里：
+   * 你改过税之后 3 回合内他不碰税率（先照你的意思走，等你不管了再按自己的判断来）。
+   * 只记 UI 的 setTaxRate；AI 走 AO.resDebug.setTax，不会写进这张表。 */
+  var TAXMAN = Object.create(null);
+  var CH_TAX_HOLD = 3;
+
+  function chOf(owner) { return CHANCELLOR[owner | 0] || null; }
+  function chLv(ch) { return (ch && AO.CHANCELLOR_LV && AO.CHANCELLOR_LV[ch.grade]) || null; }
+  /* 头衔随政体（王国 宰相 / 帝国 摄政 / 共和 副总统 / 联邦 总理 / 其余 宰相） */
+  function chTitleOf(owner) {
+    var c = state.world ? state.world.countries[(owner | 0) - 1] : null;
+    var g = c && (c.govKey || c.gov);
+    return (AO.CH_TITLE && AO.CH_TITLE[g]) || '宰相';
+  }
+  /* 实际生效的权限（**唯一**的权限判定处，UI 与执行都读它）：
+   *   权相 → 全开（无视开关）；1 级 → 只有 build/research（开关点了也不生效）；
+   *   其余 → 开关 AND 等级自带的权限。 */
+  function chPerms(ch) {
+    var L = chLv(ch), out = {};
+    if (!L) return { build: 0, research: 0, tax: 0, officials: 0 };
+    if (L.ignorePerms) return { build: 1, research: 1, tax: 1, officials: 1 };
+    var p = ch.perms || {};
+    for (var k in L.perms) out[k] = (L.perms[k] && p[k] !== 0) ? 1 : 0;
+    return out;
+  }
+  /* 权相的常驻民心 debuff（结算 driver 用；没有宰相的国家恒 0） */
+  function chHappyOf(owner) {
+    var L = chLv(chOf(owner));
+    return (L && L.happy) || 0;
+  }
+
+  /* 拜相：把候选池里那位移出来，入 CHANCELLOR。只有 isChancellor 的词条能拜。 */
+  function appointChancellor(owner, offId) {
+    owner = owner | 0;
+    if (!canAct(owner)) return { ok: false, msg: lockTitle() };
+    if (CHANCELLOR[owner]) return { ok: false, msg: '已经有' + chTitleOf(owner) + '了 —— 先罢免再换人' };
+    var T = talentOf(owner), idx = -1, i;
+    for (i = 0; i < T.pool.length; i++) if (T.pool[i] && T.pool[i].id === offId) { idx = i; break; }
+    if (idx < 0) return { ok: false, msg: '这位不在候选池里（可能已经上任了）' };
+    var off = T.pool[idx], tr = AO.traitOf(off.traitKey);
+    if (!tr.isChancellor) {
+      return { ok: false, msg: '「' + tr.cn + '」不是宰相之才 —— 只有「守成之才」以上四级可拜相' };
+    }
+    T.pool.splice(idx, 1);
+    offNorm(off);
+    CHANCELLOR[owner] = {
+      id: off.id, name: off.name, traitKey: off.traitKey, grade: tr.grade || 1,
+      /* 权限默认全开：拜相的人不会一上来就只准他盖房；要不要收权是玩家的事 */
+      perms: { build: 1, research: 1, tax: 1, officials: 1 },
+      owed: 0, paused: '', since: turnNo, adviseAt: turnNo
+    };
+    var L = chLv(CHANCELLOR[owner]);
+    NOTES.push({ owner: owner, cls: 'ok',
+      text: '拜相：' + off.name + ' 为' + chTitleOf(owner) + ' —— 「' + tr.cn + '」' +
+        '（每回合 ' + L.acts + ' 个动作 · 俸禄 ' + L.pay + ' 倍）' });
+    return { ok: true, ch: CHANCELLOR[owner] };
+  }
+  /* 罢相：位子空缺、自动化全停；**该官员致仕不回候选池**（想再请回来就得重新开科） */
+  function dismissChancellor(owner) {
+    owner = owner | 0;
+    var ch = CHANCELLOR[owner];
+    if (!ch) return null;
+    var title = chTitleOf(owner);
+    delete CHANCELLOR[owner];
+    NOTES.push({ owner: owner, cls: 'warn',
+      text: '罢相：' + ch.name + ' 致仕还乡 —— ' + title + '之位空缺，自动化全停' });
+    return ch;
+  }
+
+  /* 每回合的"人在朝堂"部分：俸禄 / 权相偷金 / 贤相罢工与进言 / 权相弹劾。
+   * 排在 settleOfficials 之后（人口税段）：和官员一样，先把钱的事算清。 */
+  function settleChancellor() {
+    var G = AO.GOV;
+    for (var k in CHANCELLOR) {
+      var ch = CHANCELLOR[k], owner = k | 0, L = chLv(ch);
+      if (!ch || !L) continue;
+      var cen = ensureCentral(owner), FC = FLOWC[owner];
+      /* ① 俸禄 = 普通俸禄 × 等级倍率，从中央出；发不出就欠着并停摆 */
+      var due = G.salary * (L.pay || 1) + (ch.owed || 0);
+      var pay = Math.min(cen.gold || 0, due);
+      if (pay > 0) {
+        cen.gold -= pay;
+        if (FC) {
+          FC.loss.gold = (FC.loss.gold || 0) + pay;
+          FC.d.chancellor = (FC.d.chancellor || 0) + pay;
+        }
+      }
+      ch.owed = due - pay;
+      if (ch.owed > 0) {
+        if (ch.paused !== 'owed') {
+          ch.paused = 'owed';
+          NOTES.push({ owner: owner, cls: 'warn',
+            text: ch.name + ' 的俸禄发不出（欠 ' + Math.round(ch.owed) +
+              ' 金）—— ' + chTitleOf(owner) + '停摆，国库补上即复工' });
+        }
+      } else if (ch.paused === 'owed') {
+        ch.paused = '';
+        NOTES.push({ owner: owner, cls: 'ok', text: ch.name + ' 的俸禄补齐，' + chTitleOf(owner) + '复工' });
+      }
+      /* ② 权相：每回合从国库拿 3 金（记 FLOWC，国家卡的收支里看得到） */
+      if (L.grab && (cen.gold || 0) >= L.grab) {
+        cen.gold -= L.grab;
+        if (FC) {
+          FC.loss.gold = (FC.loss.gold || 0) + L.grab;
+          FC.d.chancellor = (FC.d.chancellor || 0) + L.grab;
+        }
+      }
+      /* ③ 贤相：民心 <40 撂挑子，回到 45 才复工（带 5 点回差，免得来回横跳） */
+      if (L.strikeHappy) {
+        var hv = AO.resCountryHappy(coOf(owner));
+        if (hv < L.strikeHappy && ch.paused !== 'strike' && ch.paused !== 'owed') {
+          ch.paused = 'strike';
+          NOTES.push({ owner: owner, cls: 'warn',
+            text: ch.name + ' 撂挑子：国民幸福度 ' + Math.round(hv) + ' < ' + L.strikeHappy +
+              ' —— 自动化暂停（回到 ' + L.resumeHappy + ' 复工）' });
+        } else if (ch.paused === 'strike' && hv >= L.resumeHappy) {
+          ch.paused = '';
+          NOTES.push({ owner: owner, cls: 'ok',
+            text: ch.name + ' 回朝视事：国民幸福度回到 ' + Math.round(hv) });
+        }
+      }
+      /* ④ 贤相进言：每 10 回合一条（走同一条纪要，进年表） */
+      if (L.adviseEvery && turnNo - (ch.adviseAt || 0) >= L.adviseEvery) {
+        ch.adviseAt = turnNo;
+        NOTES.push({ owner: owner, cls: 'ok', text: chAdvice(owner, ch) });
+      }
+      /* ⑤ 权相：10% 概率被谏官弹劾（只是推送，不掉任何数值 —— 压力给玩家） */
+      if (L.impeach && Math.random() < L.impeach) {
+        NOTES.push({ owner: owner, cls: 'warn',
+          text: '谏官弹劾：' + ch.name + ' 擅权自专、目无君上 —— 罢相可止，留用则国无宁日' });
+      }
+    }
+  }
+  /* 贤相的"进言"：一句看账的话，按当前最紧要的事挑 —— 不是随机台词，
+   * 玩家扫一眼纪要就知道该往哪看。 */
+  function chAdvice(owner, ch) {
+    var cen = ensureCentral(owner);
+    var hv = AO.resCountryHappy(coOf(owner));
+    var wars = 0, k, W = AO.resWar && AO.resWar.wars;
+    if (W) for (k in W) if (W[k] && k.split('|').indexOf(String(owner)) >= 0) wars++;
+    var body;
+    if ((cen.gold || 0) < 30) body = '国库见底（' + Math.floor(cen.gold || 0) + ' 金），宜开源节流，或暂停营造';
+    else if (hv < 50) body = '民心仅 ' + Math.round(hv) + '，宜减税、修仓、少动土木';
+    else if (wars) body = '兵事未决（' + wars + ' 处交战），宜先修军械坊、备粮草';
+    else body = '四境无事，府库尚可 —— 宜劝农桑、兴学校，缓称王';
+    return ch.name + '进言：' + body;
+  }
+
+  /* 自动化：结算尾（AI tick 之后）由宰相代劳。**权限与动作格都从等级来**。 */
+  function chancellorAct() {
+    if (!PLAYER) return 0;
+    var ch = CHANCELLOR[PLAYER];
+    if (!ch) return 0;
+    var L = chLv(ch);
+    if (!L || ch.paused) return 0;
+    if (!AO.aiDecide) return 0;
+    var opt = {
+      slots: L.acts, taxMul: L.taxMul, smartTax: !!L.smartTax,
+      forceMax: !!L.forceMax, noMaxTax: !L.forceMax
+    };
+    var perms = chPerms(ch);
+    /* "你手动做的他绝不推翻"：你刚调过税率 → 他这几回合不碰税。
+     * 只挡税率：营造/科研/人事都是**追加**动作，闸门（同省同 kind 只建一座、
+     * 池里有人就不再开科）天然保证不会覆盖你刚做的事。 */
+    if (turnNo - (TAXMAN[PLAYER] || -99) < CH_TAX_HOLD) perms.tax = 0;
+    return AO.aiDecide(PLAYER, perms, opt);
+  }
+  AO.resChOf = chOf;
+  AO.resChLv = chLv;
+  AO.resChTitle = chTitleOf;
+  AO.resChPerms = chPerms;
+  AO.resAppoint = appointChancellor;
+  AO.resDismissCh = dismissChancellor;
+  AO.resChancellor = CHANCELLOR;
+  AO.resSettleChancellor = settleChancellor;
+  AO.resChancellorAct = chancellorAct;
 
   /* ---------------- 战争层（v3）的状态 ----------------
    * 全部照老路子：**按 id 挂对象**，读默认靠 Of()，存档原样存、读档补默认。
@@ -1267,6 +1463,10 @@
      * settleTax 里才定下来）。偷金那一步留在 settleTax 里（那里有 FLOW 上下文）。 */
     settleOfficials();
 
+    /* ④c 宰相（v12）：俸禄 / 权相偷金 / 贤相罢工与进言 / 权相弹劾。
+     * 和官员同一位次（人口税段）—— 都是"人"的开销，先把账算清再谈干活。 */
+    settleChancellor();
+
     /* ⑥ 科研：学校产点 → 条满解锁 → 在研科技倒计时 → 队列拉下一条。
      * 人才点也在这一步累加（同一批学校，见 settleResearch） */
     settleResearch();
@@ -1290,6 +1490,12 @@
      * 排在事件之前：这一回合刚盖好的学校，下回合才产科研点，和玩家的时序一致。
      * 工坊模式（PLAYER = 0）里 18-ai.js 自己会立刻返回，AI 全静止。 */
     if (AO.aiEconTick) AO.aiEconTick();
+
+    /* ⑦c2 宰相（v12）：AI 走完之后，玩家国由宰相代劳"你还没做的"。
+     * 排在 AI 之后：同一回合里世界先动、你家的宰相后动 —— 这样他读到的
+     * 已经是这一回合打完之后的版图（和玩家的时序一致）。
+     * 排在世界纪要之前：他的进言要走同一条 flush（不然要等下一回合才见报）。 */
+    chancellorAct();
 
     /* ⑦d 世界纪要（v10）：AI 之间这一回合出的大事，最多放 AIWAR.newsPerTurn 条。
      * 排在 AI tick 之后 —— 不然这一回合刚打起来的仗要等到下回合才见报。 */
@@ -1553,7 +1759,12 @@
     d.faith = (AO.faithDriver && prov) ? AO.faithDriver(pid, owner) : 0;
     d.faithN = d.faith ? 1 : 0;
 
-    var target = d.base + d.rate + d.food + d.halt + d.official + d.market + d.faith + d.war;
+    /* 宰相（v12）：权倾朝野的常驻 −3（§14.3 的 debuff 之一）。
+     * 按 owner 查表：没有宰相的国家恒 0，所以这一段对 AI 国天然无影响。 */
+    d.chancellor = chHappyOf(owner);
+
+    var target = d.base + d.rate + d.food + d.halt + d.official + d.market + d.faith +
+      d.war + (d.chancellor || 0);
     h.target = AO.clamp(target, 0, 100);
     h.drivers = d;
     h.v = AO.clamp(h.v + (h.target - h.v) * G.happyLerp, 0, 100);
@@ -1587,6 +1798,9 @@
       }
       lines.push('战争 ' + (d.war >= 0 ? '+' : '') + Math.round(d.war) +
         (d.war ? '（占领/封锁/群龙无首/驻军扰民）' : ''));
+      if (d.chancellor) {
+        lines.push('权臣在朝 ' + d.chancellor + '（罢相可去）');
+      }
       lines.push('→ 目标 ' + Math.round(h.target) + '，本回合往它靠 ' + Math.round(G.happyLerp * 100) + '%');
     }
     lines.push('');
@@ -5317,6 +5531,76 @@
     return n;
   }
 
+  /* ---------------- 内阁（v12）：宰相 ----------------
+   * 这一节只做三件事：显示在任者（或可拜的人）、拜相/罢相、四项权限开关。
+   * 权限开关的**唯一**判定在 chPerms()，这里只负责画：权相那一档开关全部置灰，
+   * 下面写一句红字"他自作主张" —— 玩家必须一眼看出"这个人不听我的"。 */
+  function renderCabinet(c) {
+    var row = $('gpCabRow'), perm = $('gpCabPerm');
+    if (!row) return;
+    var owner = c.id, ch = CHANCELLOR[owner];
+    var title = chTitleOf(owner);
+    var T = talentOf(owner);
+    var pool = (T.pool || []).filter(function (o) {
+      return o && AO.traitOf(o.traitKey).isChancellor;
+    });
+    var nEl = $('gpCabN');
+    if (nEl) nEl.textContent = ch ? '· 在任' : (pool.length ? '· ' + pool.length + ' 位可拜' : '');
+    var h = '', i;
+    if (ch) {
+      var tr = AO.traitOf(ch.traitKey), L = chLv(ch);
+      var state = ch.paused === 'owed' ? '欠俸停摆' : ch.paused === 'strike' ? '撂挑子' : '视事';
+      h += '<div class="chcard g' + ch.grade + (ch.paused ? ' paused' : '') + '">' +
+        '<span class="chav">' + escHtml(ch.name.charAt(0)) + '</span>' +
+        '<div class="chm"><div class="chn"><b>' + escHtml(ch.name) + '</b>' +
+          '<span class="cht">' + title + '</span>' +
+          '<span class="otag gold">' + tr.cn + '</span>' +
+          '<span class="chst' + (ch.paused ? ' bad' : '') + '">' + state + '</span></div>' +
+        '<div class="chd">' + escHtml(L.desc) + '</div>' +
+        (ch.owed > 0 ? '<div class="chw">欠俸 ' + Math.round(ch.owed) + ' 金 —— 补上即复工</div>' : '') +
+        '</div>' +
+        '<button type="button" class="pgo out chbtn" data-ch="out"' +
+        ' title="罢相：致仕还乡（不回候选池），自动化全停">罢相</button>' +
+        '</div>';
+    } else if (pool.length) {
+      h += '<div class="chlist">';
+      for (i = 0; i < pool.length; i++) {
+        var o = pool[i], t2 = AO.traitOf(o.traitKey);
+        var L2 = AO.CHANCELLOR_LV[t2.grade] || {};
+        h += '<div class="chcand"><b>' + escHtml(o.name) + '</b>' +
+          '<span class="otag gold">' + t2.cn + '</span>' +
+          '<em>' + escHtml(L2.desc || '') + '</em>' +
+          '<button type="button" class="pgo chbtn" data-ch="in" data-oid="' + o.id + '">拜相</button></div>';
+      }
+      h += '</div>';
+    } else {
+      h += '<div class="chempty">尚未拜相 —— 开科取士有约 3.8% 的概率抽到宰相之才' +
+        '（守成之才 / 干练能臣 / 一代贤相 / 权倾朝野）。拜相之后，本国每回合由他代劳' +
+        '你还没做的事；他只做你没做的，不会推翻你的决定。</div>';
+    }
+    row.innerHTML = h;
+
+    /* 权限开关：四颗。没有宰相时整排置灰（先拜相才有意义） */
+    if (perm) {
+      var L3 = ch && chLv(ch), eff = ch ? chPerms(ch) : null;
+      var ph = '<span class="pl">权限</span>';
+      for (i = 0; i < AO.CH_PERMS.length; i++) {
+        var pk = AO.CH_PERMS[i];
+        var own = L3 ? (L3.perms[pk.key] ? 1 : 0) : 0;
+        var on = eff ? eff[pk.key] : 0;
+        var dis = !ch || (L3 && (L3.ignorePerms || !own));
+        ph += '<button type="button" class="permtog' + (on ? ' on' : '') + '"' +
+          ' data-perm="' + pk.key + '"' + (dis ? ' disabled' : '') +
+          ' title="' + (L3 && L3.ignorePerms ? '他自作主张：权限开关对他无效'
+            : (!ch ? '先拜相' : (own ? '许可宰相做这一类决策（即时生效）'
+              : '这一级宰相不会做这件事（开关点了也不生效）'))) + '">' + pk.cn + '</button>';
+      }
+      if (L3 && L3.ignorePerms) ph += '<em class="pbad">他自作主张：四项开关全部失效</em>';
+      else if (!ch) ph += '<em>拜相后可调</em>';
+      perm.innerHTML = ph;
+    }
+  }
+
   function renderGovPool(cid) {
     var box = $('gpPool');
     if (!box) return;
@@ -5536,6 +5820,7 @@
     lockBtn(ex, cid);
 
     renderGovPool(cid);
+    renderCabinet(c);               // 内阁（v12）：拜相 / 罢相 / 四项权限
     renderIntelSection(c);          // 情报署（v6）：预算三档 + 已知国家 + 定向探测
     renderGovRows(c);
     $('gpProvN').textContent = '· ' + c.provinces.length + ' 省';
@@ -5601,6 +5886,7 @@
     if (r !== 0 && r !== 1 && r !== 2) return;
     if (!canAct(owner)) return govMsg(lockTitle(), 'warn');
     TAXRATE[owner] = r;
+    TAXMAN[owner | 0] = turnNo;        // v12：宰相 3 回合内不许动税率（见 CH_TAX_HOLD）
     var G = AO.GOV;
     govMsg('税率改为「' + G.rateCn[r] + '」：每 ' + G.popCn() + ' ' + G.goldPerUnit[r] +
       ' 金/回合，民心压力 ' + (G.happyHit[r] > 0 ? '+' : '') + G.happyHit[r] +
@@ -5731,6 +6017,36 @@
         var cc = state.world.countries[prov.owner - 1];
         if (cc) renderGovern(cc);
       }
+    });
+
+    /* 内阁（v12）：拜相 / 罢相 / 四项权限开关。整节一个委托，
+     * 因为候选人与在任者是两种卡片，重画频繁。 */
+    var cab = $('gpCabSec');
+    if (cab) cab.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('button') : null;
+      if (!b || b.disabled) return;
+      var act = b.getAttribute('data-ch');
+      if (act === 'in') {
+        var r = appointChancellor(GP.owner, +b.getAttribute('data-oid'));
+        govMsg(r.ok ? ('拜相：' + r.ch.name + ' 为' + chTitleOf(GP.owner) + ' —— 「' +
+          AO.traitOf(r.ch.traitKey).cn + '」') : r.msg, r.ok ? 'ok' : 'warn');
+      } else if (act === 'out') {
+        var ch = dismissChancellor(GP.owner);
+        if (ch) govMsg('罢相：' + ch.name + ' 致仕还乡（自动化全停；他不回候选池）', 'warn');
+      } else if (b.getAttribute('data-perm')) {
+        var ch2 = chOf(GP.owner);
+        if (!ch2) return;
+        var k = b.getAttribute('data-perm'), cn = k;
+        for (var pi = 0; pi < AO.CH_PERMS.length; pi++) {
+          if (AO.CH_PERMS[pi].key === k) cn = AO.CH_PERMS[pi].cn;
+        }
+        ch2.perms[k] = ch2.perms[k] ? 0 : 1;
+        govMsg('宰相权限「' + cn + '」：' + (ch2.perms[k] ? '开' : '关'), 'ok');
+      } else {
+        return;
+      }
+      renderGovPanel();
+      flushNotes();
     });
 
     /* 军务页的事件委托（和上面同一层，只是挂在同一个 overlay 上） */
@@ -10232,6 +10548,9 @@
        * TAXACC 也存 —— 不存的话读档后每省的小数零头归零，
        * 长期看只是慢一点点，但"存档前后税入不一样"会被玩家当成 bug。 */
       TALENT: TALENT, OFFICIAL: OFFICIAL, TAXRATE: TAXRATE, HAPPY: HAPPY,
+      /* 宰相（v12，**不升 SAVE_VER**）：owner -> { id,name,traitKey,grade,perms,owed,paused,… }。
+       * 旧档没有这个键 → fill 之后是空表，等于"还没拜相"，和新开一局同一条路。 */
+      CHANCELLOR: CHANCELLOR,
       TAXACC: TAXACC, GOV_ID: GOV_ID,
       /* 战争层（v3）：五座装备厂（和学校同形状）+ 军队 / 将领 / 外交 / 占领 / 围城 /
        * 封锁 / 灭亡 / 战报 / 征兵队列 + 两个 id 计数器 + 玩家国。
@@ -10337,6 +10656,23 @@
     fill(POP, d.POP);
     fill(TALENT, d.TALENT);
     fill(OFFICIAL, d.OFFICIAL);
+    /* 宰相（v12）：旧档没有 CHANCELLOR → 空表；有的话把缺的键补齐
+     * （perms / owed / paused 都是后加的字段，读到旧档不能是 undefined） */
+    fill(CHANCELLOR, d.CHANCELLOR);
+    for (var chk in CHANCELLOR) {
+      var ch0 = CHANCELLOR[chk];
+      if (!ch0 || typeof ch0 !== 'object') { delete CHANCELLOR[chk]; continue; }
+      if (typeof ch0.grade !== 'number' || !AO.CHANCELLOR_LV[ch0.grade]) {
+        var g0 = (AO.traitOf(ch0.traitKey) || {}).grade;
+        ch0.grade = AO.CHANCELLOR_LV[g0] ? g0 : 1;
+      }
+      if (!ch0.perms || typeof ch0.perms !== 'object') {
+        ch0.perms = { build: 1, research: 1, tax: 1, officials: 1 };
+      }
+      if (typeof ch0.owed !== 'number' || !isFinite(ch0.owed) || ch0.owed < 0) ch0.owed = 0;
+      if (typeof ch0.paused !== 'string') ch0.paused = '';
+      if (typeof ch0.adviseAt !== 'number') ch0.adviseAt = turnNo;
+    }
     /* 官员的资历 / 怨气 / 俸禄零头（v11 新增字段，**不升版本号**）：
      * 旧档里的官没有这四个键 —— 逐个补默认，和"新开一局"走同一条路。
      * 不补的话 PMOD 里 off.rank 是 undefined，倍率会算出 NaN，整省产出归零。 */
@@ -10672,6 +11008,17 @@
     offNorm: offNorm,
     offTitle: offTitle,
     settleOfficials: settleOfficials,
+    /* v12：宰相（test/chancellor.js 只从这里进） */
+    chancellor: CHANCELLOR,
+    chOf: chOf,
+    chLv: chLv,
+    chTitle: chTitleOf,
+    chPerms: chPerms,
+    chHappy: chHappyOf,
+    appoint: appointChancellor,
+    dismissCh: dismissChancellor,
+    settleChancellor: settleChancellor,
+    chancellorAct: chancellorAct,
     taxrate: TAXRATE,
     happy: HAPPY,
     officialsOf: officialsOf,

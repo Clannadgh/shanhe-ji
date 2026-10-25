@@ -82,9 +82,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   }, S.owner);
   ck('学校产人才点（建校 4 回合后 pts 增加）', draw.afterSchool > draw.before,
     draw.before + ' → ' + draw.afterSchool + ' 点');
-  ck('抽卡覆盖七种词条且有权重分布（平平无奇最多）',
-    Object.keys(draw.cnt).length === 7 && draw.cnt.plain > draw.cnt.finance &&
-    draw.cnt.greedy > 0 && draw.cnt.sage > 0,
+  /* v12：卡池从七条扩到十一条（加了四条宰相级，合计约 3.8%）。
+   * 所以这里不再要求"刚好七种"，而是：七条普通词条都在 + 至少抽到一位宰相级；
+   * 权重分布仍是"平平无奇最多"（宰相级太稀有，300 抽里见不到某一条很正常）。 */
+  const PLAIN7 = ['plain', 'finance', 'beloved', 'maker', 'agrarian', 'greedy', 'sage'];
+  const chSeen = Object.keys(draw.cnt).filter(k => /^ch_/.test(k));
+  ck('抽卡覆盖七种普通词条 + 宰相级（超稀有）且有权重分布（平平无奇最多）',
+    PLAIN7.every(k => draw.cnt[k] > 0) && draw.cnt.plain > draw.cnt.finance && chSeen.length >= 1,
     Object.entries(draw.cnt).map(([k, v]) => k + ':' + v).join(' '));
   ck('稀有度：贪墨 / 治世能臣都抽得到', draw.cnt.greedy > 0 && draw.cnt.sage > 0,
     '贪墨 ' + draw.cnt.greedy + ' · 能臣 ' + draw.cnt.sage + '（共抽 ' + draw.total + ' 位）');
