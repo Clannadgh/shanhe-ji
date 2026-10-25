@@ -1,0 +1,19 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+  body{margin:0;padding:14px;background:#f6f2ea;font:12px/1.4 "Microsoft YaHei",sans-serif;color:#2b3238}
+  table{border-collapse:collapse}
+  td{padding:6px 10px;text-align:center;border-bottom:1px solid #e3dccd}
+  .cap{color:#7b868f;font-size:11px}
+  img{display:block;margin:0 auto}
+</style></head><body>
+<table id="t"></table>
+<script>
+const keys=[['iron','铁矿场','高炉+矿车轨道'],['gold','金矿场','井架+金块堆'],['grain','农场','大谷仓+犁好的田'],['horse','牧场','高栏+一匹马'],['timber','伐木场','锯木棚+水车'],['fish','渔港','渔船+渔网'],['salt','盐场','3×3 晒盐池+盐堆']];
+const v='?v='+Date.now();
+const t=document.getElementById('t');
+t.innerHTML='<tr><td></td><td class="cap">Lv1</td><td class="cap">Lv2</td><td class="cap">Lv2 @22px</td></tr>'+
+ keys.map(([k,n,n2])=>`<tr><td class="cap" style="text-align:right">${n} → ${n2}</td>
+   <td><img src="../assets/res/item-${k}-bld.png${v}" width="72" height="72"></td>
+   <td><img src="../assets/res/item-${k}-bld-2.png${v}" width="72" height="72"></td>
+   <td><img src="../assets/res/item-${k}-bld-2.png${v}" width="22" height="22"></td></tr>`).join('');
+</script></body></html>

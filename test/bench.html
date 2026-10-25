@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>bench</title></head>
+<body>
+<script src="../js/00-core.js"></script>
+<script src="../js/01-noise.js"></script>
+<script src="../js/02-terrain.js"></script>
+<script src="../js/03-seeds.js"></script>
+<script src="../js/04-partition.js"></script>
+<script src="../js/05-geometry.js"></script>
+<script src="../js/06-adjacency.js"></script>
+<script src="../js/07-politics.js"></script>
+<script src="../js/08-names.js"></script>
+<script src="../js/09-export.js"></script>
+<script src="../js/13-main.js"></script>
+<script>
+window.runBench = function (n) {
+  var out = [];
+  for (var i = 0; i < n; i++) {
+    var t = performance.now();
+    var w = AO.generate({ seed: 'bench-' + i, width: 2400, height: 1200, provinces: 1100, countries: 64, landRatio: 0.38 });
+    out.push([Math.round(performance.now() - t), Math.round(w.meta.timing.terrain), Math.round(w.meta.timing.geometry)]);
+  }
+  return out;
+};
+</script>
+</body></html>

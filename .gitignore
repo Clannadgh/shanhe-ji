@@ -1,0 +1,16 @@
+# 测试产物：test/*.js 每跑一次就往 shots/ 写几张截图（本机已积到 232MB），不进仓库
+shots/
+test/downloads/
+
+# 运行期临时文件
+debug.log
+diag/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+
+# 智能体的本地工作区（会话状态 / 项目记忆，不属于源码）
+.workbuddy/
+.workbuddy-ai/
+.zcode/
