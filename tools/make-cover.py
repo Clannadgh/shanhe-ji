@@ -55,32 +55,31 @@ def track_text(d, xy, text, font, fill, tracking=0.0, stroke=0, stroke_fill=None
 # ---- 标题 ----
 f_title = ImageFont.truetype(SERIF, 168)
 x_end = track_text(draw, (88, 46), '山河纪', f_title, INK, tracking=16,
-                   stroke=4, stroke_fill=(101.0 and (24, 30, 36)))
+                   stroke=3, stroke_fill=(22, 28, 34))
 
-# 标题下：一条短rule + 方形印章（朱红），像一册书的扉页
-rule_y = 250
-draw.line([(94, rule_y), (94 + 210, rule_y)], fill=(238, 228, 208), width=2)
-draw.line([(94, rule_y + 3), (94 + 210, rule_y + 3)], fill=(24, 30, 36), width=2)
-draw.rectangle([94 + 224, rule_y - 11, 94 + 246, rule_y + 11], fill=ACCENT)
+# 标题下：一条双色细线（亮线压暗线），像书页上的压印
+rule_y = 252
+draw.line([(94, rule_y), (94 + 236, rule_y)], fill=(238, 228, 208), width=2)
+draw.line([(94, rule_y + 3), (94 + 236, rule_y + 3)], fill=(24, 30, 36), width=2)
 
 # ---- 副标 ----
 f_sub = ImageFont.truetype(SONG, 42)
-track_text(draw, (92, rule_y + 34), '一个种子，一个世界，一百年', f_sub, INK_DIM,
-           tracking=2, stroke=3, stroke_fill=(14, 20, 26))
+track_text(draw, (92, rule_y + 32), '一个种子，一个世界，一百年', f_sub, INK,
+           tracking=2, stroke=2, stroke_fill=(14, 20, 26))
 
 # ---- 卖点（三小段，用中点隔开，字距放宽）----
 f_tag = ImageFont.truetype(SANS, 22)
-track_text(draw, (94, rule_y + 108),
+track_text(draw, (94, rule_y + 106),
            '程序化生成 1100 省 / 64 国', f_tag, (216, 208, 192), tracking=0.6,
            stroke=2, stroke_fill=(14, 20, 26))
-track_text(draw, (94 + 322, rule_y + 108),
+track_text(draw, (94 + 322, rule_y + 106),
            '·', f_tag, (170, 162, 148), stroke=2, stroke_fill=(14, 20, 26))
-track_text(draw, (94 + 350, rule_y + 108),
+track_text(draw, (94 + 350, rule_y + 106),
            '战争迷雾与情报署', f_tag, (216, 208, 192), tracking=0.6,
            stroke=2, stroke_fill=(14, 20, 26))
-track_text(draw, (94 + 562, rule_y + 108),
-           '·', f_tag, (140, 132, 118))
-track_text(draw, (94 + 590, rule_y + 108),
+track_text(draw, (94 + 562, rule_y + 106),
+           '·', f_tag, (170, 162, 148), stroke=2, stroke_fill=(14, 20, 26))
+track_text(draw, (94 + 590, rule_y + 106),
            '属于你自己的一本编年史', f_tag, (216, 208, 192), tracking=0.6,
            stroke=2, stroke_fill=(14, 20, 26))
 

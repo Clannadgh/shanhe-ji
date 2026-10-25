@@ -85,10 +85,20 @@ console.log('saved', path.relative(root, OUT1));
 /* ---- 第二轮：缺图回退（拦截 = 404 = 删图） ---- */
 blockMil = true;
 await openTree();
-await page.waitForFunction(`(() => {
-  const imgs = [...document.querySelectorAll('#techTree .milico img')];
-  return imgs.length === 16 && imgs.every(i => i.complete && i.naturalWidth > 0);
-})()`, { timeout: 30000 });
+let st = null, hit = false;
+for (let i = 0; i < 8 && !hit; i++) {
+  await new Promise(r => setTimeout(r, 2000));
+  st = await page.evaluate(`(() => {
+    const imgs = [...document.querySelectorAll('#techTree .milico img')];
+    const bh = document.querySelector('#techTree [data-tech="mil_bronze"] .h');
+    return { nMil: imgs.length,
+      ok: imgs.filter(i => i.complete && i.naturalWidth > 0).length,
+      bronze: bh ? bh.innerHTML.slice(0, 120) : '(missing)' };
+  })()`);
+  console.log('t+' + ((i + 1) * 2) + 's', JSON.stringify(st));
+  hit = st.nMil === 16 && st.ok === 16;
+}
+if (!hit) throw new Error('fallback state not reached');
 const check = await page.evaluate(`(() => {
   const node = document.querySelector('#techTree [data-tech="mil_bronze"] .h');
   const img = node.querySelector('img');
