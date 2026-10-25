@@ -815,6 +815,14 @@
     if (inc <= 0) return 0;
     return men / 1000 * G.upkeepGoldPerK / inc;
   }
+  /* 还能不能再征兵（§9 ① + §10 的交叉点）：军费已经吃掉 milShare(60%) 岁入的国家，
+   * 不再动员新军 —— "护栏优先（少征兵，不掏空国库）"。
+   * 11-ui 的 aiDefend（每 3 回合的民兵动员）在建军之前问这一句。 */
+  function canRecruit(cid) {
+    var G = AO.AIWAR && AO.AIWAR.guard;
+    if (!G) return true;
+    return milRatioOf(cid) <= (G.milShare || 0.6);
+  }
   function warEcon(cid, per) {
     var W = AO.AIWAR && AO.AIWAR.warEcon, rep = AO.rep, D = AO.resDebug;
     if (!W || !rep || !rep.setPrio) return 0;
@@ -1563,6 +1571,9 @@
     wecon: WECON,
     ecoTick: ecoTick,
     payOwed: payOwedAtWar,
+    milRatio: milRatioOf,
+    canRecruit: canRecruit,
+    allKinds: allKinds,
     /* 单步入口（测试用）：只做一件事，不走"每回合两格"的调度 */
     build: tryBuild,
     buildOrder: function (cid) { return buildOrderOf(cid, personaOf(cid), false); },

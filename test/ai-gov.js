@@ -543,6 +543,17 @@ const add = (list) => { for (const c of list) out.push(c); };
       afterSwap === 'p3' && fired === 1 && rep.prio(cid, 'barracks') === 'p3',
       '换挡后 ' + afterSwap + ' → 护栏后 ' + rep.prio(cid, 'barracks'));
 
+    /* 护栏优先的另一半：超了 60% 就不再征兵（少征兵，不掏空国库）。
+     * aiDefend（每 3 回合的民兵动员）建军之前问的就是这一句。 */
+    const ratio = AI.milRatio(cid);
+    const noRec = AI.canRecruit(cid);
+    const poor = w.countries.find(x => x.id !== me && x.id !== cid && x.provinces.length > 1);
+    const yesRec = AI.canRecruit(poor.id);       // 没有军队的国家永远可以征兵
+    ok('③ 护栏优先：军费超 60% 岁入就不再征兵',
+      ratio > 0.6 && noRec === false && yesRec === true,
+      '比例 ' + ratio.toFixed(2) + ' → canRecruit=' + noRec +
+      '（无军的 ' + poor.id + ' 号国 = ' + yesRec + '）');
+
     delete A.resOfficial[pid];
     if (D.atWar(cid, foe.id)) D.makePeace(cid, foe.id);
     return o;

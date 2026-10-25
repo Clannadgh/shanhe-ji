@@ -7894,6 +7894,10 @@
       if (!foes) continue;
       var mine = armiesOf(c.id);
       if (mine.length >= 2) continue;
+      /* v11 护栏优先（§9 ① / §10）：名义军费已经吃掉 60% 岁入的国家不再动员新军 ——
+       * "少征兵，不掏空国库"。判据在 18-ai 的 milRatioOf 里，和 guardMil 同一份算法，
+       * 所以"护栏说超了"和"这里不许征兵"永远是同一句话。 */
+      if (AO.aiDebug && AO.aiDebug.canRecruit && !AO.aiDebug.canRecruit(c.id)) continue;
       /* 想派到哪：首都（还在自己手里）→ 任一与敌接壤的省 → 随便一个省 */
       var spot = 0;
       if (c.capital && pOf(c.capital) && pOf(c.capital).owner === c.id) spot = c.capital;
