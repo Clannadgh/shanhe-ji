@@ -1459,7 +1459,8 @@
    *   quirk        个体怪癖系数的范围（buildBias / taxBias / researchBias / warBias）
    *   buildJitter  buildBias 对建造表项的挪格幅度（底色不变，顺序各国略有差异）
    *   researchPick 研究时从"最便宜的几条"里按 researchBias 加权掷
-   *   buildOrder   三种性格的建造优先级（kind 用的是 UNIV / RESOURCES 的键 + smelt）
+   *   buildOrder   三种性格的建造优先级（kind 用的是 UNIV / RESOURCES 的键；
+   *                **不含 smelt** —— 改建走 aiConvert 的快速通道，不占建造格）
    *   actPerTurn   每国每回合最多几个动作
    *   buildPerTurn 其中"建造"最多几座 —— 不加这道闸，一回合两座能把国库抽干
    *   goldReserve  建之前中央金必须 ≥ cost.gold + 它（防抽干国库）
@@ -1499,21 +1500,29 @@
      * 6 → 极端国家（1.2）挪 1.2 格：够让同性格的两国换位，不够把底色翻过来。 */
     buildJitter: 6,
     researchPick: 2,         // 研究：从最便宜的几条里掷（任务书：两条）
+    /* 熔旧坊 / 淘金场**不在表里**（v18.1b 改建快速通道）：改建不是"盖一座新建筑"，
+     * 它不占地、不吃建造格 —— 走 18-ai 的 aiConvert，每回合独立结算 1 座。
+     * 以前它们排在表尾（经营甚至排最后），而前面是"每省一座市场 / 三座粮仓"
+     * 这种无底清单，于是改建永远排不上，矿睡了就只能干等 48 回合。 */
     buildOrder: {
       /* 经营：先扫盲（学校）→ 换金口（市场）→ 冲工期（建造坊）→ 存粮（粮仓）
        *       → 大学（教育 ≥ 60）→ 工厂（教育 ≥ 15，挑已有军械坊的省）
-       *       → 军械坊 → 熔旧坊（**经营排最后**：先顾活人，再顾旧铁）。 */
+       *       → 军械坊。 */
       econ:     ['school', 'market', 'builder', 'granary', 'university', 'factory',
-                 'armory', 'smelt'],
-      /* 均衡：学校 → 市场 → 建造坊 → 兵营（交战中优先）→ 工厂 → 熔旧坊 → 军械坊。
-       * 熔旧坊排在军械坊**之前**：矿枯了还硬盖军械坊是白扔料。 */
-      balanced: ['school', 'market', 'builder', 'barracks', 'factory', 'smelt', 'armory'],
-      /* 军国：兵营 → 熔旧坊 → 军械坊 → 工厂 → 学校 → 市场。税重兵多，科研垫底。 */
-      mil:      ['barracks', 'smelt', 'armory', 'factory', 'school', 'market']
+                 'armory'],
+      /* 均衡：学校 → 市场 → 建造坊 → 兵营（交战中优先）→ 工厂 → 军械坊。 */
+      balanced: ['school', 'market', 'builder', 'barracks', 'factory', 'armory'],
+      /* 军国：兵营 → 军械坊 → 工厂 → 学校 → 市场。税重兵多，科研垫底。 */
+      mil:      ['barracks', 'armory', 'factory', 'school', 'market']
     },
     actPerTurn: 2,
     buildPerTurn: 1,
     goldReserve: 5,
+    /* 改建（熔旧坊 / 淘金场）额外要多留的金（v18.1b）：改建走独立通道、不占建造格，
+     * 但它花的是**同一个国库** —— 只按 goldReserve 放行的话，改建会把下一回合
+     * 学校 / 市场的预算吃光，那就成了"换个位置挤建造"。所以它要留得更宽：
+     * 门槛 = cost.gold + goldReserve + convertPad。 */
+    convertPad: 30,
     schoolQuotaDiv: 3,
     taxDownHappy: 45,
     taxUpGold: 80,
@@ -2149,7 +2158,9 @@
       resKinds: ['grain', 'fish', 'salt', 'timber', 'horse', 'iron', 'gold'],
       civKinds: ['market', 'builder', 'school', 'university', 'granary', 'factory'],
       milKeep: 1, resKeep: 1, civKeep: 0.5,
-      build: ['barracks', 'armory', 'smelt'],   // 战时只许盖这三类
+      /* 战时只许盖这两类（熔旧坊 v18.1b 起走 aiConvert 快速通道，
+       * 不吃建造格、也不受这张白名单管 —— 战时照改） */
+      build: ['barracks', 'armory'],
       topUpReserve: 20,                          // 中央补俸禄后至少留这么多金
       grace: 1                                   // 宣战后第几回合内完成换挡（1 = 当回合）
     },

@@ -359,10 +359,13 @@
   /* ---------------- ① 建造 ----------------
    * 优先级（AIECON.buildOrder）：
    *   经营  学校（全国 < 省数/3）→ 市场 → 建造坊 → 粮仓 → 大学(60) →
-   *         工厂(15，有军械坊的省) → 军械坊（有铁）→ 熔旧坊（排最后）
-   *   均衡  学校 → 市场 → 建造坊 → 兵营（交战中优先）→ 工厂(15) → 熔旧坊 → 军械坊
-   *   军国  兵营 → 熔旧坊 → 军械坊 → 工厂(15) → 学校 → 市场
+   *         工厂(15，有军械坊的省) → 军械坊
+   *   均衡  学校 → 市场 → 建造坊 → 兵营（交战中优先）→ 工厂(15) → 军械坊
+   *   军国  兵营 → 军械坊 → 工厂(15) → 学校 → 市场
    * 这是**底表**；每国再按 buildBias 做一次微调重排（orderOf，一局只算一次）。
+   *
+   * **熔旧坊 / 淘金场不在表里**（v18.1b）：改建走 aiConvert 的快速通道，
+   * 不占建造格、每国每回合独立结算 1 座（见 govTick 那一节）。
    *
    * 三条硬门（顺序就是"先别把自己搞垮"的顺序）：
    *   ① 中央金 ≥ cost.gold + goldReserve —— 建造是先扣中央再扣省，不加这道闸，
@@ -492,8 +495,8 @@
     return !!(st2 && st2.site > 0);
   }
   /* 淘金场（v18 / A）：金的熔旧坊 —— 和 trySmelt 逐条镜像，只把 iron 换成 gold。
-   * 它骑在**同一个建造格**里（tryBuild 的 'smelt' 那一项后面接着试）：
-   * 两种枯竭矿的再就业本来就是同一件事，没必要占两格。 */
+   * v18.1b 起它和熔旧坊一起走 aiConvert 的快速通道（不再挤建造格）：
+   * 两种"矿没了"的再就业本来就是同一件事，同一回合只做一件。 */
   function tryWash(cid) {
     var D = AO.resDebug, S = AO.WASH, E = AO.AIECON;
     if (!S || !D.washOf || !D.buildWash) return false;
@@ -514,6 +517,42 @@
     D.buildWash(best, true);
     var st2 = D.washOf(best.id);
     return !!(st2 && st2.site > 0);
+  }
+  /* ---------------- 改建快速通道（v18.1b）----------------
+   * 熔旧坊 / 淘金场原来只是建造表里的一项，于是改建要跟"每省一座市场 /
+   * 三座粮仓"这种无底清单抢**同一个建造格**（每回合 1 座），排到最后等于永远排不上。
+   * 可它们和"盖一座新建筑"根本不是一类事：改建是把一条已经睡下的矿脉换个活法 ——
+   * 不占地、不吃工期、料只要一点。所以单开一条通道，照 aiMillPolicy 的家法：
+   *
+   *   · **独立结算、不占建造格**（挂在 govTick，和 aiMillPolicy 同一个位次）
+   *   · 每国每回合至多 1 座 —— 再多就不是"补课"而是刷国库
+   *   · 先铁后金：dormant 的铁省（gone 或 cool>0）优先，铁是军备与维护的命脉；
+   *     铁那边改成了就不再看金（同一回合只做一件）
+   *   · 硬门与玩家侧同源：每省封顶、围城 / 占领省不动、中央金要够 ——
+   *     全在 trySmelt / tryWash 里（也就是 AO.SMELT.check）。
+   *     但**它要多留一份钱**（AIECON.convertPad）：改建不占建造格，花的却是同一个
+   *     国库；只按 goldReserve 放行的话，改建会把下一回合的学校/市场预算吃光，
+   *     那就成了"换个位置挤建造"。
+   * 玩家侧零改动：玩家本来自己点「改建」，从来不占建造格。 */
+  function aiConvert(cid) {
+    var D = AO.resDebug, E = AO.AIECON;
+    if (!D || !D.ensureCentral) return 0;
+    /* 扫盲没完不谈改建：学校配额（省数 / schoolQuotaDiv）是 AI 自己的底线。
+     * 改建不占建造格，花的却是同一个国库 —— 要是它把这笔钱吃掉，
+     * 就等于"换个位置挤建造"，验收里"学校/市场不因此减少"那条立刻翻红。 */
+    var provN = provsOf(cid).length;
+    var quota = Math.max(1, Math.floor(provN / (E.schoolQuotaDiv || 3)));
+    if (univCountAll(cid, 'school') < quota) return 0;
+    var cen = D.ensureCentral(cid);
+    var g = cen.gold || 0;
+    var pad = (E.goldReserve || 0) + (E.convertPad || 0);
+    if (AO.SMELT && g >= (AO.SMELT.cost.gold || 0) + pad) {
+      if (trySmelt(cid)) return 1;    // 铁：dormant（休眠或枯竭）
+    }
+    if (AO.WASH && g >= (AO.WASH.cost.gold || 0) + pad) {
+      if (tryWash(cid)) return 1;     // 金：只认 gone（金矿不会休眠）
+    }
+    return 0;
   }
   /* ---------------- 缺矿反应（v18 / E）：对稀缺有反应，活得像人 ----------------
    * AI 的建造表里从来没有资源建筑 —— 于是矿挖空了它就干等着，全国一起缺铁缺金。
@@ -617,22 +656,20 @@
     /* 扩容本能（v18.2）：人挤到 85% 以上就先扩地 —— 和"缺矿先开矿"同一个道理，
      * 饿着 / 挤着的时候，别的事都往后放。战时不动（战争档的建造白名单只有军备）。 */
     if (!war && tryExpand(cid)) return true;
-    /* 战时只盖军备类（§9 ⑤：兵营 / 军械坊 / 熔旧坊）。
+    /* 战时只盖军备类（§9 ⑤：兵营 / 军械坊）。
      * 民用全停 —— 打仗的时候盖学校是白扔料，而且省下的维护费
-     * 正是军费护栏要的那一笔。熔旧坊留着：它是战时的铁来源。 */
+     * 正是军费护栏要的那一笔。熔旧坊不在白名单里也不用管了：它 v18.1b 起
+     * 走 aiConvert 的快速通道，**不吃建造格**，战时照改（它正是战时的铁来源）。 */
     var warAllow = (AO.AIWAR && AO.AIWAR.warEcon && AO.AIWAR.warEcon.build) || null;
     var schoolCap = Math.max(1, Math.floor(provs.length / (E.schoolQuotaDiv || 3)));
     var T = AO.resTalentOf(cid), edu = T.total || 0;
     for (var i = 0; i < order.length; i++) {
       var kind = order[i];
       if (war && warAllow && warAllow.indexOf(kind) < 0) continue;
-      /* 熔旧坊 / 淘金场走自己的挑省逻辑（只有枯竭矿的省能改）。
-       * v18：两种枯竭矿共用**同一个建造格** —— 先试铁、再试金。 */
-      if (kind === 'smelt') {
-        if (trySmelt(cid)) return true;
-        if (tryWash(cid)) return true;
-        continue;
-      }
+      /* 熔旧坊 / 淘金场**不再走这里**（v18.1b）：它们不占建造格，
+       * 由 aiConvert 每回合独立结算一座。表里还留着 'smelt' 的老档 / 手改表
+       * 也照样安全 —— 认出来就跳过，免得又挤回独木桥。 */
+      if (kind === 'smelt') continue;
       /* 经营：学校够用了就往下走（省数/3 是"扫盲"而不是"每省一座"） */
       if (kind === 'school' && persona === 'econ' && univCountAll(cid, 'school') >= schoolCap) continue;
       /* 教育门槛（大学 60 / 工厂 15）：还没到就先跳过，别把格子浪费在必然失败的调用上 */
@@ -1900,6 +1937,9 @@
        * 顺序有讲究：先排产线（这一回合的炉子摆好），再派人（下一回合才有加成），
        * 最后配装（吃的是**已经打出来**的库存）。 */
       n += aiMillPolicy(c, per);
+      /* v18.1b 改建快速通道：不占建造格，每国每回合至多 1 座（先铁后金）。
+       * 放在产线策略旁边 —— 两件事都是"管铺子"，不是治国。 */
+      n += aiConvert(c.id);
       n += aiArtisans(c, per);
       n += aiEquipFit(c);
     }
@@ -2081,6 +2121,8 @@
     mineOpen: tryMineOpen,
     expand: tryExpand,
     wash: tryWash,
+    /* v18.1b：改建快速通道（不占建造格）—— test/lifeline.js 定点验 */
+    convert: aiConvert,
     millPolicy: aiMillPolicy,
     guard: guardMil,
     milGuard: MILG,

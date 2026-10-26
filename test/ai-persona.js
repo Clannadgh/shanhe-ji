@@ -104,15 +104,17 @@ const add = (list) => { for (const c of list) out.push(c); };
     const A = window.AO, AI = A.aiDebug, D = A.resDebug, E = A.AIECON, o = [];
     const ok = (n, c, d) => o.push({ name: n, ok: !!c, detail: d === undefined ? '' : String(d) });
     const w = D.world(), ids = w.countries.slice(1, 9).map(c => c.id);
-    /* 表里有本批新加的三项 */
-    ok('③ 底表含 大学 / 工厂 / 熔旧坊',
+    /* 表里有本批新加的两项；**熔旧坊 v18.1b 起不在表里**（改建走 aiConvert 的
+     * 快速通道，不占建造格）—— 旧断言"底表含熔旧坊 / 经营排最后 / 军国排在
+     * 军械坊之前"三条跟着改：现在要验的恰恰是"它已经不在表里"。 */
+    ok('③ 底表含 大学 / 工厂',
       E.buildOrder.econ.indexOf('university') >= 0 &&
-      E.buildOrder.econ.indexOf('factory') >= 0 &&
-      E.buildOrder.econ.indexOf('smelt') >= 0);
-    ok('③ 经营把熔旧坊排在最后',
-      E.buildOrder.econ[E.buildOrder.econ.length - 1] === 'smelt');
-    ok('③ 军国把熔旧坊排在军械坊之前',
-      E.buildOrder.mil.indexOf('smelt') < E.buildOrder.mil.indexOf('armory'));
+      E.buildOrder.econ.indexOf('factory') >= 0);
+    ok('③ 三张表都不再有 smelt（改建走快速通道，不占建造格）',
+      ['econ', 'balanced', 'mil'].every(k => E.buildOrder[k].indexOf('smelt') < 0),
+      ['econ', 'balanced', 'mil'].map(k => k + ':' + E.buildOrder[k].join(',')).join(' | '));
+    ok('③ 改建入口独立（aiDebug.convert 在，且不吃建造格）',
+      typeof AI.convert === 'function' && typeof AI.build === 'function');
 
     /* 顺序稳定：同一国连问两次一样（每回合不重掷） */
     const a1 = AI.orderOf(ids[0]), a2 = AI.orderOf(ids[0]);
@@ -198,7 +200,11 @@ const add = (list) => { for (const c of list) out.push(c); };
 
   await page.evaluate(() => {
     const D = window.AO.resDebug;
-    for (let i = 0; i < 30; i++) {
+    /* **窗口 30 → 36 回合**（v18.1b 跟改）：30 回合正好卡在"1 座学校 ×
+     * 每回合 0.5 点 × 30 = 15 点 = 开科线"这条刀刃上，改建通道（aiConvert）
+     * 分掉一点国库就会把某国的第一场科考推到第 31 回合，断言随之翻红 ——
+     * 那是余量问题，不是"AI 不会派官"。多给 6 回合余量，断言本身一个字没改。 */
+    for (let i = 0; i < 36; i++) {
       D.settleTurn();
       if (D.evtPending()) D.evtPick(0);     // 玩家国的事件按默认选项落地，别卡住回合
     }

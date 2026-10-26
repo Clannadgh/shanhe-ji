@@ -1,5 +1,5 @@
 /* =============================================================
- * test/lifeline.js —— v18「经济续命」的验收（A0 / A / B / C / D / E / F 七件）
+ * test/lifeline.js —— v18「经济续命」的验收（A0 / A / B / C / D / E / F / G / H 九件）
  *
  * 这一批不推翻"终局压力"，只给五条活气口 + 拆一道锁死穷国的门槛：
  *   A0  拆门槛：熔旧坊 / 淘金场是"活命建筑"，不问学历（累计教育 0 也能改建）
@@ -11,6 +11,8 @@
  *   F   税也收铁（v18 追加二）：人口铁税从涓流提为常脉，与金税同单位
  *   G   市场一座 · 国库不是商店（v18 追加三）：每省 maxPer 1；
  *       买货改走世界市场（供给无限、金沉没、不扣中央），buyCentral 退役
+ *   H   改建快速通道（v18.1b）：熔旧坊/淘金场从 buildOrder 里摘出来，
+ *       改走 aiConvert（不占建造格，每国每回合至多 1 座，先铁后金）
  *
  * 每一节都对着任务书那一条验收写，断言尽量落在"规则层"（check / settle /
  * 表本身）而不是像素上；只有"钮亮不亮、title 写什么"这类必须走 DOM。
@@ -926,6 +928,11 @@ function add(list) { for (const c of list) out.push(c); }
     const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
     const T = window.__T;
     D.wash[T.g] = { n: 2, site: 1, halted: false, mAcc: { iron: 0, gold: 0 }, iAcc: 0.25, tAcc: 0 };
+    /* 顺手放一座熔旧坊：下面要验"摘掉 WASH 不会连 SMELT 一起清掉"。
+     * v18.1b 之后 AI 每回合都会改建，档里本来就有几条 —— 但这一条是我们自己放的，
+     * 断言不依赖 AI 的运气。 */
+    D.smelt[T.b] = { n: 1, site: 0, halted: false, mAcc: { iron: 0, gold: 0 }, iAcc: 0 };
+    window.__SMELT_N = Object.keys(A.resSmelt).length;
     D.save(true);
     let raw = null;
     try { raw = JSON.parse(localStorage.getItem(A.SAVE_KEY)); } catch (e) { /* file:// 禁 ls */ }
@@ -964,8 +971,12 @@ function add(list) { for (const c of list) out.push(c); }
     ok('A 老档（无 WASH）读得进', !!D.world(), '第 ' + D.turn() + ' 回合');
     ok('A 老档读进来是"还没改建过"（空表）', Object.keys(A.resWash).length === 0,
       Object.keys(A.resWash).length + ' 条');
-    ok('A 老档读进来 SMELT 也还是空表（两套镜像互不干扰）',
-      Object.keys(A.resSmelt).length === 0, Object.keys(A.resSmelt).length + ' 条');
+    /* 旧断言"读回来 SMELT 也是空表"跟改（v18.1b）：AI 现在每回合都改建，
+     * 档里必然有熔旧坊 —— 要验的是**摘掉 WASH 不会连 SMELT 一起清掉**，
+     * 所以比"条数没少 + 我们放的那条还在"，而不是比"空"。 */
+    ok('A 老档读进来 SMELT 还在（摘掉 WASH 不影响另一套镜像）',
+      Object.keys(A.resSmelt).length === window.__SMELT_N && !!A.resSmelt[window.__T.b],
+      Object.keys(A.resSmelt).length + ' 条 / 存档时 ' + window.__SMELT_N);
 
     /* F（v18 追加二）：常数从 200 万改成 10 万，但存档格式没动 ——
      * 铁税的零头应该原样读回来（0.75），旧档读入后结算也不能炸。 */
@@ -987,6 +998,97 @@ function add(list) { for (const c of list) out.push(c); }
     ok('旧档迁移：gone 的铁袋 → 休眠 48（left 留 0，不回溯）',
       !!mig && mig.gone === false && mig.cool === 48 && mig.left === 0,
       mig ? 'cool=' + mig.cool + ' gone=' + mig.gone + ' left=' + mig.left : '没有这个铁袋');
+    return o;
+  }));
+
+  /* =============================================================
+   * H 改建快速通道（v18.1b）—— 改建不再挤建造独木桥
+   *
+   * 老路子：熔旧坊是 buildOrder 里的一项，改建要跟"每省一座市场 / 三座粮仓"
+   * 这种无底清单抢同一个建造格（每回合 1 座），排到最后 = 永远排不上。
+   * 新路子：aiConvert 独立结算、不占建造格，每国每回合至多 1 座（先铁后金）。
+   *
+   * 这一节放在最后：前面几节按"回合数"和 IRONACC 零头对过账，60 回合的挂机
+   * 会把那些数冲掉，所以不能插在中间。
+   * ============================================================= */
+  add(await page.evaluate(() => {
+    const D = window.AO.resDebug, A = window.AO, AI = A.aiDebug, o = [];
+    const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
+    const w = D.world(), T = window.__T;
+    const c = w.countries.filter(x => x && x.id !== T.cid && x.provinces.length >= 4)[0];
+    const cid = c.id;
+    const cen = D.ensureCentral(cid);
+    cen.gold = 3000; cen.timber = 3000; cen.iron = 3000; cen.grain = 3000;
+
+    /* ① 三张表里已经没有 smelt（改建不走建造表了） */
+    ok('H 三张建造表都不再有 smelt',
+      ['econ', 'balanced', 'mil'].every(k => A.AIECON.buildOrder[k].indexOf('smelt') < 0),
+      ['econ', 'balanced', 'mil'].map(k => k + ':' + A.AIECON.buildOrder[k].join(',')).join(' | '));
+
+    /* ② 扫盲闸：学校还没铺够（省数/3）时，改建通道一律不动 ——
+     *    改建不占建造格，花的却是同一个国库；不设这道闸就是"换个位置挤建造"。 */
+    for (const id of c.provinces) { if (A.resSchool[id]) A.resSchool[id].n = 0; }
+    const quota = Math.max(1, Math.floor(c.provinces.length / (A.AIECON.schoolQuotaDiv || 3)));
+    ok('H 扫盲没完（学校 < 省数/' + (A.AIECON.schoolQuotaDiv || 3) + ' = ' + quota +
+      ' 座）：改建通道不动',
+      AI.convert(cid) === 0, 'convert=' + AI.convert(cid) + ' · 学校 0 座');
+
+    /* ③ 铺够学校之后：同一回合 —— 建造格照常动 + 改建通道也动（互不挤） */
+    for (const id of c.provinces) {
+      if (!A.resSchool[id]) A.resSchool[id] = { n: 0, site: 0, halted: false, mAcc: { iron: 0, gold: 0 }, order: null };
+      A.resSchool[id].n = 1;
+    }
+    const pid = c.provinces[0];
+    const s = A.resSim[pid].iron;
+    s.built = 1; s.tiers = { 1: 1, 2: 0 };
+    s.left = 0; s.cool = 48; s.gone = false; s.halted = false;
+    for (const id of c.provinces) delete A.resSmelt[id];     // 清场：别撞封顶
+
+    const cnt = () => {
+      let sm = 0, sch = 0, mkt = 0;
+      for (const id of c.provinces) {
+        if (A.resSmelt[id]) sm += A.resSmelt[id].n;
+        if (A.resSchool[id]) sch += A.resSchool[id].n;
+        if (A.resMarket[id]) mkt += A.resMarket[id].n;
+      }
+      return { sm, sch, mkt };
+    };
+    const before = cnt();
+    const built = AI.build(cid, AI.personaOf(cid));
+    const conv = AI.convert(cid);
+    const st = A.resSmelt[pid];
+    ok('H 同一回合：建造格真的动了（AI.build 开工）', built === true, 'build=' + built);
+    ok('H 同一回合：改建通道也动了（AI.convert → 熔旧坊开工）',
+      conv === 1 && !!st && st.site > 0,
+      'convert=' + conv + ' site=' + (st ? st.site : '—'));
+
+    /* ④ 硬指标：挂机 60 回合 —— 熔旧坊数 > 0、逐回合不降且确实在涨；
+     *    学校 / 市场也照涨（建造格没被改建吃掉）。
+     *    先把学校清零，让 AI 自己从 0 铺到配额，再开始改建 —— 这一段测的是
+     *    "两条路同时走"，不是"我替它铺好"。
+     *    每回合先停战：战时民用建造全停，不停战就测不出"建造格还在不在"。 */
+    for (const id of c.provinces) { if (A.resSchool[id]) A.resSchool[id].n = 0; }
+    for (const id of c.provinces) delete A.resSmelt[id];
+    const t0 = cnt();
+    const series = [];
+    let grew = 0, last = 0;
+    for (let i = 0; i < 60; i++) {
+      AI.warsOf(cid).forEach(foe => { if (D.atWar(cid, foe)) D.makePeace(cid, foe); });
+      D.settleTurn();
+      if (D.evtPending()) D.evtPick(0);
+      const cur = cnt().sm;
+      series.push(cur);
+      if (cur > last) grew++;
+      last = cur;
+    }
+    const after = cnt();
+    const mono = series.every((v, i) => i === 0 || v >= series[i - 1]);
+    ok('H 60 回合：熔旧坊数 > 0', after.sm > 0, '熔旧坊 ' + t0.sm + ' → ' + after.sm + ' 座');
+    ok('H 60 回合：只增不减，且真的涨过', mono && grew >= 1,
+      '序列 ' + series[0] + ' → ' + series[series.length - 1] + '（涨了 ' + grew + ' 次）');
+    ok('H 60 回合：建造格没被改建吃掉（学校 / 市场照涨）',
+      (after.sch + after.mkt) > (t0.sch + t0.mkt),
+      '学校 ' + t0.sch + '→' + after.sch + ' · 市场 ' + t0.mkt + '→' + after.mkt);
     return o;
   }));
 

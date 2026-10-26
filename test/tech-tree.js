@@ -5,7 +5,9 @@
  *   1) 国家卡里只有摘要 + 按钮；点按钮全屏树铺开，× / ESC 能关
  *   2) 无前置的科技在第 1 列；「良种牧场」因 req「铁犁深耕」排在下一列且有虚线连过去
  *   3) 四态切换：锁定灰、可研能点开研、研究中带进度、完成 ✓ 变淡
- *   4) 科研条没攒满的国家：所有节点都是锁定态（提示"建学校开始科研"）
+ *   4) 科研条没攒满的国家：除**免费根（皮革工艺）**之外全锁（提示"建学校开始科研"）
+ *      —— 旧用例跟改：v19 返工后树上多了一枚开局就点亮的根，"全锁"不再成立，
+ *      改成"19 锁 + 1 亮"。
  *   5) 树宽超屏时能横向拖；地图滚轮缩放在 overlay 开着时不起作用
  *
  * 用法：node test/tech-tree.js
@@ -92,22 +94,34 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     /rgb|#/.test(opened.flag) && opened.name.length > 0 && /#\d+/.test(opened.id) && /\d+ \/ 30/.test(opened.meter),
     opened.name + ' ' + opened.id + ' · ' + opened.meter);
 
-  /* ---- 4) 没攒满科研条 → 全锁 ---- */
+  /* ---- 4) 没攒满科研条 → 除免费根之外全锁 ----
+   * **旧用例跟改**（v19 返工）：原来断言"20 个节点全锁"，但树上有一枚**免费根**
+   * （皮革工艺，t.free）—— 设计上它开局就是已点亮的根（任务书原话"树上画成
+   * 已点亮的根"），所以锁定的判定要把它排除：19 锁 + 1 亮。 */
   const locked = await page.evaluate(() => {
     const ns = [...document.querySelectorAll('#ttNodes .ttnode')];
+    const lockNs = ns.filter(n => n.classList.contains('lock'));
+    const freeNs = ns.filter(n => n.classList.contains('done'));
+    const txt = (n) => (n.querySelector('.ft') || {}).textContent || '';
     return {
       n: ns.length,
-      lock: ns.filter(n => n.classList.contains('lock')).length,
-      notes: [...new Set(ns.map(n => (n.querySelector('.ft') || {}).textContent || ''))]
+      lock: lockNs.length,
+      free: freeNs.length,
+      freeKeys: freeNs.map(n => n.getAttribute('data-tech')),
+      freeNotes: [...new Set(freeNs.map(txt))],
+      notes: [...new Set(lockNs.map(txt))]
     };
   });
   const techN = await page.evaluate(() => ({
     n: window.AO.TECHS.length,
     edges: window.AO.TECHS.filter(t => !!t.req).length
   }));
-  ck('科研条没攒满 → ' + techN.n + ' 个节点全锁，提示「建学校开始科研」',
-    locked.n === techN.n && locked.lock === techN.n && locked.notes.length === 1 && /建学校开始科研/.test(locked.notes[0]),
-    locked.lock + '/' + locked.n + ' 锁，文案「' + locked.notes.join('|') + '」');
+  ck('科研条没攒满 → ' + (techN.n - 1) + ' 个节点锁着（免费根已点亮），提示「建学校开始科研」',
+    locked.n === techN.n && locked.lock === techN.n - 1 && locked.free === 1 &&
+    locked.freeKeys.indexOf('leather') >= 0 &&
+    locked.notes.length === 1 && /建学校开始科研/.test(locked.notes[0]),
+    locked.lock + '/' + locked.n + ' 锁 · 亮点 ' + locked.freeKeys.join(',') +
+    '（' + locked.freeNotes.join('|') + '），锁定文案「' + locked.notes.join('|') + '」');
 
   /* 点锁定节点 → 顶部提示行（不弹 alert） */
   await page.evaluate(() => document.querySelector('#ttNodes .ttnode[data-tech="plow2"]').click());
