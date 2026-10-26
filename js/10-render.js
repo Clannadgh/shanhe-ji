@@ -1012,6 +1012,7 @@
     vg.addColorStop(1, 'rgba(16,24,32,0.065)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, this.cssW, this.cssH);
+
   };
 
   /* 载入 7 张图标并烘焙。图片是异步的：加载完一张就置一次脏标记，
@@ -1386,6 +1387,89 @@
 
     canvas.addEventListener('mouseleave', function () {
       if (self.hover) { self.hover = 0; self.requestDraw(); if (self.onHover) self.onHover(0); }
+    });
+
+    /* ---------------- 触摸（v17）：手机上的拖动 / 捏合缩放 / 轻点选择 ----------------
+     * 原来这套交互只认 mousedown / mousemove / wheel：手机上地图**拖不动也缩放不了**，
+     * 只剩浏览器合成的"点一下选中"。这里按手指补齐三件事：
+     *   ① 单指拖动 = 平移     ② 双指捏合 = 以两指中点为锚缩放（同时跟着平移）
+     *   ③ 轻点（累计位移 < 8px）= 选中，规则和 mouseup 那条分支一模一样
+     * 不做惯性滑动：回合制里没人靠甩地图赶路，加了只会滑过头。
+     * ---------------------------------------------------------- */
+    var T = { on: false, x: 0, y: 0, moved: 0, pinch: false, dist: 0, mx: 0, my: 0 };
+    function touchDist(ts) {
+      var dx = ts[0].clientX - ts[1].clientX, dy = ts[0].clientY - ts[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    function touchPick(t) {
+      if (!t || !self.world) return;
+      var rect = canvas.getBoundingClientRect();
+      var mx = t.clientX - rect.left, my = t.clientY - rect.top;
+      if (mx < 0 || my < 0 || mx > rect.width || my > rect.height) return;
+      var wp = self.toWorld(mx, my);
+      var id = AO.pickProvince(self.world, wp.x, wp.y);
+      if (!id) return;
+      if (self.mode === 'paint') self.paint(id);
+      else if (self.mode === 'country') {
+        var pp = self.world.provinces[id - 1];
+        if (pp) self.selectCountry(pp.owner);
+      } else self.select(id);
+    }
+
+    canvas.addEventListener('touchstart', function (e) {
+      if (e.touches.length === 1) {
+        var t0 = e.touches[0];
+        T.on = true; T.pinch = false; T.moved = 0;
+        T.x = t0.clientX; T.y = t0.clientY;
+      } else if (e.touches.length >= 2) {
+        /* 从单指变成双指：把刚才那点位移作废，否则手指一分开就被当成"点了一下" */
+        T.on = false; T.pinch = true; T.moved = 99;
+        T.dist = touchDist(e.touches);
+        T.mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        T.my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchmove', function (e) {
+      if (!self.world) return;
+      if (T.pinch && e.touches.length >= 2) {
+        e.preventDefault();
+        var d = touchDist(e.touches);
+        var cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        var cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        var rect = canvas.getBoundingClientRect();
+        var px = cx - rect.left, py = cy - rect.top;
+        /* 缩放锚在中点：先记中点下的世界坐标，缩完再把它挪回中点（和滚轮同一套算法） */
+        var before = self.toWorld(px, py);
+        if (T.dist > 0) self.cam.scale = AO.clamp(self.cam.scale * (d / T.dist), 0.12, 24);
+        var after = self.toWorld(px, py);
+        self.cam.x += before.x - after.x;
+        self.cam.y += before.y - after.y;
+        self.cam.x -= (cx - T.mx) / self.cam.scale;
+        self.cam.y -= (cy - T.my) / self.cam.scale;
+        T.dist = d; T.mx = cx; T.my = cy;
+        self.clampCam(); self._needBase = true; self.requestDraw();
+        return;
+      }
+      if (!T.on || e.touches.length !== 1) return;
+      var t = e.touches[0];
+      var dx = t.clientX - T.x, dy = t.clientY - T.y;
+      T.moved += Math.abs(dx) + Math.abs(dy);
+      T.x = t.clientX; T.y = t.clientY;
+      if (T.moved <= 8) return;
+      e.preventDefault();          // 手指已经确实在拖了：别让浏览器再掺一手
+      self.cam.x -= dx / self.cam.scale;
+      self.cam.y -= dy / self.cam.scale;
+      self.clampCam(); self._needBase = true; self.requestDraw();
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', function (e) {
+      var was = T.on, moved = T.moved;
+      T.on = false;
+      if (e.touches.length < 2) T.pinch = false;
+      if (!was || moved > 8) return;
+      e.preventDefault();          // 吞掉合成 click，选中只走上面那一条路
+      touchPick(e.changedTouches[0]);
     });
 
     root.addEventListener('keydown', function (e) {

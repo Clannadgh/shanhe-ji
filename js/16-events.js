@@ -91,10 +91,15 @@
     {
       key: 'drought', cn: '大旱', cat: '天灾', w: 11, cd: 9, once: false, spot: 'prov',
       when: function (ctx) { return ctx.pop > 30000 && ctx.has('grain'); },
-      text: '{prov}两月无雨，禾苗卷叶，井水见底。老农说：再不下雨，这一季就算完了。',
+      text: '{prov}两月无雨，禾苗卷叶，井水见底。老农说：再不下雨，这一造就算完了。',
+      /* v14：旱情直接喂价格 —— 减产是慢的（库存要吃完才见底），
+       * 但"粮要涨"这件事市场当天就知道。所以这里除了 buff，还给一条
+       * jump=1 的物价冲击（当回合就走一半），见 PRICES_CFG.shockLerp。 */
       options: [
-        { cn: '凿井引水', w: 2, fx: { stock: { gold: -18 }, buff: { key: 'grain', mul: 0.75, turns: 1 } } },
-        { cn: '听天由命', w: 1, fx: { happy: -3, buff: { key: 'grain', mul: 0.5, turns: 1 } } }
+        { cn: '凿井引水', w: 2, fx: { stock: { gold: -18 }, buff: { key: 'grain', mul: 0.75, turns: 1 },
+          price: { grain: { target: 1.8, turns: 2, jump: 1 } } } },
+        { cn: '听天由命', w: 1, fx: { happy: -3, buff: { key: 'grain', mul: 0.5, turns: 1 },
+          price: { grain: { target: 2.1, turns: 2, jump: 1 } } } }
       ]
     },
     {
@@ -102,8 +107,8 @@
       when: function (ctx) { return ctx.has('grain') && ctx.pop > 20000; },
       text: '{prov}今岁风调雨顺，仓廪盈溢。是尽数入官仓，还是分与乡里？',
       options: [
-        { cn: '尽数入仓', w: 2, fx: { stock: { grain: 30 } } },
-        { cn: '分与乡里', w: 1, fx: { stock: { grain: 12 }, happy: 5 } }
+        { cn: '尽数入仓', w: 2, fx: { stock: { grain: 30 }, price: { grain: { target: 0.7, turns: 2 } } } },
+        { cn: '分与乡里', w: 1, fx: { stock: { grain: 12 }, happy: 5, price: { grain: { target: 0.8, turns: 2 } } } }
       ]
     },
     {
@@ -111,7 +116,8 @@
       when: function (ctx) { return ctx.has('fish'); },
       text: '{prov}海面忽起银鳞，渔户说这是十年一遇的大汛。船少网疏，怕赶不上这一潮。',
       options: [
-        { cn: '全力捕捞', w: 2, fx: { buff: { key: 'fish', mul: 2, turns: 3 } } },
+        { cn: '全力捕捞', w: 2, fx: { buff: { key: 'fish', mul: 2, turns: 3 },
+          price: { fish: { target: 0.75, turns: 2 } } } },
         { cn: '修船备汛', w: 1, fx: { stock: { gold: -10 }, buff: { key: 'fish', mul: 1.5, turns: 3 } } }
       ]
     },
@@ -129,11 +135,18 @@
     /* ---------------- 人祸 ---------------- */
     {
       key: 'bandits', cn: '匪患', cat: '人祸', w: 11, cd: 7, once: false, spot: 'prov',
-      when: function (ctx) { return ctx.border && ctx.pop > 40000; },
+      /* v13（A3）：改成**看不安值** —— 原来判"边境 + 人口"，结果是
+       * "边境大省三天两头闹匪、内陆快饿死的省一次不闹"，因果反了。
+       * 现在不安 ≥ 40 才出，于是它和 UNREST 互喂：
+       * 不安养匪患（+10 不安），匪患的处置又改不安。 */
+      when: function (ctx) { return ctx.unrest >= 40; },
       text: '{prov}界上聚了一股马贼，专劫运粮的车队。县令请兵，兵在三百里外。',
       options: [
-        { cn: '发兵剿匪', w: 2, fx: { stock: { gold: -15 }, happy: 2 } },
-        { cn: '置之不理', w: 1, fx: { stockPct: { grain: -0.2 } } }
+        { cn: '发兵剿匪', w: 2, fx: { stock: { gold: -15 }, happy: 2, unrest: -15 } },
+        { cn: '置之不理', w: 1, fx: { stockPct: { grain: -0.2 }, bandit: true } },
+        /* 招安：花钱把匪首收编成守军 —— "金能买人心"最直白的那一档。
+         * 三个效果一起给：不安 −25、匪患标记清掉、城里多一支驻防军（走现有征兵结构）。 */
+        { cn: '招安', w: 1, fx: { stock: { gold: -20 }, unrest: -25, garrison: 1 } }
       ]
     },
     {
@@ -180,6 +193,19 @@
         { cn: '设关抽税', w: 2, fx: { central: { gold: 25 } } },
         { cn: '让利商旅', w: 1, fx: { central: { gold: 10 }, happy: 3 } }
       ]
+    },
+    /* v14：商队到访 —— 给玩家一个"盯价格板"的理由。
+     * 收购价固定在物价 ×1.3，所以**本土物价越高，这一笔越值钱**：
+     * 粮价 1.8 的时候卖 10 单位粮是 4.7 金，粮价 0.7 的时候只有 1.8 金。
+     * 于是"什么时候卖"这件事第一次有了答案。 */
+    {
+      key: 'caravan', cn: '商队到访', cat: '商事', w: 6, cd: 12, once: false, spot: 'prov',
+      when: function (ctx) { return !!ctx.market; },
+      text: '一支远道而来的商队在{prov}城外卸货，领队的说：本地土产，有多少收多少，价比市面高三成。',
+      options: [
+        { cn: '卖与他', w: 2, fx: { caravan: 1.3 } },
+        { cn: '不卖，留着自用', w: 1, fx: { happy: 2 } }
+      ]
     }
   ];
   AO.EVENTS = EVENTS;
@@ -204,6 +230,9 @@
    *   killOfficial:true  撤掉本省在任官员（不回候选池）
    *   removeGeneral:true 该将去职（失一将）
    *   mutiny:true        该将带军自立为叛军，攻向旧主
+   *   unrest:n          不安值（省事件=本省，v13 新增）
+   *   bandit:true       挂匪患标记（下一回合产物归零 + 不安 +10）
+   *   garrison:n        本省 +n 支驻防军（走现有征兵结构，v13 新增）
    * ============================================================= */
   function eachKey(obj, fn) {
     if (!obj) return;
@@ -226,6 +255,16 @@
     if (fx.killOfficial) f.killOfficial();
     if (fx.removeGeneral) f.removeGeneral();
     if (fx.mutiny) f.mutiny();
+    /* v13（A3）：不安 / 匪患 / 招安驻军 —— 和 UNREST 互喂的那三笔 */
+    if (fx.unrest) f.unrest(fx.unrest);
+    if (fx.bandit) f.bandit();
+    if (fx.garrison) f.garrison(fx.garrison);
+    /* v14：物价冲击 / 商队收购 —— 让既有事件自动喂价格 */
+    if (fx.price) eachKey(fx.price, function (k, o) {
+      if (o && typeof o === 'object') f.price(k, o.target, o.turns, o.jump);
+      else f.price(k, o, 2, 0);          // 简写：price:{grain:1.8} = 目标 1.8、2 回合
+    });
+    if (fx.caravan) f.caravan(fx.caravan === true ? 1.3 : fx.caravan);
   };
 
   /* ---------------- fx → 一行文案 ----------------
@@ -268,6 +307,17 @@
     if (fx.killOfficial) out.push('失一官');
     if (fx.removeGeneral) out.push('失一将');
     if (fx.mutiny) out.push('该将带军自立');
+    if (fx.unrest) out.push('不安 ' + signed(fx.unrest));
+    if (fx.bandit) out.push('匪患未平（下一回合断产、不安 +10）');
+    if (fx.garrison) out.push('本省 +' + fx.garrison + ' 支驻防军');
+    /* v14：物价冲击 / 商队 */
+    eachKey(fx.price, function (k, o) {
+      var t = (o && typeof o === 'object') ? o.target : o;
+      var tn = (o && typeof o === 'object') ? (o.turns || 2) : 2;
+      out.push(resCn(k) + '价 → ' + (Math.round(t * 100) / 100) + '（' + tn + ' 回合）');
+    });
+    if (fx.caravan) out.push('商队按 ×' + (fx.caravan === true ? 1.3 : fx.caravan) +
+      ' 价收 10 单位土产换金');
     return out.join('，');
   };
 
@@ -415,6 +465,9 @@
       border: isBorder(p),
       war: inWar(owner),
       market: hasMarket(owner),
+      /* 不安（v13）：UNREST 的唯一出口。没有就按 0 算 ——
+       * 老档 / 手搓的 world 读进来不会崩，只是"这一刻还没人闹事"。 */
+      unrest: D.unrestOf ? D.unrestOf(pid | 0).v : 0,
       scope: scope,
       has: function (key) { return provHas(p, key); },
       ore: oreOf(pid),
@@ -462,7 +515,10 @@
         cen[key] = Math.max(0, (cen[key] || 0) + n);
       },
       /* 储量 +50%：矿已经采空（gone）的话这一笔就把它救活 ——
-       * 不然"新发现"落在一座空矿上，效果是 0，玩家会以为没生效 */
+       * 不然"新发现"落在一座空矿上，效果是 0，玩家会以为没生效。
+       * **复活 = 回储量 + 清 gone**：gone 留着的话 settleTurn 里
+       * `if (!s.built || s.gone) continue` 会把它永久跳过，改了也白改
+       * （枯竭矿不再收维护、不再产出，只有清掉标记才恢复结算）。 */
       left: function (key, mul) {
         var k = (key === '*') ? oreOf(pid) : key;
         if (!k) return;
@@ -470,10 +526,14 @@
         if (!s) return;
         if ((s.left || 0) <= 0) {
           s.left = Math.max(10, Math.round((s.n || 40) * 0.5));
-          s.gone = false; s.cool = 0;
+          s.cool = 0;
         } else {
           s.left = Math.max(1, Math.round(s.left * (1 + mul)));
         }
+        /* 不管走哪一支，只要这一笔真给了储量，枯竭标记就得跟着清。
+         * 复活之后熔旧坊照常并存（两份收入叠加）—— 熔旧坊的状态在 UI 层，
+         * 这里一行都不用碰。 */
+        s.gone = false;
       },
       buff: function (key, mul, turns) {
         if (!key || !(turns > 0)) return;
@@ -499,6 +559,43 @@
       mutiny: function () {
         var g = pickGeneral(owner, true);
         if (g) rebelGeneral(g, owner);
+      },
+      /* 不安（v13）：**按 scope 逐省**改（和 happy 一个口径 ——
+       * 省事件改一省，国事件改全国），并同步把 target 压下去，
+       * 否则下一回合 settleUnrest 的 lerp 会立刻把降下去的那一截拉回来。 */
+      unrest: function (n) {
+        if (!D.unrestOf) return;
+        for (var i = 0; i < scope.length; i++) {
+          var u = D.unrestOf(scope[i]);
+          u.v = clamp(u.v + n, 0, (AO.UNREST && AO.UNREST.max) || 100);
+          u.target = clamp(Math.min(u.target, u.v), 0, (AO.UNREST && AO.UNREST.max) || 100);
+          if (n < 0 && u.v < ((AO.UNREST && AO.UNREST.warnAt) || 70) && D.unwarnClear) {
+            D.unwarnClear(scope[i]);          // 压回去了 → 预警档复位，下次攒上去还会再报
+          }
+        }
+      },
+      /* 匪患标记：下一回合产物归零 + 不安 +10（和"匪乱"共用一条标记） */
+      bandit: function () {
+        if (!D.banditSet) return;
+        D.banditSet(pid | 0);
+      },
+      /* 招安出来的驻防军：走 11-ui 的现有征兵结构（newArmy + 该代最好的武器） */
+      garrison: function (n) {
+        if (!D.garrisonAdd) return;
+        D.garrisonAdd(pid | 0, n || 1);
+      },
+      /* 物价冲击（v14）：把**本国**这种资源的目标价接管 turns 回合。
+       * 只改 target 不改 v —— v 由 settlePrices 的 lerp 一步步挪过去，
+       * 所以"旱情一起，粮价两天内涨上去"是看得见的过程，不是一夜跳价。
+       * jump=1（旱情/商队这种消息面冲击）当回合就走一半。 */
+      price: function (key, target, turns, jump) {
+        if (!D.priceNudge || !key) return;
+        D.priceNudge(owner | 0, key, target, turns || 2, jump);
+      },
+      /* 商队到访：按 ×1.3 价收本省 10 单位最富的土产（钱走攒整） */
+      caravan: function (mul) {
+        if (!D.caravan) return null;
+        return D.caravan(pid | 0, null, mul || 1.3);
       }
     };
   }
@@ -619,7 +716,7 @@
       if ((ECD[ev.key] || 0) > turn) continue;
       tg = findTarget(ev);
       if (!tg) continue;
-      pool.push({ ev: ev, tg: tg, w: ev.w || 1 });
+      pool.push({ ev: ev, tg: tg, w: Math.max(0.2, ev.w || 1) });
     }
     if (!pool.length) return null;
     var pick = weightedPick(pool, 'w');

@@ -161,6 +161,15 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         const bag = window.AO.resSim[pid];
         if (bag) for (const k in bag) { bag[k].built = 0; bag[k].tiers = { 1: 0, 2: 0 }; bag[k].site = 0; }
       }
+      /* 必须**没有战争**：tryBuild 在战时只允许盖军备类（AIWAR.warEcon.build），
+       * 民心/扫盲那些优先级全被换挡盖掉 —— 那样测出来的是"战时规则"，
+       * 不是这条断言想看的"优先级表"。世界漂移让某个大国打起来就会红，
+       * 所以这里显式停战。 */
+      const wars = window.AO.resWar.wars;
+      for (const wk in wars) {
+        const ab = wk.split('|');
+        if (+ab[0] === cid || +ab[1] === cid) delete wars[wk];
+      }
       const cen = D.ensureCentral(cid);
       for (const k in cen) cen[k] = 400;
       window.AO.resTalent[cid] = { pts: 0, pool: [], total: 0 };
@@ -345,7 +354,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     let raw = null;
     try { raw = localStorage.getItem('sj.save'); } catch (e) { return { err: 'no-storage' }; }
     const d = JSON.parse(raw);
-    const saved = d.AI && d.AI[c.id];
+    /* 存档形状：v7 第一版是扁平的 { cid: 'econ' }；完整版改成
+     * { p: { cid: 性格 }, q: { cid: 怪癖 } }。两种都认，断言只关心性格读得回来。 */
+    const saved = d.AI && (d.AI.p ? d.AI.p[c.id] : d.AI[c.id]);
     const ver = d.v;
     /* 模拟"读档前的内存被清空"：换成别的性格，再 load 回来 */
     AI.setPersona(c.id, 'econ');

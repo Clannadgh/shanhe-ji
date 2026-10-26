@@ -65,6 +65,9 @@ const COLOR_COUNT = `(cv) => {
   await smallWorld('chrono-spec-1');
   await page.evaluate(() => AO.resDebug.choosePlayer(AO.resDebug.world().countries[0].id));
 
+  /* v16：存档/读档/科技/治理/编年史 收进了 ☰ 菜单，先把菜单打开再点 */
+  await page.click('#menuBtn');
+  await sleep(150);
   await page.click('#chronoBtn');
   await sleep(700);
   const opened = await page.evaluate(() => {
@@ -110,6 +113,9 @@ const COLOR_COUNT = `(cv) => {
   ck('ESC 关闭', await page.evaluate(() => !document.getElementById('chrono').classList.contains('on')));
 
   /* ================= ② 三图快照 ================= */
+  /* v16：存档/读档/科技/治理/编年史 收进了 ☰ 菜单，先把菜单打开再点 */
+  await page.click('#menuBtn');
+  await sleep(150);
   await page.click('#chronoBtn');
   await sleep(600);
   const maps = await page.evaluate((fnSrc) => {
@@ -192,6 +198,9 @@ const COLOR_COUNT = `(cv) => {
   ck('年表内没有重复条目', dup[0] === 0, dup[1] + ' 条 / 重 ' + dup[0]);
 
   /* 年表渲染：出现「第 N 年」小节 */
+  /* v16：存档/读档/科技/治理/编年史 收进了 ☰ 菜单，先把菜单打开再点 */
+  await page.click('#menuBtn');
+  await sleep(150);
   await page.click('#chronoBtn');
   await sleep(500);
   const years = await page.evaluate(() => {

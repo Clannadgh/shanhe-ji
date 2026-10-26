@@ -7,7 +7,11 @@
  *   3) 三档税率切换：税入与幸福度压力同步变；民心悬停能看到逐项 drivers
  *   4) 缺粮 / 多类停产的省民心走低 → 收税系数下降、人口增速打折（v≤30）
  *   5) 省库金：收税 + / 俸禄 − / 卖货 + / 买货 −；中央的账不被买货污染
- *   6) 买货从中央进货成功、中央无货置灰；贪墨官的省民心明显下滑但税更高
+ *   6) 买货从**世界市场**进货成功（中央库存不动）、省库没钱置灰；
+ *      贪墨官的省民心明显下滑但税更高
+ *
+ * v18 追加三改口：买货不再从中央国库扣货（国库不是商店），
+ * 所以 5) 的"中央 −5 木材"与 6) 的"中央没货 → 置灰"两条旧断言跟着反转。
  *   7) 总览面板：只列当前国、切国刷新、ESC 关闭、开着时地图滚轮锁住
  *   8) 存档 v2 往返含官员与税率；读 v1 旧档补默认不炸
  *
@@ -210,7 +214,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const mulHigh = pop.happyMul, rateHigh = pop.rate;
 
     for (const k in bag) bag[k].halted = false;   // 复原
+    /* 人口速率只乘民心倍率（四季已删，速率上不再有季节乘数）。 */
     return { d, vAfter, target, mulLow, rateLow, mulHigh, rateHigh,
+             spm: 1,
              taxMulLow: G.happyTaxMul(20), taxMulHigh: G.happyTaxMul(85) };
   }, S);
   ck('缺粮 −15 且停产封顶 −9',
@@ -219,10 +225,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   ck('民心向目标靠拢（不跳变：60 起跑只走 30%）',
     Math.abs(happyCheck.vAfter - (60 + (happyCheck.target - 60) * 0.3)) < 0.01,
     '60 → ' + happyCheck.vAfter.toFixed(1) + '（目标 ' + happyCheck.target + '）');
-  ck('民心 ≤30：人口增速 ×0.5；≥70：×1.2',
+  ck('民心 ≤30：人口增速 ×0.5；≥70：×1.2（含倍率 ×' + happyCheck.spm + '）',
     happyCheck.mulLow === 0.5 && happyCheck.mulHigh === 1.2 &&
-    Math.abs(happyCheck.rateLow - 0.006) < 1e-9 && Math.abs(happyCheck.rateHigh - 0.0144) < 1e-9,
-    '民心20 → ' + (happyCheck.rateLow * 100).toFixed(1) + '%/回合（×' + happyCheck.mulLow +
+    Math.abs(happyCheck.rateLow - 0.006 * happyCheck.spm) < 1e-9 &&
+    Math.abs(happyCheck.rateHigh - 0.0144 * happyCheck.spm) < 1e-9,
+    '民心20 → ' + (happyCheck.rateLow * 100).toFixed(2) + '%/回合（×' + happyCheck.mulLow +
     '）· 民心85 → ' + (happyCheck.rateHigh * 100).toFixed(2) + '%/回合（×' + happyCheck.mulHigh + '）');
   ck('民心影响收税系数（20 与 85 时差 0.39）',
     Math.abs((happyCheck.taxMulHigh - happyCheck.taxMulLow) - 0.39) < 1e-9,
@@ -258,14 +265,20 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const s1 = snap();
     const F = window.AO.resFlow[pid] || {};
 
-    D.sell(pid, 'timber');                   // 卖货：−5 木材 +1 金
+    const accBefore = window.AO.resDebug.sellAcc[pid] || 0;
+    D.sell(pid, 'timber');                   // 卖货：−5 木材，金 += 本国木价（带零头）
     const s2 = snap();
+    const accAfter = window.AO.resDebug.sellAcc[pid] || 0;
     const lot = G.buyLot();
     bag.gold.stock = 40;                     // 备足钱再买
     const before = snap();
-    D.buy(pid, 'timber');                    // 买货：−8 金，中央 −5 木材，本省 +5
+    /* 买货：−基准×本国物价，本省 +5 —— v18 追加三起货从**世界市场**来，
+     * 中央库存一分不动（金也一样沉没，不进中央账） */
+    D.buy(pid, 'timber');
     const s3 = snap();
-    return { s0, s1, s2, s3, before, lot,
+    return { s0, s1, s2, s3, before, lot, accBefore, accAfter,
+             sellPi: window.AO.resDebug.sellGold(a.owner, 'timber'),
+             buyPi: window.AO.resDebug.buyGold(a.owner, 'timber'),
              popTax: F.d.popTax || 0, salary: F.d.salary || 0,
              maintGold: (F.d.maint && F.d.maint.gold) || 0,
              taxGain: F.gain.gold || 0, taxLoss: F.loss.gold || 0 };
@@ -277,18 +290,25 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     goldCheck.s1.gold === goldCheck.s0.gold + goldCheck.popTax - goldCheck.salary - goldCheck.maintGold,
     '金 ' + goldCheck.s0.gold + ' → ' + goldCheck.s1.gold + '（税 +' + goldCheck.popTax +
     ' · 俸禄 −' + goldCheck.salary + ' · 维护 −' + goldCheck.maintGold + '）');
-  ck('卖货：省库 +1 金、木材 −5',
-    goldCheck.s2.gold === goldCheck.s1.gold + 1 && goldCheck.s2.timber === goldCheck.s1.timber - 5,
-    '金 ' + goldCheck.s1.gold + '→' + goldCheck.s2.gold + '，木 ' +
+  /* v14：卖价 / 买价都跟着物价指数走，所以这里验的是**公式**而不是写死的数：
+   *   卖：落袋 + 零头变化 = 本国木价
+   *   买：省库减少 = ceil(基准 × 本国木价) */
+  ck('卖货：省库 += 本国木价、木材 −5（零头不丢）',
+    goldCheck.s2.timber === goldCheck.s1.timber - 5 &&
+    Math.abs((goldCheck.s2.gold - goldCheck.s1.gold + goldCheck.accAfter - goldCheck.accBefore) -
+      goldCheck.sellPi) < 1e-9,
+    '金 ' + goldCheck.s1.gold + '→' + goldCheck.s2.gold + '（木价 ' +
+    Math.round(goldCheck.sellPi * 100) / 100 + '），木 ' +
     goldCheck.s1.timber + '→' + goldCheck.s2.timber);
-  ck('买货：省库 −' + goldCheck.lot.gold + ' 金、本省 +' + goldCheck.lot.n + ' 木材、中央 −' + goldCheck.lot.n,
-    goldCheck.s3.gold === goldCheck.before.gold - goldCheck.lot.gold &&
+  ck('买货：省库 −' + goldCheck.buyPi + ' 金（基准 ' + goldCheck.lot.gold +
+     ' × 本国木价）、本省 +' + goldCheck.lot.n + ' 木材；货从世界市场来，中央木不动',
+    goldCheck.s3.gold === goldCheck.before.gold - goldCheck.buyPi &&
     goldCheck.s3.timber === goldCheck.before.timber + goldCheck.lot.n &&
-    goldCheck.s3.cenTimber === goldCheck.before.cenTimber - goldCheck.lot.n,
+    goldCheck.s3.cenTimber === goldCheck.before.cenTimber,
     '金 ' + goldCheck.before.gold + '→' + goldCheck.s3.gold +
     '，木 ' + goldCheck.before.timber + '→' + goldCheck.s3.timber +
     '，中央木 ' + goldCheck.before.cenTimber + '→' + goldCheck.s3.cenTimber);
-  ck('两本账不串：买货不动中央的金',
+  ck('两本账不串：买货不动中央的金（金沉没，谁都不记这笔进项）',
     goldCheck.s3.cenGold === goldCheck.before.cenGold,
     '中央金 ' + goldCheck.before.cenGold + ' → ' + goldCheck.s3.cenGold);
 
@@ -304,13 +324,25 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const btns = [...panel.querySelectorAll('button[data-buy]')];
     const anyEnabled = btns.some(b => !b.disabled);
 
-    /* 中央把盐清空 → 盐那一行必须置灰 */
+    /* v18 追加三：中央把盐清空**不该**影响按钮（国库不是商店，世界市场供给无限）。
+     * 真正会置灰的只有"省库没钱" —— 所以这里清的是省库金。 */
+    const bag = window.AO.resSim[pid];
+    const gold0 = bag.gold.stock;
     cen.salt = 0;
+    row.querySelector('.qbtn').click();      // 收起
+    row.querySelector('.qbtn').click();      // 重开（重画面板）
+    const panelCen = document.querySelector('#iSchoolList .qinfo.on');
+    const saltCenBtn = panelCen.querySelector('button[data-buy="salt"]');
+    const saltStillOn = saltCenBtn && !saltCenBtn.disabled;
+
+    bag.gold.stock = 0;
     row.querySelector('.qbtn').click();      // 收起
     row.querySelector('.qbtn').click();      // 重开（重画面板）
     const panel2 = document.querySelector('#iSchoolList .qinfo.on');
     const saltBtn = panel2.querySelector('button[data-buy="salt"]');
     const saltOff = saltBtn && saltBtn.disabled;
+    const saltTitle = saltBtn ? saltBtn.title : '';
+    bag.gold.stock = gold0;
 
     /* 贪墨官：税更高、民心更低 */
     if (window.AO.resOfficial[pid]) D.dismiss(pid);
@@ -336,12 +368,16 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     D.settleTurn();
     const plainTax = (window.AO.resFlow[pid] || {}).d.popTax || 0;
 
-    return { buyRows: btns.length, anyEnabled, saltOff, expPlain, expGreedy,
-             greedyTax, plainTax, greedyHappy };
+    return { buyRows: btns.length, anyEnabled, saltStillOn, saltOff, saltTitle,
+             expPlain, expGreedy, greedyTax, plainTax, greedyHappy };
   }, S);
-  ck('市场买货行齐全（七种），中央有货时可买', market.buyRows === 7 && market.anyEnabled,
+  ck('市场买货行齐全（七种），有钱时可买', market.buyRows === 7 && market.anyEnabled,
     market.buyRows + ' 行，可买 ' + market.anyEnabled);
-  ck('中央无货 → 该行买货钮置灰', market.saltOff === true, '盐 ' + (market.saltOff ? '已置灰' : '仍可点'));
+  ck('中央把盐清空 → 盐那行照旧可买（国库不是商店，世界市场供给无限）',
+    market.saltStillOn === true, '盐 ' + (market.saltStillOn ? '仍可点' : '被置灰'));
+  ck('省库没钱 → 该行买货钮置灰（title 说省库金不足）',
+    market.saltOff === true && /省库金不足/.test(market.saltTitle),
+    '盐 ' + (market.saltOff ? '已置灰' : '仍可点') + ' · ' + market.saltTitle);
   ck('贪墨官：税 +40%（手算对上）、民心 −10',
     market.greedyTax === market.expGreedy && market.greedyHappy === -10 &&
     market.greedyTax > market.plainTax,
@@ -377,17 +413,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   });
   ck('面板里点官员名字 = 撤换回池', uiDismiss.ok, (uiDismiss.name || '') + ' @ #' + uiDismiss.pid);
 
-  /* 切国：行数跟着变 */
-  await page.evaluate(() => document.getElementById('gpNext').click());
-  await sleep(200);
-  const panel2 = await page.evaluate(() => {
-    const w = window.__world;
-    return {
-      rows: document.querySelectorAll('#gpTable .prow:not(.head)').length,
-      provs: w.countries[1].provinces.length,
-      name: document.getElementById('gpName').textContent
-    };
-  });
+  /* 切国按钮已删（别国的面板被情报遮蔽成一张白纸，留着只会点进空屏）。
+   * 这里守一下"顶栏不再有 ◀ / 第 N 国 / ▶"，免得以后又被谁加回来。 */
+  const noSwitch = await page.evaluate(() => ({
+    prev: !!document.getElementById('gpPrev'),
+    next: !!document.getElementById('gpNext'),
+    owner: !!document.getElementById('gpOwner')
+  }));
 
   /* 滚轮锁：面板开着时地图缩放不变；关掉之后能变 */
   const wheel = await page.evaluate(async () => {
@@ -409,9 +441,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   ck('面板只列当前国（行数 = 该国省数）',
     panel1.rows === panel1.provs && panel1.open && panel1.rates === 3,
     panel1.name + '：' + panel1.rows + ' 行 / ' + panel1.provs + ' 省，税率 ' + panel1.rates + ' 档');
-  ck('切国刷新（行数随国家变）',
-    panel2.rows === panel2.provs && panel2.name !== panel1.name,
-    panel1.name + ' ' + panel1.rows + ' 行 → ' + panel2.name + ' ' + panel2.rows + ' 行');
+  ck('顶栏没有切国按钮（别国面板是空白页，不该给入口）',
+    !noSwitch.prev && !noSwitch.next && !noSwitch.owner,
+    'gpPrev ' + noSwitch.prev + ' / gpNext ' + noSwitch.next + ' / gpOwner ' + noSwitch.owner);
   ck('面板开着时地图滚轮锁住；关掉后恢复',
     wheel.s0 === wheel.s1 && !closed && wheelAfter.s0 !== wheelAfter.s1,
     '开着 ' + wheel.s0.toFixed(2) + '→' + wheel.s1.toFixed(2) +

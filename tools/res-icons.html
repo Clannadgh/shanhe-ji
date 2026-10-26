@@ -4,7 +4,10 @@
 <style>
   html, body { margin: 0; background: transparent; }
   #wrap { display: flex; gap: 8px; padding: 8px; }
-  svg { width: 96px; height: 96px; display: block; }
+  /* flex: none 是必须的：#wrap 是 flex 行，几十个 96px 图标远超 900px 视口，
+     不写 flex:none 的话浏览器会把每个 svg 横向压扁（截出来的图 20~40px 宽、
+     192px 高），裁边归一化之后整个图标是变形的。 */
+  svg { width: 96px; height: 96px; display: block; flex: none; }
 </style></head>
 <body>
 <div id="wrap">
@@ -968,22 +971,21 @@
      —— 厚了会和剑身交叉读成"两根棒"，跟铁兵器的双剑撞剪影；青绿铜锈是第二识别点） -->
 <svg id="tech-mil_bronze" viewBox="0 0 64 64" fill="none">
   <g transform="rotate(38 32 32)">
-    <!-- 宽叶剑身：中间鼓、两头收 -->
-    <path d="M32 3 C36.5 8 38 14 38 21 L38 28 L26 28 L26 21 C26 14 27.5 8 32 3 Z" fill="#c8963c"
+    <!-- 宽叶剑身：中间鼓、两头收（去掉中脊细线，剑身放宽） -->
+    <path d="M32 3 C37 8 39 14 39 21 L39 28 L25 28 L25 21 C25 14 27 8 32 3 Z" fill="#c8963c"
+          stroke="#2b3238" stroke-width="3.4" stroke-linejoin="round"/>
+    <path d="M32 3 C37 8 39 14 39 21 L39 28 L32 28 Z" fill="#e0b45c" stroke="none"/>
+    <!-- 夸张剑格：宽而厚的一条 -->
+    <path d="M18 28.5 L46 28.5 L48.5 34.5 L15.5 34.5 Z" fill="#a8792f"
           stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M32 3 C36.5 8 38 14 38 21 L38 28 L32 28 Z" fill="#e0b45c" stroke="none"/>
-    <path d="M32 9 V27" stroke="#8a6d2c" stroke-width="1.8" stroke-linecap="round"/>
-    <!-- 夸张剑格：宽而薄的一条 -->
-    <path d="M19 28.5 L45 28.5 L47 33 L17 33 Z" fill="#a8792f"
-          stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
     <!-- 柄 + 首锤 -->
-    <path d="M29.4 33 L34.6 33 L34.6 45 L29.4 45 Z" fill="#8a5a30"
-          stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-    <circle cx="32" cy="49.5" r="4.6" fill="#d1a15a" stroke="#2b3238" stroke-width="2.6"/>
-    <!-- 铜锈：青绿斑，跟着剑身转 -->
-    <g fill="#7fae9c" opacity=".9">
-      <path d="M29 12 C31.5 10.5 34.5 12 33.5 14.5 C31.5 16.5 28 14.5 29 12 Z"/>
-      <path d="M34 21.5 C36.5 20.5 38.5 22.5 37 24.5 C35 25.5 33 23.5 34 21.5 Z"/>
+    <path d="M29 34.5 L35 34.5 L35 45 L29 45 Z" fill="#8a5a30"
+          stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+    <circle cx="32" cy="50" r="5" fill="#d1a15a" stroke="#2b3238" stroke-width="2.8"/>
+    <!-- 铜锈：两块大青绿斑，跟着剑身转 -->
+    <g fill="#7fae9c" opacity=".92">
+      <path d="M28.5 11 C32 8.5 36.5 10.5 35.5 14.5 C33 17.5 27 14.5 28.5 11 Z"/>
+      <path d="M33.5 20.5 C37 19 39.5 21.5 38 24.5 C35.5 26 32.5 23.5 33.5 20.5 Z"/>
     </g>
   </g>
 </svg>
@@ -993,74 +995,72 @@
 <svg id="tech-mil_iron" viewBox="0 0 64 64" fill="none">
   <!-- 后剑：压暗 -->
   <g transform="rotate(-44 32 33)">
-    <path d="M32 6 L36 12 L36 28 L28 28 L28 12 Z" fill="#aab6c2"
+    <path d="M32 6 L37.5 13 L37.5 28 L26.5 28 L26.5 13 Z" fill="#aab6c2"
+          stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M18.5 29 L45.5 29 L48 34.5 L16 34.5 Z" fill="#6d7883"
+          stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M29.4 34 L34.6 34 L34.6 44 L29.4 44 Z" fill="#8a5a30"
           stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-    <path d="M19 29 L45 29 L47 33.5 L32 35.5 L17 33.5 Z" fill="#6d7883"
-          stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-    <path d="M29.8 34 L34.2 34 L34.2 44 L29.8 44 Z" fill="#8a5a30"
-          stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
-    <circle cx="32" cy="47.6" r="3.6" fill="#5b6b7a" stroke="#2b3238" stroke-width="2.2"/>
+    <circle cx="32" cy="47.8" r="4" fill="#5b6b7a" stroke="#2b3238" stroke-width="2.4"/>
   </g>
-  <!-- 前剑：亮银 -->
+  <!-- 前剑：亮银（剑身放宽，剪影是两条厚刃不是四根棍） -->
   <g transform="rotate(44 32 33)">
-    <path d="M32 6 L36 12 L36 28 L28 28 L28 12 Z" fill="#c9d3dc"
-          stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M32 6 L36 12 L36 28 L32 28 Z" fill="#e2e8ed" stroke="none"/>
-    <path d="M19 29 L45 29 L47 33.5 L32 35.5 L17 33.5 Z" fill="#5b6b7a"
-          stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M29.8 34 L34.2 34 L34.2 44 L29.8 44 Z" fill="#8a5a30"
-          stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-    <circle cx="32" cy="47.6" r="3.8" fill="#6d7883" stroke="#2b3238" stroke-width="2.6"/>
+    <path d="M32 6 L37.5 13 L37.5 28 L26.5 28 L26.5 13 Z" fill="#c9d3dc"
+          stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+    <path d="M32 6 L37.5 13 L37.5 28 L32 28 Z" fill="#e2e8ed" stroke="none"/>
+    <path d="M18.5 29 L45.5 29 L48 34.5 L16 34.5 Z" fill="#5b6b7a"
+          stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+    <path d="M29.4 34 L34.6 34 L34.6 44 L29.4 44 Z" fill="#8a5a30"
+          stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+    <circle cx="32" cy="47.8" r="4.2" fill="#6d7883" stroke="#2b3238" stroke-width="2.6"/>
   </g>
 </svg>
 
 <!-- tech-mil_crossbow: 强弩·具装（十字弩侧视：竖弓 + 弦扣箭尾 + 搭在托上的箭。
-     横平竖直的"工"字剪影，和前后两张剑完全不同族） -->
+     横平竖直的"工"字剪影，和前后两张剑完全不同族。
+     武器天生细长，墨线按家法加粗半档、砍掉悬刀这类小件，20px 下才不发糊） -->
 <svg id="tech-mil_crossbow" viewBox="0 0 64 64" fill="none">
   <!-- 弩托 -->
   <path d="M4 29 L44 29 L47 36 L4 36 Z" fill="#a9743f"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="3.4" stroke-linejoin="round"/>
   <!-- 弩臂：前端的竖弓（墨线打底 + 钢色芯） -->
-  <path d="M40 13 C54 24 54 41 40 52" stroke="#2b3238" stroke-width="6.2"
+  <path d="M40 13 C54 24 54 41 40 52" stroke="#2b3238" stroke-width="6.8"
         stroke-linecap="round" fill="none"/>
-  <path d="M40 13 C54 24 54 41 40 52" stroke="#8d99a6" stroke-width="3"
+  <path d="M40 13 C54 24 54 41 40 52" stroke="#8d99a6" stroke-width="3.4"
         stroke-linecap="round" fill="none"/>
   <!-- 弦：两端扣到箭尾 -->
-  <path d="M40 14 L28 32.5 L40 51" stroke="#2b3238" stroke-width="1.8"
-        stroke-linecap="round" fill="none" opacity=".8"/>
+  <path d="M40 14 L28 32.5 L40 51" stroke="#2b3238" stroke-width="2.4"
+        stroke-linecap="round" fill="none"/>
   <!-- 弩机 nut：黄铜小圆 -->
-  <circle cx="28" cy="32.5" r="2.6" fill="#d1a15a" stroke="#2b3238" stroke-width="2"/>
+  <circle cx="28" cy="32.5" r="3" fill="#d1a15a" stroke="#2b3238" stroke-width="2.4"/>
   <!-- 箭：托上一支，钢镞探出弓臂外 -->
-  <path d="M12 32.5 H57" stroke="#2b3238" stroke-width="4.4" stroke-linecap="round"/>
-  <path d="M12 32.5 H57" stroke="#e6c795" stroke-width="1.8" stroke-linecap="round"/>
-  <path d="M51 28.5 L58.5 32.5 L51 36.5 Z" fill="#98a4b1"
-        stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M12 32.5 H57" stroke="#2b3238" stroke-width="5" stroke-linecap="round"/>
+  <path d="M12 32.5 H57" stroke="#e6c795" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M51 28 L58.5 32.5 L51 37 Z" fill="#98a4b1"
+        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
   <path d="M15 32.5 L9 28.5 L11.5 32.5 L9 36.5 Z" fill="#f6f2e8"
-        stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
-  <!-- 悬刀（扳机） -->
-  <path d="M13 36 V41 H16.5" stroke="#2b3238" stroke-width="2.2"
-        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
 </svg>
 
 <!-- tech-mil_matchlock: 火门枪（粗短钢管 + 蛇形杆 + 枪口一点橙光。
      "短而肥 + S 形压杆"是它和后面所有长枪的分界） -->
 <svg id="tech-mil_matchlock" viewBox="0 0 64 64" fill="none">
   <!-- 木柄：斜向下撇 -->
-  <path d="M13 34 L3 52" stroke="#2b3238" stroke-width="8" stroke-linecap="round"/>
-  <path d="M13 34 L3 52" stroke="#a9743f" stroke-width="3.6" stroke-linecap="round"/>
-  <!-- 粗短钢管：尾端堵一块深色 -->
-  <path d="M10 24 H47 V34 H10 Z" fill="#4b565f"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M10 24 H15.5 V34 H10.5 Z" fill="#3c4753" stroke="none"/>
-  <path d="M21 24 V34 M33 24 V34" stroke="#2b3238" stroke-width="2.2"/>
+  <path d="M13 33 L3 52" stroke="#2b3238" stroke-width="9" stroke-linecap="round"/>
+  <path d="M13 33 L3 52" stroke="#a9743f" stroke-width="4" stroke-linecap="round"/>
+  <!-- 粗短钢管：尾端堵一块深色（矮胖是辨识点，管箍只留一道） -->
+  <path d="M10 22 H47 V36 H10 Z" fill="#4b565f"
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M10 22 H16 V36 H10 Z" fill="#3c4753" stroke="none"/>
+  <path d="M28 22 V36" stroke="#2b3238" stroke-width="2.6"/>
   <!-- 蛇形杆：S 形压杆，头上一小截燃着的火绳 -->
-  <path d="M24 24 C23 17 31 14 34 18 C36 21 34 23.5 31.5 23.5"
-        fill="none" stroke="#2b3238" stroke-width="2.8" stroke-linecap="round"/>
-  <circle cx="35" cy="17.5" r="1.8" fill="#b5503f"/>
+  <path d="M22 22 C21 15 30 12 33 16 C35 19 33 21.5 30.5 21.5"
+        fill="none" stroke="#2b3238" stroke-width="3.2" stroke-linecap="round"/>
+  <circle cx="34" cy="15.5" r="2.2" fill="#b5503f"/>
   <!-- 枪口一点橙光：四角星芒 -->
-  <path d="M52 21 L55 27 L61 29 L55 31 L52 37 L49 31 L43 29 L49 27 Z" fill="#f0a04b"
-        stroke="#2b3238" stroke-width="1.8" stroke-linejoin="round"/>
-  <circle cx="52" cy="29" r="1.7" fill="#e9c063"/>
+  <path d="M52 20 L55 26.5 L61.5 29 L55 31.5 L52 38 L49 31.5 L42.5 29 L49 26.5 Z" fill="#f0a04b"
+        stroke="#2b3238" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="52" cy="29" r="2.2" fill="#e9c063"/>
 </svg>
 
 <!-- tech-mil_musket: 火绳枪（细长枪管 + 弯托 + 垂下的火绳卷。
@@ -1068,21 +1068,19 @@
 <svg id="tech-mil_musket" viewBox="0 0 64 64" fill="none">
   <!-- 弯托 -->
   <path d="M17 24 C10 26 5 35 3 47 L11 49 C13 39 17 33 23 28 Z" fill="#a9743f"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <!-- 细长枪管 + 机匣 -->
-  <path d="M19 22.5 H60 V27 H19 Z" fill="#6d7883"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <path d="M15 22 H25 V31 H15 Z" fill="#5b6b7a"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <path d="M22 30 H56" stroke="#2b3238" stroke-width="1.8" stroke-linecap="round" opacity=".6"/>
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <!-- 细长枪管 + 机匣（细但加厚到 6，32px 下仍是一条实线） -->
+  <path d="M19 22 H60 V28 H19 Z" fill="#6d7883"
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <path d="M15 21 H25 V31 H15 Z" fill="#5b6b7a"
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
   <!-- 垂下的火绳：从枪机挂下来一圈卷 + 垂尾燃头 -->
   <path d="M17 31 C16 35 18 38 21 40" fill="none" stroke="#c9a273"
-        stroke-width="2.4" stroke-linecap="round"/>
-  <circle cx="24" cy="44.5" r="4.8" fill="#e6c795" stroke="#2b3238" stroke-width="2.4"/>
-  <path d="M21.5 44.5 Q24 42 26.5 44.5" fill="none" stroke="#c9a273" stroke-width="1.8"/>
-  <path d="M26 49 C27.5 52 25.5 55 27.5 58" fill="none" stroke="#c9a273"
-        stroke-width="2.4" stroke-linecap="round"/>
-  <circle cx="27.5" cy="59" r="1.5" fill="#b5503f"/>
+        stroke-width="2.8" stroke-linecap="round"/>
+  <circle cx="24" cy="45" r="5.4" fill="#e6c795" stroke="#2b3238" stroke-width="2.8"/>
+  <path d="M26 50 C27.5 53 25.5 55.5 27.5 58" fill="none" stroke="#c9a273"
+        stroke-width="2.8" stroke-linecap="round"/>
+  <circle cx="27.5" cy="59.5" r="1.8" fill="#b5503f"/>
 </svg>
 
 <!-- tech-mil_flintlock: 燧发枪（击锤燧石特写 + 上前刺刀。
@@ -1090,43 +1088,40 @@
 <svg id="tech-mil_flintlock" viewBox="0 0 64 64" fill="none">
   <!-- 枪托（比火绳枪短一截） -->
   <path d="M18 26 C12 28 7 36 5 46 L12 48 C14 39 18 33 24 30 Z" fill="#a9743f"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
   <path d="M16 24 H26 V33 H16 Z" fill="#5b6b7a"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <path d="M24 23.5 H50 V28 H24 Z" fill="#6d7883"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <!-- 击锤（鹅颈）+ 夹着的燧石：画清楚但别压过枪形 -->
-  <path d="M29 24 C29 16.5 37.5 13.5 41.5 17 L39.5 20" fill="none"
-        stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
-  <path d="M42 16 L47 13.5 L49 17.5 L44 20 Z" fill="#3c4753"
-        stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
-  <!-- 火镰 -->
-  <path d="M35 24 L41 24 L39.5 30 L34 30 Z" fill="#8d99a6"
-        stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
-  <!-- 前刺刀：从枪口斜上挑出 -->
-  <path d="M50 25 L58.5 7.5 L61.5 10.5 L54 26.5 Z" fill="#c9d3dc"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <path d="M24 23 H50 V29 H24 Z" fill="#6d7883"
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <!-- 击锤（鹅颈）+ 夹着的燧石：粗一笔勾出，是辨识点 -->
+  <path d="M29 24 C29 16 38 13 41.5 17" fill="none"
+        stroke="#2b3238" stroke-width="3.6" stroke-linecap="round"/>
+  <path d="M40.5 14.5 L47 12 L49 17.5 L42.5 20 Z" fill="#3c4753"
+        stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
+  <!-- 前刺刀：从枪口斜上挑出（砍掉火镰小件，刺刀才是钩子） -->
+  <path d="M49 26 L58 6.5 L61.5 9.5 L53.5 27.5 Z" fill="#c9d3dc"
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
 </svg>
 
 <!-- tech-mil_percussion: 击发枪（枪尾火帽 + 一枚米涅弹。
      左边那枚大铅锥是全套火器里唯一的"弹头特写"） -->
 <svg id="tech-mil_percussion" viewBox="0 0 64 64" fill="none">
-  <!-- 枪尾特写：机匣 + 枪管往右伸出画面 -->
-  <path d="M28 21 H62 V30 H28 Z" fill="#6d7883"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M28 21 H34 V30 H28 Z" fill="#5b6b7a" stroke="none"/>
-  <!-- 击锤：张开罩着火帽 -->
-  <path d="M37 21 C36 12 47 11 47 18" fill="none"
-        stroke="#2b3238" stroke-width="3.2" stroke-linecap="round"/>
-  <!-- 火帽：机匣顶上一小粒黄铜 -->
-  <path d="M40.5 21 H44.5 L44 17.5 H41 Z" fill="#d1a15a"
-        stroke="#2b3238" stroke-width="2" stroke-linejoin="round"/>
-  <!-- 米涅弹：铅灰锥头 + 两条油沟 + 底缘 -->
-  <path d="M13 24 L20 54 H6 Z" fill="#98a4b1"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M8.6 43 H17.4 M7.4 48 H18.6" stroke="#7c8895" stroke-width="2" stroke-linecap="round"/>
-  <path d="M6 54 H20 V58 H6 Z" fill="#8d99a6"
-        stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
+  <!-- 枪尾特写：机匣加厚 + 枪管往右伸出画面 -->
+  <path d="M28 20 H62 V32 H28 Z" fill="#6d7883"
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M28 20 H35 V32 H28 Z" fill="#5b6b7a" stroke="none"/>
+  <!-- 击锤：粗一笔张开罩着火帽 -->
+  <path d="M37 20 C36 10.5 48 9.5 48 17.5" fill="none"
+        stroke="#2b3238" stroke-width="3.8" stroke-linecap="round"/>
+  <!-- 火帽：机匣顶上一粒黄铜 -->
+  <path d="M40 20 H45 L44 15.5 H41 Z" fill="#d1a15a"
+        stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
+  <!-- 米涅弹：铅灰锥头 + 一道油沟 + 底缘（弹体放大） -->
+  <path d="M12 22 L20.5 55 H3.5 Z" fill="#98a4b1"
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M6.8 47 H17.2" stroke="#7c8895" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M3.5 55 H20.5 V59.5 H3.5 Z" fill="#8d99a6"
+        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
 </svg>
 
 <!-- tech-mil_breech: 后膛定装（闭锁器拉开 + 黄铜弹壳。
@@ -1134,53 +1129,45 @@
 <svg id="tech-mil_breech" viewBox="0 0 64 64" fill="none">
   <!-- 机匣 -->
   <path d="M22 20 H56 V33 H22 Z" fill="#5b6b7a"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <!-- 拉开的闭锁块 + 侧柄球 -->
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <!-- 拉开的闭锁块（连着柄球一体，省掉细柄杆） -->
   <path d="M22 8 H38 V18 H22 Z" fill="#6d7883"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <path d="M38 13 H43" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="45.5" cy="13" r="3" fill="#4b565f" stroke="#2b3238" stroke-width="2.2"/>
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <circle cx="44" cy="13" r="4" fill="#4b565f" stroke="#2b3238" stroke-width="2.6"/>
   <!-- 开着的膛口：一道黑 -->
   <path d="M24 21 H38 V32 H24 Z" fill="#2b3238"/>
   <!-- 枪管往右 -->
   <path d="M40 23 H62 V30 H40 Z" fill="#6d7883"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <!-- 黄铜弹壳：立着贴住机匣，露铅头 -->
-  <path d="M15 20 L19.5 34 H10.5 Z" fill="#98a4b1"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <path d="M11 34 L19 34 L17.4 50 H12.6 Z" fill="#e9c063"
         stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
-  <path d="M11.4 50 H18.6 V54 H11.4 Z" fill="#d1a15a"
-        stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
+  <!-- 黄铜弹壳：立着贴住机匣，露铅头（整枚放大一号） -->
+  <path d="M15 17 L20.5 34 H9.5 Z" fill="#98a4b1"
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <path d="M10 34 L20 34 L18.2 52 H11.8 Z" fill="#e9c063"
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M10.4 52 H19.6 V57 H10.4 Z" fill="#d1a15a"
+        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
 </svg>
 
 <!-- tech-mil_gw: 一战军械（栓动步枪 + 五连弹排。
      下面那一排五个尖头是唯一的"弹排"剪影） -->
 <svg id="tech-mil_gw" viewBox="0 0 64 64" fill="none">
-  <!-- 栓动步枪：直托 + 短机匣 + 栓柄球 -->
+  <!-- 栓动步枪：直托 + 短机匣 + 栓柄球（砍掉表尺小件，枪管加厚） -->
   <path d="M23 21 C15 23 9 31 5 42 L12 44 C15 35 20 28 26 27 Z" fill="#a9743f"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
   <path d="M21 20 H32 V31 H21 Z" fill="#5b6b7a"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <path d="M30 22 H62 V26.5 H30 Z" fill="#4b565f"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
-  <path d="M34 20 H38 V17 H34 Z" fill="#4b565f"
-        stroke="#2b3238" stroke-width="2" stroke-linejoin="round"/>
-  <path d="M25 31 L23.5 36" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="23" cy="37.5" r="2.8" fill="#4b565f" stroke="#2b3238" stroke-width="2.2"/>
-  <!-- 五连弹排：桥夹 + 五发（锥头铅色 / 弹壳黄铜） -->
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <path d="M30 22 H62 V27.5 H30 Z" fill="#4b565f"
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <circle cx="23" cy="35.5" r="3.6" fill="#4b565f" stroke="#2b3238" stroke-width="2.6"/>
+  <!-- 三连弹排（五发在 20px 下必成泥，三发粗大才是"弹排"的读法） -->
   <g stroke="#2b3238" stroke-linejoin="round">
-    <g fill="#98a4b1" stroke-width="2">
-      <path d="M10 37 L12.4 43 H7.6 Z"/><path d="M17 37 L19.4 43 H14.6 Z"/>
-      <path d="M24 37 L26.4 43 H21.6 Z"/><path d="M31 37 L33.4 43 H28.6 Z"/>
-      <path d="M38 37 L40.4 43 H35.6 Z"/>
+    <g fill="#98a4b1" stroke-width="2.4">
+      <path d="M12 36 L15.5 44 H8.5 Z"/><path d="M24 36 L27.5 44 H20.5 Z"/><path d="M36 36 L39.5 44 H32.5 Z"/>
     </g>
-    <g fill="#d1a15a" stroke-width="2.2">
-      <path d="M8.1 43 H11.9 V53 H8.1 Z"/><path d="M15.1 43 H18.9 V53 H15.1 Z"/>
-      <path d="M22.1 43 H25.9 V53 H22.1 Z"/><path d="M29.1 43 H32.9 V53 H29.1 Z"/>
-      <path d="M36.1 43 H39.9 V53 H36.1 Z"/>
+    <g fill="#d1a15a" stroke-width="2.6">
+      <path d="M9.6 44 H14.4 V54 H9.6 Z"/><path d="M21.6 44 H26.4 V54 H21.6 Z"/><path d="M33.6 44 H38.4 V54 H33.6 Z"/>
     </g>
-    <path d="M6 53 H42 V57 H6 Z" fill="#5b6b7a" stroke-width="2.4"/>
+    <path d="M6 54 H42 V58 H6 Z" fill="#5b6b7a" stroke-width="2.6"/>
   </g>
 </svg>
 
@@ -1199,31 +1186,29 @@
   <path d="M7 45 H23 V57 H7 Z" fill="#8a5a30"
         stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
   <path d="M7 45 L23 57 M23 45 L7 57" stroke="#6b4522" stroke-width="2"/>
-  <!-- 梢头石块 + 两根兜绳 -->
-  <path d="M51 11 L47.5 5.5 M51 11 L58.5 8" stroke="#2b3238" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="54" cy="8.5" r="4.2" fill="#98a4b1" stroke="#2b3238" stroke-width="2.6"/>
+  <!-- 梢头石块：直接坐在臂梢（兜绳太细，20px 下成泥） -->
+  <circle cx="53" cy="9" r="5.4" fill="#98a4b1" stroke="#2b3238" stroke-width="2.8"/>
   <!-- 地面 -->
-  <path d="M6 57 H48" stroke="#2b3238" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M6 57 H48" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
 </svg>
 
 <!-- tech-mil_bronze_gun: 青铜炮（短粗臼炮斜口朝天 + 木床 + 一只小木轮。
      铸炮枝共用一条规则：管口一律朝右上，一代比一代细长/厚重，靠"管形 + 架形"分代） -->
 <svg id="tech-mil_bronze_gun" viewBox="0 0 64 64" fill="none">
-  <!-- 炮管：斜置四方管，口朝右上 -->
+  <!-- 炮管：斜置四方管，口朝右上（管箍只留一道） -->
   <path d="M40.5 26.3 L51.5 17.7 L31.5 52.3 L20.5 43.7 Z" fill="#a8893c"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M35.6 24 L46.6 32.6 M29.5 31.9 L40.5 40.5" stroke="#8a6d2c" stroke-width="3"/>
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M35.6 24 L46.6 32.6" stroke="#8a6d2c" stroke-width="3.4"/>
   <!-- 膛口 + 尾球 -->
-  <circle cx="46" cy="22" r="3.2" fill="#2b3238"/>
-  <circle cx="26" cy="48" r="2.4" fill="#8a6d2c" stroke="#2b3238" stroke-width="2.2"/>
+  <circle cx="46" cy="22" r="3.4" fill="#2b3238"/>
+  <circle cx="26" cy="48" r="2.8" fill="#8a6d2c" stroke="#2b3238" stroke-width="2.4"/>
   <!-- 木床：斜楔 -->
   <path d="M8 44 H38 L31 56 H13 Z" fill="#8a5a30"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
-  <path d="M13 44 L31 56" stroke="#6b4522" stroke-width="2"/>
-  <!-- 小木轮 -->
-  <circle cx="45" cy="47" r="7" fill="#c99e6d" stroke="#2b3238" stroke-width="2.8"/>
-  <path d="M45 40 V54 M38 47 H52 M40 42 L50 52 M50 42 L40 52" stroke="#8a5a30" stroke-width="2.2"/>
-  <circle cx="45" cy="47" r="2.4" fill="#8a5a30" stroke="#2b3238" stroke-width="2"/>
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <!-- 小木轮：十字辐 -->
+  <circle cx="45" cy="47" r="7" fill="#c99e6d" stroke="#2b3238" stroke-width="3"/>
+  <path d="M45 40 V54 M38 47 H52" stroke="#8a5a30" stroke-width="2.6"/>
+  <circle cx="45" cy="47" r="2.8" fill="#8a5a30" stroke="#2b3238" stroke-width="2.2"/>
 </svg>
 
 <!-- tech-mil_field_gun: 野战炮（细长炮管口朝右上 + 大辐条轮压在管中段 + 尾架从炮尾拖向左下
@@ -1236,13 +1221,13 @@
     <path d="M6 26 H12 V32 H6 Z" fill="#5b6b7a" stroke="none"/>
     <path d="M50 26 V32 M55 26 V32" stroke="#2b3238" stroke-width="2"/>
   </g>
+  <!-- 大轮：只留十字辐条（斜辐 20px 下成泥） -->
+  <circle cx="20" cy="45" r="10.5" fill="#d9b483" stroke="#2b3238" stroke-width="3.2"/>
+  <path d="M20 35 V55 M10 45 H30" stroke="#8a5a30" stroke-width="2.8"/>
+  <circle cx="20" cy="45" r="3.4" fill="#8a5a30" stroke="#2b3238" stroke-width="2.4"/>
   <!-- 尾架：从炮尾拖向左下，和大轮错开 -->
-  <path d="M12 35 L3 54" stroke="#2b3238" stroke-width="6.4" stroke-linecap="round"/>
-  <path d="M12 35 L3 54" stroke="#a9743f" stroke-width="2.8" stroke-linecap="round"/>
-  <!-- 大轮 -->
-  <circle cx="28" cy="45" r="10.5" fill="#d9b483" stroke="#2b3238" stroke-width="3"/>
-  <path d="M28 35 V55 M18 45 H38 M21 38 L35 52 M35 38 L21 52" stroke="#8a5a30" stroke-width="2.4"/>
-  <circle cx="28" cy="45" r="3" fill="#8a5a30" stroke="#2b3238" stroke-width="2.2"/>
+  <path d="M12 35 L3 54" stroke="#2b3238" stroke-width="6.8" stroke-linecap="round"/>
+  <path d="M12 35 L3 54" stroke="#a9743f" stroke-width="3.2" stroke-linecap="round"/>
 </svg>
 
 <!-- tech-mil_heavy_gun: 重炮（大口径厚管 + 管口加强帽 + 一排铆钉。
@@ -1259,45 +1244,43 @@
   <!-- 尾闩块 -->
   <path d="M4 17.5 H9 V42.5 H4 Z" fill="#3c4753"
         stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
-  <!-- 铆钉：管面一排 + 帽上两颗 -->
-  <g fill="#c9d3dc" stroke="#2b3238" stroke-width="1.4">
-    <circle cx="14" cy="23.5" r="1.7"/><circle cx="22" cy="23.5" r="1.7"/>
-    <circle cx="30" cy="23.5" r="1.7"/><circle cx="38" cy="23.5" r="1.7"/>
-    <circle cx="51" cy="20" r="1.7"/><circle cx="55" cy="20" r="1.7"/>
+  <!-- 铆钉：管面一排 + 帽上两颗（本图辨识点，放粗） -->
+  <g fill="#c9d3dc" stroke="#2b3238" stroke-width="1.8">
+    <circle cx="14" cy="23.5" r="2.1"/><circle cx="22" cy="23.5" r="2.1"/>
+    <circle cx="30" cy="23.5" r="2.1"/><circle cx="38" cy="23.5" r="2.1"/>
+    <circle cx="51" cy="20" r="2.1"/><circle cx="55" cy="20" r="2.1"/>
   </g>
-  <!-- 炮架 + 钢轮 + 尾架（尾架拖向左下，和朝右的炮口反向） -->
+  <!-- 炮架 + 钢轮（十字辐） + 尾架（拖向左下，与炮口反向） -->
   <path d="M6 40 H30 V48 H6 Z" fill="#5b6b7a"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
-  <circle cx="38" cy="48" r="8" fill="#6d7883" stroke="#2b3238" stroke-width="2.8"/>
-  <path d="M38 41 V55 M31 48 H45 M33.5 43.5 L42.5 52.5 M42.5 43.5 L33.5 52.5"
-        stroke="#4b565f" stroke-width="2.2"/>
-  <circle cx="38" cy="48" r="2.6" fill="#4b565f" stroke="#2b3238" stroke-width="2"/>
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="38" cy="48" r="8" fill="#6d7883" stroke="#2b3238" stroke-width="3"/>
+  <path d="M38 41 V55 M31 48 H45" stroke="#4b565f" stroke-width="2.6"/>
+  <circle cx="38" cy="48" r="2.8" fill="#4b565f" stroke="#2b3238" stroke-width="2.2"/>
   <path d="M10 47 L2 58" stroke="#2b3238" stroke-width="5.6" stroke-linecap="round"/>
   <path d="M10 47 L2 58" stroke="#5b6b7a" stroke-width="2.4" stroke-linecap="round"/>
 </svg>
 
 <!-- ============ 舰种四张：侧视剪影，共用水线，逐级加层 ============ -->
 
-<!-- tech-mil_galley: 桨帆船（低舷 + 一排斜桨 + 三角帆。四个舰种里唯一的桨） -->
+<!-- tech-mil_galley: 桨帆船（低舷 + 一排斜桨 + 三角帆。四个舰种里唯一的桨；
+     桨三支粗、无甲板饰线 —— 20px 下每一笔都要数得过来） -->
 <svg id="tech-mil_galley" viewBox="0 0 64 64" fill="none">
   <!-- 一排桨：先画，压在船壳后 -->
-  <g stroke="#8a5a30" stroke-width="2.6" stroke-linecap="round">
-    <path d="M16 40 L9 55"/><path d="M26 40 L21 56"/>
-    <path d="M36 40 L33 57"/><path d="M46 40 L45 57"/>
+  <g stroke="#8a5a30" stroke-width="3.2" stroke-linecap="round">
+    <path d="M18 40 L11 56"/><path d="M31 40 L28 57"/><path d="M44 40 L44 57"/>
   </g>
   <!-- 低舷船壳 -->
   <path d="M5 35 L59 33 L52 46 L9 46 Z" fill="#c9a273"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M7 38 H57" stroke="#a9743f" stroke-width="2.2"/>
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
   <!-- 桅 + 三角帆（斜桁大三角） -->
-  <path d="M33 34 V9" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
+  <path d="M33 34 V9" stroke="#2b3238" stroke-width="3.4" stroke-linecap="round"/>
   <path d="M31 11 L53 33 L31 33 Z" fill="#f6f2e8"
-        stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
   <path d="M33 9 L41 11.5 L33 14 Z" fill="#b5503f"
-        stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
   <!-- 水线 -->
   <path d="M1 52 C11 48 21 56 31 52 C41 48 51 56 61 52 L62 59 L2 59 Z"
-        fill="#9fc6cf" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+        fill="#9fc6cf" stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
 </svg>
 
 <!-- tech-mil_galleon: 盖伦帆船（双桅 + 左侧高艉楼两层 + 右侧艏楼） -->
@@ -1306,17 +1289,13 @@
   <path d="M4 36 H60 L54 50 L9 50 Z" fill="#a9743f"
         stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
   <path d="M6 42 H58" stroke="#8a5a30" stroke-width="2.2"/>
-  <!-- 艉楼两层（左）+ 艏楼（右） -->
+  <!-- 艉楼两层（左）+ 艏楼（右）：小窗砍掉，20px 下是噪点 -->
   <path d="M4 29 H20 V36 H4 Z" fill="#c08a58"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
   <path d="M4 21 H13 V29 H4 Z" fill="#c08a58"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
   <path d="M50 30 H60 V36 H50 Z" fill="#c08a58"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
-  <g fill="#3a4450">
-    <rect x="7" y="23.5" width="3" height="3"/><rect x="7" y="31.5" width="3" height="3"/>
-    <rect x="13" y="31.5" width="3" height="3"/><rect x="53" y="32" width="3" height="3"/>
-  </g>
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
   <!-- 双桅双方帆 -->
   <path d="M28 36 V8" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
   <path d="M45 36 V12" stroke="#2b3238" stroke-width="2.8" stroke-linecap="round"/>
@@ -1333,60 +1312,353 @@
         fill="#9fc6cf" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
 </svg>
 
-<!-- tech-mil_ship74: 风帆战列（三桅 + 舷侧一排炮窗。层数最多的一张） -->
+<!-- tech-mil_ship74: 风帆战列（三桅 + 舷侧一排炮窗。每桅一张大帆——
+     上帆砍掉，六张帆的边线在 20px 下全糊成一片） -->
 <svg id="tech-mil_ship74" viewBox="0 0 64 64" fill="none">
   <!-- 船壳 + 上缘奶油条 -->
   <path d="M2 38 H62 L55 51 H8 Z" fill="#8a5a30"
-        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M4 42.5 H60" stroke="#d9b483" stroke-width="2"/>
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M4 42.5 H60" stroke="#d9b483" stroke-width="2.4"/>
   <!-- 一排炮窗 -->
   <g fill="#2b3238">
     <rect x="11" y="43.4" width="3.6" height="4.6"/><rect x="18.5" y="43.4" width="3.6" height="4.6"/>
     <rect x="26" y="43.4" width="3.6" height="4.6"/><rect x="33.5" y="43.4" width="3.6" height="4.6"/>
     <rect x="41" y="43.4" width="3.6" height="4.6"/><rect x="48.5" y="43.4" width="3.6" height="4.6"/>
   </g>
-  <!-- 三桅，各两张方帆 -->
-  <path d="M16 38 V10 M32 38 V6 M48 38 V11" stroke="#2b3238" stroke-width="2.8" stroke-linecap="round"/>
-  <g fill="#f6f2e8" stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round">
-    <path d="M10 12 H22 V21 Q16 23.5 10 21 Z"/>
-    <path d="M10 25 H22 V35 Q16 37.5 10 35 Z"/>
-    <path d="M25 8 H39 V18 Q32 21 25 18 Z"/>
-    <path d="M24.5 22 H39.5 V34 Q32 36.5 24.5 34 Z"/>
-    <path d="M42 12 H54 V21 Q48 23.5 42 21 Z"/>
-    <path d="M42 25 H54 V35 Q48 37 42 35 Z"/>
+  <!-- 三桅三张大方帆 -->
+  <path d="M16 38 V8 M32 38 V5 M48 38 V9" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
+  <g fill="#f6f2e8" stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round">
+    <path d="M9 10 H23 L23 33 Q16 36.5 9 33 Z"/>
+    <path d="M24.5 7 H39.5 L39.5 34 Q32 37.5 24.5 34 Z"/>
+    <path d="M41 11 H55 L55 34 Q48 37 41 34 Z"/>
   </g>
-  <path d="M32 6 L39 8 L32 10 Z" fill="#b5503f"
-        stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M32 5 L39 7 L32 9 Z" fill="#b5503f"
+        stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
   <!-- 水线 -->
   <path d="M1 52 C11 48 21 56 31 52 C41 48 51 56 61 52 L62 59 L2 59 Z"
-        fill="#9fc6cf" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+        fill="#9fc6cf" stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
 </svg>
 
 <!-- tech-mil_ironclad: 铁甲舰（低干舷长条 + 中央炮塔双管 + 烟囱冒烟。
      四张里唯一没有帆的：灰板 + 烟就是年代） -->
 <svg id="tech-mil_ironclad" viewBox="0 0 64 64" fill="none">
-  <!-- 低干舷船体 -->
-  <path d="M2 42 H62 L56 51 H7 Z" fill="#6d7883"
+  <!-- 低干舷船体（加厚一档，甲板细线砍掉） -->
+  <path d="M2 41 H62 L55.5 51.5 H6.5 Z" fill="#6d7883"
+        stroke="#2b3238" stroke-width="3.2" stroke-linejoin="round"/>
+  <!-- 炮塔：鼓形，双炮管朝左（粗双管） -->
+  <path d="M25 41 V34 A7.5 6 0 0 1 40 34 V41 Z" fill="#8d99a6"
         stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M4 45.5 H60" stroke="#8d99a6" stroke-width="2"/>
-  <!-- 炮塔：鼓形，双炮管朝左 -->
-  <path d="M24 42 V35 A8 6.5 0 0 1 40 35 V42 Z" fill="#8d99a6"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
-  <path d="M9 35.5 H25 M9 39 H25" stroke="#2b3238" stroke-width="4.4" stroke-linecap="round"/>
-  <path d="M9 35.5 H25 M9 39 H25" stroke="#6d7883" stroke-width="1.8" stroke-linecap="round"/>
-  <!-- 烟囱 + 烟 -->
-  <path d="M45 31 H52 V42 H45 Z" fill="#4b565f"
-        stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
-  <path d="M45 35 H52" stroke="#f4ecdc" stroke-width="2.2"/>
-  <g fill="#f4ecdc" stroke="#2b3238" stroke-width="1.8">
-    <circle cx="48.5" cy="25" r="3.4"/>
-    <circle cx="53.5" cy="19.5" r="2.7"/>
-    <circle cx="58" cy="15" r="2.1"/>
+  <path d="M8 34.5 H26 M8 39 H26" stroke="#2b3238" stroke-width="5.2" stroke-linecap="round"/>
+  <path d="M8 34.5 H26 M8 39 H26" stroke="#6d7883" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- 烟囱 + 烟（三团放大） -->
+  <path d="M45 30 H52 V41 H45 Z" fill="#4b565f"
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M45 34 H52" stroke="#f4ecdc" stroke-width="2.4"/>
+  <g fill="#f4ecdc" stroke="#2b3238" stroke-width="2.2">
+    <circle cx="48.5" cy="24" r="3.8"/>
+    <circle cx="53.5" cy="18" r="3"/>
+    <circle cx="58" cy="13.5" r="2.3"/>
   </g>
   <!-- 水线 -->
   <path d="M1 52 C11 48 21 56 31 52 C41 48 51 56 61 52 L62 59 L2 59 Z"
-        fill="#9fc6cf" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+        fill="#9fc6cf" stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
 </svg>
+
+<!-- smelt-bld: 熔旧坊（枯竭铁矿场的改建）—— 石砌炉膛 + 冒烟烟囱 + 堆着的旧铁锅菜刀
+     辨识点全在"这不是矿、是回炉"：矿洞是横着的一个黑洞，这里是一座**立着**的炉，
+     炉口有火；右边那堆旧铁器（倒扣的铁锅 + 一把菜刀）说明料是从民间收来的。 -->
+<svg id="smelt-bld" viewBox="0 0 64 64" fill="none">
+  <!-- 地面线 -->
+  <path d="M3 57 H61" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
+  <!-- 炉身：石砌方炉（矮胖，一眼是炉不是房） -->
+  <path d="M7 54 V29 H37 V54 Z" fill="#aab6c2" stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <!-- 炉顶压条 -->
+  <path d="M5 29 V23 H39 V29 Z" fill="#8d99a6" stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <!-- 烟囱 + 烟 -->
+  <path d="M25 23 V9 H33 V23" fill="#6b7885" stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <circle cx="29" cy="5.4" r="2.6" fill="#f4ecdc" stroke="#2b3238" stroke-width="1.6"/>
+  <circle cx="35.4" cy="3.6" r="1.5" fill="#f4ecdc" stroke="#2b3238" stroke-width="1.3"/>
+  <!-- 炉膛：拱形黑洞 -->
+  <path d="M12 54 V41 C12 36.6 15.4 33 20 33 C24.6 33 28 36.6 28 41 V54 Z"
+        fill="#4b3a2a" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+  <!-- 炉火 -->
+  <path d="M20 52c-2.6 0-4.4-2-4.4-4.4 0-1.8 1.2-3 2.2-4.2.2 1.5.8 2.2 1.5 2.4-.5-2.8.6-5 1.3-8 2.3 3 4 4.5 4 7.6 0 3-1.8 6.6-4.6 6.6Z"
+        fill="#d9822b" stroke="#2b3238" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="20.6" cy="30" r="1.3" fill="#e3b95a"/>
+  <!-- 旧铁堆：一口带盖的铁锅 + 斜靠在锅盖上的菜刀（料是从民间收来的） -->
+  <!-- 锅身（上宽下窄） -->
+  <path d="M42 45 H58 L56.4 55 H43.6 Z" fill="#5b6b7a" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+  <!-- 锅沿 + 两耳 -->
+  <path d="M39.6 45 H60.4" stroke="#2b3238" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M39.6 45c-1.8 0-3 1.4-3 3.2 M60.4 45c1.8 0 3 1.4 3 3.2"
+        stroke="#2b3238" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- 锅盖 + 顶钮 -->
+  <path d="M43.4 45c0-4 3-6.4 6.6-6.4S56.6 41 56.6 45Z"
+        fill="#6b7885" stroke="#2b3238" stroke-width="2.4" stroke-linejoin="round"/>
+  <circle cx="50" cy="37.4" r="1.9" fill="#8d99a6" stroke="#2b3238" stroke-width="1.6"/>
+  <!-- 菜刀：斜靠在锅盖上（刀身 + 木柄 + 刀刃高光） -->
+  <g transform="rotate(-16 48 30)">
+    <path d="M40 26 H52 V35 H40 Z" fill="#c9d3db" stroke="#2b3238" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M52 28.5 H58 V32.5 H52 Z" fill="#a97b4a" stroke="#2b3238" stroke-width="2"/>
+    <path d="M42 33.2 H50" stroke="#8d99a6" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
+</svg>
+
+<!-- wash-bld: 淘金场（枯竭金矿场的改建，v18）—— 斜放的木溜槽 + 冲下来的水 +
+     沉在横档后的金粒 + 一只淘金盘
+     辨识点全在"这不是矿、是淘"：金矿场是**立着**的井架，这里是一条斜槽；
+     水从高的一头冲下来，金粒沉在低的一头的格条后面（比重淘金，一句话讲完）。 -->
+<svg id="wash-bld" viewBox="0 0 64 64" fill="none">
+  <!-- 地面线 -->
+  <path d="M3 57 H61" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
+  <!-- 支腿：高的一头矮、低的一头高（槽是斜的） -->
+  <path d="M15 38 V55 M42 47 V55" stroke="#8a5a30" stroke-width="4" stroke-linecap="round"/>
+  <!-- 溜槽：斜放的木箱（够高，才看得见木头本色） -->
+  <path d="M4 16 L47 29 L47 49 L4 36 Z" fill="#c99e6d"
+        stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <!-- 槽口：浅色内壁（比外框亮 —— 暗一档会糊成一团黑） -->
+  <path d="M9 24 L42 33.6 L42 43 L9 33.4 Z" fill="#e6c08a"
+        stroke="#2b3238" stroke-width="2" stroke-linejoin="round"/>
+  <!-- 水：从高的一头冲下来（一道粗蓝带 + 一道细的） -->
+  <path d="M13 27 L26 30.6" stroke="#7fb6c4" stroke-width="5.6" stroke-linecap="round"/>
+  <path d="M14 31.4 L21 33.4" stroke="#9fc6cf" stroke-width="3" stroke-linecap="round"/>
+  <!-- 横档：挡金粒的格条（两根） -->
+  <path d="M29 36.4 V41.6 M35.4 38.2 V43.4" stroke="#8a5a30" stroke-width="3" stroke-linecap="round"/>
+  <!-- 金粒：沉在低的一头、格条后面 -->
+  <g fill="#f0c24a" stroke="#2b3238" stroke-width="1.5">
+    <circle cx="32" cy="42.4" r="2.2"/>
+    <circle cx="40" cy="43.8" r="2.6"/>
+  </g>
+  <!-- 淘金盘：斜靠在槽尾（浅圆盘 + 盘里的金砂） -->
+  <g transform="rotate(-16 53 50)">
+    <ellipse cx="53" cy="50" rx="8.4" ry="3.8" fill="#aab6c2"
+             stroke="#2b3238" stroke-width="2.6"/>
+    <ellipse cx="53" cy="49" rx="5.4" ry="2.1" fill="#7f8c99"/>
+    <circle cx="51.4" cy="49" r="1.4" fill="#f0c24a" stroke="#2b3238" stroke-width="1"/>
+  </g>
+</svg>
+
+<!-- tech-mil_std: 制式装备（一件叠好的军服 + 立领 + 一排铜扣 + 肩章条纹。
+     辨识点是"制式"两个字：同一种形制、同一排扣子 —— 不是某一件甲，是**一整套标准**） -->
+<svg id="tech-mil_std" viewBox="0 0 64 64" fill="none">
+  <!-- 衣身：肩宽、腰收，下摆平 -->
+  <path d="M18 18 C18 12 24 8 32 8 C40 8 46 12 46 18 L48 40 L46 56 H18 L16 40 Z"
+        fill="#5f7286" stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <!-- 立领：V 形开口 -->
+  <path d="M26 8 L32 22 L38 8" fill="#f4ecdc" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+  <!-- 前襟（左右两片的分界） -->
+  <path d="M32 22 V56" stroke="#2b3238" stroke-width="2.4"/>
+  <!-- 一排铜扣：制式的意思全在这四个点上 -->
+  <g fill="#c9a05a" stroke="#2b3238" stroke-width="1.8">
+    <circle cx="36" cy="28" r="2.2"/><circle cx="36" cy="36" r="2.2"/>
+    <circle cx="36" cy="44" r="2.2"/><circle cx="36" cy="52" r="2.2"/>
+  </g>
+  <!-- 肩章：两道短杠（等级纹） -->
+  <path d="M19 21 H27 M37 21 H45" stroke="#e0c489" stroke-width="3" stroke-linecap="round"/>
+  <!-- 腰带 -->
+  <path d="M17 42 H47" stroke="#8a5a30" stroke-width="4.2" stroke-linecap="round"/>
+  <rect x="29" y="39.4" width="6" height="5.2" rx="1.2" fill="#c9a05a" stroke="#2b3238" stroke-width="1.8"/>
+</svg>
+
+<!-- tech-mil_quench: 淬火工艺（木桶里插着一把烧红的刃，桶口冒白汽。
+     红刃 + 白汽是"淬"的全部：冷热一撞，钢才硬） -->
+<svg id="tech-mil_quench" viewBox="0 0 64 64" fill="none">
+  <!-- 木桶：上宽下窄 + 两道箍 -->
+  <path d="M14 30 H50 L46 56 H18 Z" fill="#a9743f" stroke="#2b3238" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M13 30 H51" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>
+  <path d="M16 40 H48 M17.4 49 H46.6" stroke="#6b4522" stroke-width="2.6"/>
+  <!-- 水面：桶口一圈浅水 -->
+  <ellipse cx="32" cy="30" rx="17" ry="3.4" fill="#9fc6cf" stroke="#2b3238" stroke-width="2.4"/>
+  <!-- 刃：斜插在桶里，下半段入水（压暗），上半段烧红 -->
+  <g transform="rotate(18 32 20)">
+    <path d="M28.5 6 H35.5 L34.4 34 H29.6 Z" fill="#d76d3a" stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round"/>
+    <path d="M29.6 34 H34.4 L33.8 42 H30.2 Z" fill="#7a8794" stroke="#2b3238" stroke-width="2.2"/>
+    <path d="M32 6 V28" stroke="#f0a35c" stroke-width="1.8" stroke-linecap="round"/>
+  </g>
+  <!-- 白汽：三缕往上飘 -->
+  <g stroke="#f4ecdc" stroke-width="3" stroke-linecap="round" opacity=".95">
+    <path d="M20 24 C17 19 21 15 18 10"/>
+    <path d="M44 22 C47 17 43 13 46 8"/>
+    <path d="M53 26 C55 22 52 19 54 15"/>
+  </g>
+</svg>
+
+<!-- tech-mil_massline: 量产工艺（一枚齿轮咬着一台传送带，带上过一只箱。
+     齿轮 = 机力，传送带 = 流水 —— 这张图讲的不是"更好的兵刃"，是"更快地做出来"） -->
+<svg id="tech-mil_massline" viewBox="0 0 64 64" fill="none">
+  <!-- 齿轮：八齿，画成四个十字齿块省线 -->
+  <g stroke="#2b3238" stroke-width="2.6" stroke-linejoin="round">
+    <circle cx="24" cy="20" r="9.5" fill="#8d99a6"/>
+    <path d="M24 6.5 V10 M24 30 V33.5 M10.5 20 H14 M34 20 H37.5" stroke-width="4.6" stroke-linecap="round"/>
+    <path d="M13.6 9.6 L16 12 M32 28 L34.4 30.4 M13.6 30.4 L16 28 M32 12 L34.4 9.6"
+          stroke-width="4.2" stroke-linecap="round"/>
+    <circle cx="24" cy="20" r="3.4" fill="#f4ecdc"/>
+  </g>
+  <!-- 传送带：两条托辊 + 台面 -->
+  <path d="M6 48 H58" stroke="#2b3238" stroke-width="3.4" stroke-linecap="round"/>
+  <path d="M10 48 V56 M54 48 V56" stroke="#2b3238" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="13" cy="52" r="4" fill="#c9d3db" stroke="#2b3238" stroke-width="2.4"/>
+  <circle cx="51" cy="52" r="4" fill="#c9d3db" stroke="#2b3238" stroke-width="2.4"/>
+  <!-- 带上的箱子（正在过线） -->
+  <path d="M34 34 H50 V48 H34 Z" fill="#c9a273" stroke="#2b3238" stroke-width="2.8" stroke-linejoin="round"/>
+  <path d="M34 39 H50 M42 34 V48" stroke="#8a5a30" stroke-width="2"/>
+  <!-- 运动线：箱子往右走 -->
+  <path d="M52 30 H58 M55 26 V34" stroke="#2b3238" stroke-width="2.4" stroke-linecap="round"/>
+</svg>
+
+<!-- =============================================================
+     兵器矩阵（v19 返工）：**形状只画一次，材质只换色**。
+     5 类型 × 4 材质 = 20 枚（弓在火器下换成"铳"身，是同一格的微变体）；
+     另外补 马品种 4 枚 + 产能 / 武库入口 2 枚。
+     id 规则：wpn-<类型>-<材质> / mount-<品种> / ui-<入口>
+     gen-res-icons.mjs 按 id 截屏 → normalize-icons.py 落成 item-<id>.png。
+     禁手画 20 张：下面这张网格是脚本按 token 套色生成的。
+     ============================================================= -->
+<div id="wpn-matrix" style="margin:24px 12px 12px">
+  <div style="font:600 14px/1.4 system-ui;margin-bottom:8px">兵器矩阵 · 形状 × 材质色（皮 #a08a6a · 青铜 #b08a3c · 铁 #8c949c · 火器 #3c5566）
+    <button id="wm-export" type="button" style="margin-left:10px;font:12px system-ui;padding:2px 8px;cursor:pointer">一键全量导出</button>
+    <span id="wm-tip" style="font:11px system-ui;color:#8b8272;margin-left:6px"></span>
+  </div>
+  <div id="wpnGrid" style="display:grid;grid-template-columns:repeat(4, 96px);gap:10px"></div>
+</div>
+<script>
+(function () {
+  var MATS = [
+    { key: 'leather', cn: '皮',   c: '#a08a6a', d: '#7d6a50' },
+    { key: 'bronze',  cn: '青铜', c: '#b08a3c', d: '#8a6a2c' },
+    { key: 'iron',    cn: '铁',   c: '#8c949c', d: '#6d7883' },
+    { key: 'powder',  cn: '火器', c: '#3c5566', d: '#2b3f4c' }
+  ];
+  var ST = 'stroke="#2b3238" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"';
+  var WOOD = '#8a5a30';
+  /* 每种类型一个函数：material → svg 内胆（坐标 0..64） */
+  var SHAPES = {
+    dao: function (m) {          /* 刀：单刃阔背，斜置 */
+      return '<g transform="rotate(34 32 32)">' +
+        '<path d="M31 4 C38 10 40 18 39 29 L29 29 C28 18 28 11 31 4 Z" fill="' + m.c + '" ' + ST + '/>' +
+        '<path d="M31 4 C36 10 38 18 37.5 27 L34 27 C34 17 33 11 31 4 Z" fill="' + m.d + '" stroke="none" opacity=".55"/>' +
+        '<path d="M19 29 L45 29 L47 35 L17 35 Z" fill="' + m.d + '" ' + ST + '/>' +
+        '<path d="M29 35 L35 35 L35 47 L29 47 Z" fill="' + WOOD + '" ' + ST + '/>' +
+        '<circle cx="32" cy="51" r="4.4" fill="' + m.c + '" ' + ST + '/>' +
+        '</g>';
+    },
+    jian: function (m) {         /* 剑：直身双刃，剑格 + 首锤 */
+      return '<g transform="rotate(-36 32 32)">' +
+        '<path d="M32 3 C35 8 36.5 14 36.5 21 L36.5 29 L27.5 29 L27.5 21 C27.5 14 29 8 32 3 Z" fill="' + m.c + '" ' + ST + '/>' +
+        '<path d="M32 3 C34 8 35 14 35 21 L35 29 L32 29 Z" fill="#fff" opacity=".22" stroke="none"/>' +
+        '<path d="M20 29 L44 29 L46 35 L18 35 Z" fill="' + m.d + '" ' + ST + '/>' +
+        '<path d="M29 35 L35 35 L35 46 L29 46 Z" fill="' + WOOD + '" ' + ST + '/>' +
+        '<circle cx="32" cy="50.5" r="4.2" fill="' + m.c + '" ' + ST + '/>' +
+        '</g>';
+    },
+    qiang: function (m) {        /* 矛：叶形矛头 + 长杆 + 缨 */
+      return '<path d="M32 3 L37 13 L34.5 23 L29.5 23 L27 13 Z" fill="' + m.c + '" ' + ST + '/>' +
+        '<path d="M31 23 L33 23 L34 60 L30 60 Z" fill="' + WOOD + '" ' + ST + '/>' +
+        '<path d="M29.5 24 C23 27 22 33 26 38" fill="none" stroke="' + m.c + '" stroke-width="3.2" stroke-linecap="round"/>' +
+        '<path d="M26 36 L23 41 L28 40 Z" fill="' + m.d + '" stroke="none"/>';
+    },
+    fu: function (m) {           /* 斧：半月斧刃 + 短柄 */
+      return '<path d="M12 12 C24 8 34 13 36 22 C38 31 30 36 18 33 L13 26 Z" fill="' + m.c + '" ' + ST + '/>' +
+        '<path d="M12 12 C20 10 28 12 32 16 C28 20 20 22 14 22 Z" fill="#fff" opacity=".2" stroke="none"/>' +
+        '<path d="M24 30 L29 30 L33 60 L27 60 Z" fill="' + WOOD + '" ' + ST + '/>' +
+        '<path d="M14 26 L20 33" stroke="' + m.d + '" stroke-width="3"/>';
+    },
+    gong: function (m, mat) {    /* 弓：弓身 + 弦 + 箭；火器材质换成「铳」 */
+      if (mat === 'powder') {
+        return '<path d="M6 34 L40 26 L42 33 L9 41 Z" fill="' + m.c + '" ' + ST + '/>' +
+          '<path d="M40 26 L52 22 L56 29 L42 33 Z" fill="' + WOOD + '" ' + ST + '/>' +
+          '<path d="M6 34 L9 41" stroke="' + m.d + '" stroke-width="3"/>' +
+          '<circle cx="8" cy="38" r="2.6" fill="#2b3238"/>' +
+          '<path d="M46 24 L50 18" stroke="' + m.c + '" stroke-width="3" stroke-linecap="round"/>';
+      }
+      return '<path d="M42 6 C26 15 26 49 42 58 L47 53 C34 45 34 19 47 11 Z" fill="' + m.c + '" ' + ST + '/>' +
+        '<path d="M43 9 L43 55" stroke="#2b3238" stroke-width="2"/>' +
+        '<path d="M22 32 L43 32" stroke="' + WOOD + '" stroke-width="2.6" stroke-linecap="round"/>' +
+        '<path d="M22 32 L28 29 L28 35 Z" fill="' + m.d + '" stroke="none"/>';
+    }
+  };
+  var TYPES = [
+    { key: 'dao', cn: '刀' }, { key: 'jian', cn: '剑' }, { key: 'qiang', cn: '矛' },
+    { key: 'fu', cn: '斧' }, { key: 'gong', cn: '弓/铳' }
+  ];
+  var grid = document.getElementById('wpnGrid');
+  TYPES.forEach(function (t) {
+    MATS.forEach(function (m) {
+      var d = document.createElement('div');
+      d.style.cssText = 'text-align:center;font:11px system-ui;color:#5b544a';
+      d.innerHTML = '<svg id="wpn-' + t.key + '-' + m.key + '" viewBox="0 0 64 64" width="96" height="96" fill="none">' +
+        SHAPES[t.key](m, m.key) + '</svg><div>' + t.cn + ' · ' + m.cn + '</div>';
+      grid.appendChild(d);
+    });
+  });
+
+  /* 马品种 4 枚：马形不变，鬃毛 / 护甲区分 */
+  var HORSES = [
+    { key: 'mount-nag',    cn: '驽马',   body: '#a08a6a', mane: '#7d6a50', armor: null },
+    { key: 'mount-steppe', cn: '草原马', body: '#b08a5a', mane: '#5b4a34', armor: null },
+    { key: 'mount-dayuan', cn: '大宛马', body: '#c9a273', mane: '#8a5a30', armor: null },
+    { key: 'mount-barded', cn: '具装马', body: '#8c949c', mane: '#6d7883', armor: '#6d7883' }
+  ];
+  var hg = document.createElement('div');
+  hg.style.cssText = 'display:grid;grid-template-columns:repeat(4,96px);gap:10px;margin-top:14px';
+  HORSES.forEach(function (h) {
+    var d = document.createElement('div');
+    d.style.cssText = 'text-align:center;font:11px system-ui;color:#5b544a';
+    d.innerHTML = '<svg id="' + h.key + '" viewBox="0 0 64 64" width="96" height="96" fill="none">' +
+      '<path d="M12 44 C12 32 20 26 32 26 C42 26 48 32 50 40 L54 40 L56 46 L48 46 C46 52 40 56 32 56 C22 56 14 52 12 44 Z" fill="' + h.body + '" ' + ST + '/>' +
+      '<path d="M18 30 L14 14 L26 22" fill="' + h.body + '" ' + ST + '/>' +
+      '<path d="M16 16 C20 12 24 14 26 20" fill="' + h.mane + '" stroke="none"/>' +
+      '<path d="M28 26 C30 18 34 16 36 22" fill="' + h.mane + '" stroke="none"/>' +
+      '<circle cx="22" cy="26" r="2" fill="#2b3238"/>' +
+      (h.armor ? '<path d="M28 34 C36 32 44 36 46 44 L34 46 Z" fill="' + h.armor + '" opacity=".85" stroke="#2b3238" stroke-width="2"/>' : '') +
+      '<path d="M14 56 L14 48 M20 56 L20 48 M46 56 L46 48 M52 56 L52 48" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>' +
+      '</svg><div>' + h.cn + '</div>';
+    hg.appendChild(d);
+  });
+  document.getElementById('wpn-matrix').appendChild(hg);
+
+  /* 入口 2 枚：产能（三池齿轮）/ 武库（架上的兵刃与甲） */
+  var eg = document.createElement('div');
+  eg.style.cssText = 'display:grid;grid-template-columns:repeat(4,96px);gap:10px;margin-top:14px';
+  eg.innerHTML =
+    '<div style="text-align:center;font:11px system-ui;color:#5b544a">' +
+    '<svg id="ui-mill" viewBox="0 0 64 64" width="96" height="96" fill="none">' +
+    '<circle cx="24" cy="22" r="10" fill="#8d99a6" ' + ST + '/>' +
+    '<path d="M24 8 V12 M24 32 V36 M10 22 H14 M34 22 H38" stroke="#2b3238" stroke-width="4" stroke-linecap="round"/>' +
+    '<circle cx="44" cy="42" r="8" fill="#c9a273" ' + ST + '/>' +
+    '<path d="M44 30 V34 M44 50 V54 M32 42 H36 M52 42 H56" stroke="#2b3238" stroke-width="3.6" stroke-linecap="round"/>' +
+    '<path d="M6 56 H58" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>' +
+    '</svg><div>产能</div></div>' +
+    '<div style="text-align:center;font:11px system-ui;color:#5b544a">' +
+    '<svg id="ui-arsenal" viewBox="0 0 64 64" width="96" height="96" fill="none">' +
+    '<path d="M8 24 H56 V30 H8 Z" fill="#8a5a30" ' + ST + '/>' +
+    '<path d="M14 30 L32 44 L50 30" fill="none" stroke="#2b3238" stroke-width="3"/>' +
+    '<path d="M26 30 L26 8 L30 4 L34 8 L34 30" fill="#8c949c" ' + ST + '/>' +
+    '<path d="M40 30 L40 16 L44 12 L48 16 L48 30" fill="#b08a3c" ' + ST + '/>' +
+    '<path d="M6 56 H58" stroke="#2b3238" stroke-width="3" stroke-linecap="round"/>' +
+    '</svg><div>武库</div></div>';
+  document.getElementById('wpn-matrix').appendChild(eg);
+
+  /* 一键全量导出：这个页面只负责"画 + 套色"，真正的落盘是那条命令 ——
+   * 把 26 个 id 拼好放进剪贴板，粘到终端就能只重出这一批（不碰旧图）。 */
+  document.getElementById('wm-export').addEventListener('click', function () {
+    var ids = [];
+    TYPES.forEach(function (t) { MATS.forEach(function (m) { ids.push('wpn-' + t.key + '-' + m.key); }); });
+    HORSES.forEach(function (h) { ids.push(h.key); });
+    ids.push('ui-mill', 'ui-arsenal');
+    var cmd = 'node tools/gen-res-icons.mjs ' + ids.join(' ') +
+      ' && python tools/normalize-icons.py ' + ids.join(' ');
+    var tip = document.getElementById('wm-tip');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).then(function () {
+        tip.textContent = '已复制 ' + ids.length + ' 个 id 的导出命令';
+      }, function () { tip.textContent = cmd; });
+    } else {
+      tip.textContent = cmd;
+    }
+  });
+})();
+</script>
 
 </div>
 </body></html>

@@ -190,7 +190,9 @@ function add(list) { for (const c of list) out.push(c); }
     AI.setPersona(a, 'mil');
     AI.quirkOf(a).war = 1.2;
     const pid = D.country(a).provinces[0];
-    const ar = D.newArmy(a, pid, { type: 'army', men: 6000 });
+    /* v19 起「裸兵只驻防」（tryAttack 里 `if (!a.weapon) continue`）——
+     * 这一节验的是"目标只在已探集里"，不是"没兵刃也敢冲"，所以给一份铁刀。 */
+    const ar = D.newArmy(a, pid, { type: 'army', men: 6000, tier: 'ironwp' });
     ar.order = { type: 'defend', cid: a, pid: pid, tactic: 'assault' };
 
     const tgt = AI.pickTarget(a, ar);
@@ -224,7 +226,15 @@ function add(list) { for (const c of list) out.push(c); }
     const c1 = count();
     ok('③ 已探集变大 → 已知敌省变多（重金情报目标选择更优）', c1 > c0, c0 + ' → ' + c1);
 
-    /* 一条真的进攻命令：目标必须在已探集里，且 WSTAT.badTarget 不涨 */
+    /* 一条真的进攻命令：目标必须在已探集里，且 WSTAT.badTarget 不涨。
+     * 前面 100 回合挂机可能已经让这一国有军队在进攻 —— tryAttack 的配额
+     * （want）被它们占满，这支新军就轮不到。这一节验的是"命令怎么下"，
+     * 不是"配额够不够"，所以先把别人的进攻令收回驻防。 */
+    D.armiesOf(a).forEach(x => {
+      if (x !== ar && x.order && (x.order.type === 'attack' || x.order.type === 'siege')) {
+        x.order = { type: 'defend', cid: a, pid: x.pid, tactic: 'assault' };
+      }
+    });
     const bad0 = AI.war.badTarget;
     const n = AI.attack(a, 'mil', AI.quirkOf(a));
     ok('③ 进攻命令下达', n >= 1 && ar.order && ar.order.type === 'attack', JSON.stringify(ar.order));
@@ -311,6 +321,13 @@ function add(list) { for (const c of list) out.push(c); }
       D.relSet(aa, bb2, 30);
       const srcPid = D.country(bb2).provinces[0];
       A.resSim[srcPid].iron.stock = 60;
+      /* v18 追加三：买货的默认源已经是**世界市场**（永远有货、价 = 基准 × 本国 PI），
+       * 想让 AI 去挑外国货源，就得让外国真的更便宜：
+       * 本国 PI 抬到 2.4（市场价 18）、外国压到 0.6（外国价 9）。 */
+      D.prices[aa] = D.prices[aa] || {};
+      D.prices[aa].iron = { v: 2.4, target: 2.4, trend: 0 };
+      D.prices[bb2] = D.prices[bb2] || {};
+      D.prices[bb2].iron = { v: 0.6, target: 0.6, trend: 0 };
       const every = A.AIWAR.trade.every.econ;
       D.setTurn(every * 10 - (aa % every));
       const iron0 = A.resSim[pv].iron.stock;
@@ -353,11 +370,26 @@ function add(list) { for (const c of list) out.push(c); }
     ok('④ 军费护栏触发（常备军吃掉太多岁入）', fired === 1 && !!mg,
       mg ? ('ratio=' + mg.ratio.toFixed(2) + ' · ' + mg.act) : '没触发');
     ok('④ 护栏动作：停进攻 + 非军备建筑降档',
-      !!mg && /停进攻/.test(mg.act) && /降档/.test(mg.act), mg && mg.act);
-    ok('④ 优先档真的被下调（学校 → p3）', A.rep.prio(a, 'school') === 'p3',
-      A.rep.prio(a, 'school'));
-    ok('④ 军备建筑没被降（兵营仍是中档）', A.rep.prio(a, 'barracks') === 'p2',
-      A.rep.prio(a, 'barracks'));
+      !!mg && /停进攻/.test(mg.act) && /停 \d+ 类/.test(mg.act), mg && mg.act);
+    /* 旧用例跟着改（v19 维修批）：`AO.rep.prio(p1/p2/p3)` 这套"优先档"已经
+     * 换成了**保留座数**（keepRatio 0~1），动作文案也从「降档」改成「停 N 类」。
+     * 这三条在维修批之后就一直红（`rep.prio` 现在在 js/ 里根本不存在），
+     * 与 v18 无关 —— 这里按现在的 API 重写，断言的意思不变：
+     * 非军备类被压到 lowKeep，军备类一座不动。 */
+    const lowK = A.AIWAR.guard.lowKeep;
+    ok('④ 军备建筑没被降（兵营仍全开）',
+      A.AIWAR.guard.keepKinds.indexOf('barracks') >= 0 &&
+      A.rep.keepRatio(a, 'barracks') === 1,
+      '兵营 keepRatio=' + A.rep.keepRatio(a, 'barracks'));
+    /* 真·比例验证：给一个省塞 3 座市场（built = 3）再跑一次护栏 ——
+     * 保留座数会压到 max(1, round(3 × lowKeep)) = 1，也就是 1/3。
+     * 单座省看不出比例（"至少留 1 座"会让 ratio 恒等于 1），所以要造 3 座。 */
+    const mkPid = D.country(a).provinces[1] || pid;
+    A.resMarket[mkPid] = { n: 3, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
+    AI.guard(a, 'balanced');
+    const kMk = A.rep.keepRatio(a, 'market');
+    ok('④ 非军备类真被压到 lowKeep（市场 3 座 → 留 1 座）', kMk <= 0.5,
+      'market keepRatio=' + kMk.toFixed(2) + '（lowKeep ' + lowK + '）');
     ok('④ 护栏之后军队全部转驻防',
       D.armiesOf(a).every(x => !x.order || x.order.type !== 'attack'),
       D.armiesOf(a).map(x => x.order && x.order.type).join(','));
@@ -413,11 +445,21 @@ function add(list) { for (const c of list) out.push(c); }
   });
   await sleep(3200);
   await page.evaluate(() => { window.AO.resDebug.choosePlayer(1); });
-  const t0 = Date.now();
-  for (let i = 0; i < 100; i++) {
-    await step();
-    await sleep(4);
-  }
+  /* 计时改成**页面内**量（v13）：原来用 Date.now() 包着 100 次
+   * `await step()` —— 那里面有一次跨进程往返 + 一帧绘制，机器一有负载
+   * 就 60s/85s/99s 乱跳（同一份代码三次跑出来三个数），量到的是 IPC 抖动，
+   * 不是模拟成本。现在 100 回合在页面里一口气跑完，只量 settleTurn 本身。 */
+  const ms = await page.evaluate((n) => {
+    const D = window.AO.resDebug;
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) {
+      let g = 0;
+      while (D.evtPending && D.evtPending() && g++ < 5) D.evtPick(0);
+      D.nextTurn();
+      if (D.surrenderState && D.surrenderState.open) D.surrenderChoose('annex');
+    }
+    return performance.now() - t0;
+  }, 100);
   add(await page.evaluate((ms) => {
     const A = window.AO, D = A.resDebug, AI = A.aiDebug, o = [];
     const ok = (n, c, d) => o.push({ name: n, ok: !!c, detail: d === undefined ? '' : String(d) });
@@ -431,9 +473,10 @@ function add(list) { for (const c of list) out.push(c); }
     ok('① 进攻目标始终在自己已探集里（badTarget = 0）', W.badTarget === 0, W.badTarget);
     ok('① 工坊模式外 AI 有动作（不是静止）', W.declare + W.attack + W.peace + W.guard + W.trade > 0,
       JSON.stringify(W));
-    ok('① 挂机 100 回合耗时可控（< 60s）', ms < 60000, (ms / 1000).toFixed(1) + 's');
+    ok('① 挂机 100 回合耗时可控（页面内 < 60s）', ms < 60000,
+      (ms / 1000).toFixed(1) + 's · 每回合 ' + (ms / 100).toFixed(0) + 'ms');
     return o;
-  }, Date.now() - t0));
+  }, ms));
 
   /* 工坊模式：AI 全静止 */
   add(await page.evaluate(() => {

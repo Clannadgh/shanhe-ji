@@ -42,6 +42,10 @@ const KEYS = [
   'wall-bld',
   // 内政批：粮仓（高脚谷仓）/ 工厂（烟囱厂房）/ 大学（穹顶柱式）
   'granary-bld', 'factory-bld', 'university-bld',
+  // 熔旧坊（枯竭铁矿场的改建）：炉膛 + 烟囱 + 堆着的旧铁锅菜刀
+  'smelt-bld',
+  // 淘金场（v18，枯竭金矿场的改建）：木溜槽 + 流水 + 金粒 + 淘金盘
+  'wash-bld',
   // 军事科技（v4）：17 条军事科技 + 皮甲（皮甲无科技键，图给军械坊订单/装备行大尺寸处用）。
   // id 命名 tech-<tech key>，normalize 自动落成 item-tech-<key>.png —— techIcon 的
   // PNG 回退链找的就是这个名字，不需要额外映射表
@@ -49,8 +53,17 @@ const KEYS = [
   'tech-mil_matchlock', 'tech-mil_musket', 'tech-mil_flintlock', 'tech-mil_percussion',
   'tech-mil_breech', 'tech-mil_gw', 'tech-mil_catapult', 'tech-mil_bronze_gun',
   'tech-mil_field_gun', 'tech-mil_heavy_gun', 'tech-mil_galley', 'tech-mil_galleon',
-  'tech-mil_ship74', 'tech-mil_ironclad'
+  'tech-mil_ship74', 'tech-mil_ironclad',
+  // 军工产线批（v16）：三条改"产线怎么跑"的科技 —— 军服纹 / 淬火桶 / 齿轮传送
+  'tech-mil_std', 'tech-mil_quench', 'tech-mil_massline'
 ];
+/* 兵器矩阵（v19 返工）：**形状 × 材质色**批量导出，禁手画 20 张。
+ *   wpn-<类型>-<材质> → item-wpn-<类型>-<材质>.png
+ * 顺带：马品种 4 枚（马形不变、鬃毛/护甲区分）+ 产能 / 武库入口 2 枚。 */
+for (const t of ['dao', 'jian', 'qiang', 'fu', 'gong']) {
+  for (const m of ['leather', 'bronze', 'iron', 'powder']) KEYS.push('wpn-' + t + '-' + m);
+}
+KEYS.push('mount-nag', 'mount-steppe', 'mount-dayuan', 'mount-barded', 'ui-mill', 'ui-arsenal');
 
 fs.mkdirSync(OUT, { recursive: true });
 

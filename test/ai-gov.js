@@ -66,9 +66,11 @@ const add = (list) => { for (const c of list) out.push(c); };
       JSON.stringify(E.gov.fireByRank) === '[70,80,80,90]' &&
       E.gov.personaAdj.econ === -10 && E.gov.personaAdj.mil === 10,
       JSON.stringify(E.gov.rewardByRank) + ' / ' + JSON.stringify(E.gov.fireByRank));
-    ok('⓪ 战时经济定义（军备/资源/民用三档 + 战时建造白名单）',
-      !!W.warEcon && W.warEcon.milPrio === 'p1' && W.warEcon.civPrio === 'p3' &&
+    ok('⓪ 战时经济定义（军备/资源全开、民用停一半 + 战时建造白名单）',
+      !!W.warEcon && W.warEcon.milKeep === 1 && W.warEcon.resKeep === 1 &&
+      W.warEcon.civKeep > 0 && W.warEcon.civKeep < 1 &&
       W.warEcon.build.indexOf('barracks') >= 0 && W.warEcon.build.indexOf('school') < 0,
+      'milKeep ' + W.warEcon.milKeep + ' · civKeep ' + W.warEcon.civKeep + ' · ' +
       JSON.stringify(W.warEcon.build));
     ok('⓪ 导出齐（resReward / resOffMul / aiDebug.gov / warEcon）',
       typeof A.resReward === 'function' && typeof A.resOffMul === 'function' &&
@@ -435,25 +437,36 @@ const add = (list) => { for (const c of list) out.push(c); };
     const cid = c.id;
     const foe = w.countries.find(x => x.id !== me && x.id !== cid && x.provinces.length > 1);
 
-    /* 战前把档位调成"标准"：学校中、兵营中、农场中 */
-    rep.setPrio(cid, 'school', 'p2');
-    rep.setPrio(cid, 'barracks', 'p2');
-    rep.setPrio(cid, 'grain', 'p2');
-    rep.setPrio(cid, 'market', 'p2');
+    /* 战前把保留座数调成"全开"（= 默认）。
+     * 注意：这一版把"高/中/低/停"四档换成了**每城保留几座**，
+     * 所以 AI 换挡改的是 keepRatio（1 = 全开，0.5 = 每城停一半）。
+     * 先给这个国真造出几座建筑 —— 一座都没有时 keepRatio 恒为 1，
+     * 断言就成了"1 === 1"，什么也没验到。 */
+    const pid0 = c.provinces[0], pid1 = c.provinces[1];
+    [pid0, pid1].forEach(q => {
+      const bag = A.resSim[q];
+      bag.grain.built = 3; bag.grain.tiers = { 1: 3, 2: 0 };
+      ['school', 'market', 'barracks'].forEach(k => {
+        const T = k === 'school' ? A.resSchool : k === 'market' ? A.resMarket : A.univAll.barracks;
+        if (!T[q]) T[q] = { n: 0, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
+        T[q].n = 4;
+      });
+    });
+    ['school', 'barracks', 'grain', 'market'].forEach(k => rep.setKeepRatio(cid, k, 1));
     if (D.atWar(cid, foe.id)) D.makePeace(cid, foe.id);
     D.setTurn(800);
     AI.warEcon(cid, 'balanced');                    // 先落一次"和平"基线
-    ok('③ 和平时不动档位（学校仍是中档）', rep.prio(cid, 'school') === 'p2',
-      rep.prio(cid, 'school'));
+    ok('③ 和平时不动保留座数（学校仍是全开）',
+      rep.keepRatio(cid, 'school') === 1, rep.keepRatio(cid, 'school'));
 
     /* 宣战 → 一回合内换挡 */
     D.declareWar(cid, foe.id);
     AI.warEcon(cid, 'balanced');
-    ok('③ 宣战后换挡：军备升「高」、资源留「中」、民用降「低」',
-      rep.prio(cid, 'barracks') === 'p1' && rep.prio(cid, 'grain') === 'p2' &&
-      rep.prio(cid, 'school') === 'p3' && rep.prio(cid, 'market') === 'p3',
-      '兵营 ' + rep.prio(cid, 'barracks') + ' · 农场 ' + rep.prio(cid, 'grain') +
-      ' · 学校 ' + rep.prio(cid, 'school') + ' · 市场 ' + rep.prio(cid, 'market'));
+    ok('③ 宣战后换挡：军备全开、资源全开、民用停一半',
+      rep.keepRatio(cid, 'barracks') === 1 && rep.keepRatio(cid, 'grain') === 1 &&
+      rep.keepRatio(cid, 'school') <= 0.5 + 0.01 && rep.keepRatio(cid, 'market') <= 0.5 + 0.01,
+      '兵营 ' + rep.keepRatio(cid, 'barracks') + ' · 农场 ' + rep.keepRatio(cid, 'grain') +
+      ' · 学校 ' + rep.keepRatio(cid, 'school') + ' · 市场 ' + rep.keepRatio(cid, 'market'));
 
     /* 换挡只做一次（状态没变不重复改） */
     const n2 = AI.warEcon(cid, 'balanced');
@@ -491,9 +504,9 @@ const add = (list) => { for (const c of list) out.push(c); };
     /* 停战恢复：原来怎么调的就怎么还回去 */
     D.makePeace(cid, foe.id);
     AI.warEcon(cid, 'balanced');
-    ok('③ 停战恢复原档位（学校回中、兵营回中）',
-      rep.prio(cid, 'school') === 'p2' && rep.prio(cid, 'barracks') === 'p2',
-      '学校 ' + rep.prio(cid, 'school') + ' · 兵营 ' + rep.prio(cid, 'barracks'));
+    ok('③ 停战恢复原保留座数（学校回全开、兵营回全开）',
+      rep.keepRatio(cid, 'school') === 1 && rep.keepRatio(cid, 'barracks') === 1,
+      '学校 ' + rep.keepRatio(cid, 'school') + ' · 兵营 ' + rep.keepRatio(cid, 'barracks'));
 
     /* 俸禄照付不欠：战时省库发不出 → 中央补，owed 清零 */
     const pid = c.provinces[0];
@@ -535,13 +548,14 @@ const add = (list) => { for (const c of list) out.push(c); };
     if (!D.atWar(cid, foe.id)) D.declareWar(cid, foe.id);
     /* 把换挡状态清零，逼它重新走一次"进入战争"分支 */
     delete AI.wecon[cid];
-    rep.setPrio(cid, 'barracks', 'p2');
+    rep.setKeepRatio(cid, 'barracks', 1);
     AI.warEcon(cid, 'balanced');
-    const afterSwap = rep.prio(cid, 'barracks');
+    const afterSwap = rep.keepRatio(cid, 'barracks');
     const fired = AI.guard(cid, 'balanced');
+    const afterGuard = rep.keepRatio(cid, 'barracks');
     ok('③ 护栏优先：军费爆表时军备不升档、guard 再压到低档',
-      afterSwap === 'p3' && fired === 1 && rep.prio(cid, 'barracks') === 'p3',
-      '换挡后 ' + afterSwap + ' → 护栏后 ' + rep.prio(cid, 'barracks'));
+      afterSwap <= 0.5 + 0.01 && fired === 1 && afterGuard <= 0.5 + 0.01,
+      '换挡后 ' + afterSwap.toFixed(2) + ' → 护栏后 ' + afterGuard.toFixed(2));
 
     /* 护栏优先的另一半：超了 60% 就不再征兵（少征兵，不掏空国库）。
      * aiDefend（每 3 回合的民兵动员）建军之前问的就是这一句。 */

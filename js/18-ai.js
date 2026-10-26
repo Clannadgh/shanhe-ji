@@ -419,6 +419,22 @@
       s += (g && g.left || 0) * 2000;      // 资源建筑：这块地产得越多越优先
     }
     s += stockOf(p.id, 'gold') * 2000;     // 省库有钱的省，自己就能出一部分料
+    /* v18.2 承载力：扩容本能（只管"吃粮 / 存粮"这三类）。
+     * 负载 load = 人口 / 承载力：
+     *   > 85% → 分数大幅上调（谁挤就先扩谁：农场抬上限、渔港补口粮、粮仓保余粮）
+     *   < 50% → 这一省**跳过**（还不挤，把料留给真需要的地方）
+     * 返回 −1 就是"淘汰"：pickProv 的 bestS 从 −1 起，任何真分数都大过它，
+     * 于是"全场都空"时 pickProv 返回 null、tryBuild 顺着表往下走（不盖而已）。
+     * buildOrder 一个字没动 —— 顺序说的是"先盖什么"，这里说的是"盖在哪儿"。 */
+    if (kind === 'grain' || kind === 'granary' || kind === 'fish') {
+      var PC = AO.POPCAP;
+      var capv = (AO.resPopCap ? AO.resPopCap(p.id) : 0) || 0;
+      if (PC && PC.ai && capv > 0) {
+        var load = popOf(p.id) / capv;
+        if (load < PC.ai.low) return -1;
+        if (load > PC.ai.high) s += PC.ai.boost;
+      }
+    }
     return s + popOf(p.id);                // 人口最多：有人才盖得起来，也才有人用
   }
   function pickProv(cid, kind) {
@@ -450,11 +466,11 @@
   }
   /* 熔旧坊：本省铁矿枯了才改建（规则与玩家点「改建」同源，见 AO.SMELT.check）。
    * 它和别的建造共用**同一个建造格**（每回合最多一座），所以放在 tryBuild 里
-   * 当一项来试，而不是单独一个动作。 */
-  function trySmelt(cid, edu) {
+   * 当一项来试，而不是单独一个动作。
+   * v18（A0）：**教育门槛已拆** —— 活命建筑不问学历（最缺铁的正是没铺学校的穷国）。 */
+  function trySmelt(cid) {
     var D = AO.resDebug, S = AO.SMELT, E = AO.AIECON;
     if (!S || !D.smeltOf || !D.buildSmelt) return false;
-    if (edu < (S.needEdu || 15)) return false;
     var cen = D.ensureCentral(cid);
     if ((cen.gold || 0) < (S.cost.gold || 0) + (E.goldReserve || 0)) return false;
     var list = provsOf(cid), best = null, bestPop = -1, i;
@@ -464,7 +480,9 @@
       var st = D.smeltOf(p.id);
       if (st && (st.n >= S.maxPer || st.site > 0)) continue;   // 封顶 / 正在改建
       var bag = AO.resSim[p.id], s = bag && bag.iron;
-      if (!s || !s.gone) continue;                             // 矿还在 → 不许改建
+      /* 矿睡了（永久枯竭 gone / 深层休眠 cool>0）就该开炉 —— 判定和玩家侧同源，
+       * 读 AO.SMELT.dormant，别再写一遍 `!s.gone`（v18 追加一补课）。 */
+      if (!s || !S.dormant(s)) continue;
       var pv = popOf(p.id);
       if (pv > bestPop) { bestPop = pv; best = p; }
     }
@@ -473,6 +491,119 @@
     var st2 = D.smeltOf(best.id);
     return !!(st2 && st2.site > 0);
   }
+  /* 淘金场（v18 / A）：金的熔旧坊 —— 和 trySmelt 逐条镜像，只把 iron 换成 gold。
+   * 它骑在**同一个建造格**里（tryBuild 的 'smelt' 那一项后面接着试）：
+   * 两种枯竭矿的再就业本来就是同一件事，没必要占两格。 */
+  function tryWash(cid) {
+    var D = AO.resDebug, S = AO.WASH, E = AO.AIECON;
+    if (!S || !D.washOf || !D.buildWash) return false;
+    var cen = D.ensureCentral(cid);
+    if ((cen.gold || 0) < (S.cost.gold || 0) + (E.goldReserve || 0)) return false;
+    var list = provsOf(cid), best = null, bestPop = -1, i;
+    for (i = 0; i < list.length; i++) {
+      var p = list[i];
+      if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
+      var st = D.washOf(p.id);
+      if (st && (st.n >= S.maxPer || st.site > 0)) continue;
+      var bag = AO.resSim[p.id], s = bag && bag.gold;
+      if (!s || !s.gone) continue;
+      var pv = popOf(p.id);
+      if (pv > bestPop) { bestPop = pv; best = p; }
+    }
+    if (!best) return false;
+    D.buildWash(best, true);
+    var st2 = D.washOf(best.id);
+    return !!(st2 && st2.site > 0);
+  }
+  /* ---------------- 缺矿反应（v18 / E）：对稀缺有反应，活得像人 ----------------
+   * AI 的建造表里从来没有资源建筑 —— 于是矿挖空了它就干等着，全国一起缺铁缺金。
+   * 这里给它一条**最低限度的本能**：全国库存（中央 + 各省）低于 AIECON.mineOpen.at
+   * 时，找一块"这一种一座都没盖、left 还够、没被围/占"的省开一座矿。
+   *
+   * 三条闸（和 tryBuild 的其它项同一套）：
+   *   ① 中央金 ≥ cost.gold + goldReserve（不许为了开矿把国库抽干）
+   *   ② 每回合一座（它 return true 就吃掉这一回合的建造格）
+   *   ③ 围城 / 占领省不动
+   * 铁金都缺时先开 (库存/at) 比值小的那种 —— 缺得更狠的先补。
+   * 战时不开：战争档的建造白名单只有军备三类（既有规则，不在这批动）。 */
+  function tryMineOpen(cid) {
+    var E = AO.AIECON, M = E && E.mineOpen, D = AO.resDebug;
+    if (!M || !M.at) return false;
+    var want = [], keys = ['iron', 'gold'], i, k;
+    for (i = 0; i < keys.length; i++) {
+      k = keys[i];
+      var at = M.at[k];
+      if (!(at > 0)) continue;
+      var total = stockTotal(cid, k);
+      if (total < at) want.push({ key: k, ratio: total / at });
+    }
+    if (!want.length) return false;
+    want.sort(function (a, b) { return a.ratio - b.ratio; });
+    var provs = provsOf(cid), cen = D.ensureCentral(cid);
+    for (i = 0; i < want.length; i++) {
+      k = want[i].key;
+      var cost = costForKind(cid, k);
+      if ((cen.gold || 0) < (cost.gold || 0) + (E.goldReserve || 0)) continue;
+      var leftMin = (M.left && M.left[k]) || 0;
+      var best = null, bestLeft = -1, bestPop = -1, j;
+      for (j = 0; j < provs.length; j++) {
+        var p = provs[j];
+        if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
+        var bag = AO.resSim[p.id], s = bag && bag[k];
+        if (!s || s.gone) continue;               // 枯了就改建，不是开矿
+        if ((s.built | 0) !== 0) continue;        // 这一种已经有一座了
+        if ((s.site | 0) > 0) continue;           // 还有工地在建
+        var l = s.left || 0;
+        if (l < leftMin) continue;                // 薄矿不值得开
+        var pv = popOf(p.id);
+        if (l > bestLeft || (l === bestLeft && pv > bestPop)) {
+          bestLeft = l; bestPop = pv; best = p;
+        }
+      }
+      if (!best) continue;
+      D.buildOne(best, k, true);
+      if (siteOf(best.id, k).site > 0) return true;
+    }
+    return false;
+  }
+  /* ---------------- 扩容本能（v18.2）：人挤了就先扩地 ----------------
+   * 为什么需要这一条：AI 的建造表（AIECON.buildOrder）里**从来没有**农场 / 渔港 ——
+   * 资源建筑只靠开局的铺底和"缺矿反应"（tryMineOpen）补。承载力一上来，
+   * 全国人口就会一起顶在天花板上停住（人丁兴旺），而 AI 永远不会想到去多盖一座农场。
+   * 这里补一条本能，写法和 tryMineOpen 逐条对齐：
+   *   ① 有省负载 > POPCAP.ai.high（85%）才动 —— 没有就立刻返回，不占建造格
+   *   ② **扩什么、扩在哪都走 pickProv** —— provScore 的负载项就是在这里生效的
+   *      （农场优先：+10 万上限 > 渔港 +8；农场这一行不可用才轮到渔港）
+   *   ③ 每回合一座（return true 就吃掉这一回合的建造格）
+   *   ④ 中央金 ≥ cost.gold + goldReserve；围城 / 占领省不动
+   * buildOrder 一个字没动 —— 表说的是"平时先盖什么"，这条说的是"什么时候该扩"，
+   * 两件事分开，才不会把"军国的兵营排第一"这种底色改掉。 */
+  function tryExpand(cid) {
+    var PC = AO.POPCAP, D = AO.resDebug, E = AO.AIECON;
+    if (!PC || !PC.ai || !D || !D.buildOne) return false;
+    /* ① 触发：有没有省挤到 85% 以上 */
+    var list = provsOf(cid), i, hot = false, p;
+    for (i = 0; i < list.length; i++) {
+      p = list[i];
+      if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
+      var capv = AO.resPopCap ? AO.resPopCap(p.id) : 0;
+      if (capv > 0 && popOf(p.id) / capv > PC.ai.high) { hot = true; break; }
+    }
+    if (!hot) return false;
+    /* ② 扩在哪：走 pickProv（负载 < 50% 的省在 provScore 里已经被淘汰了） */
+    var kinds = ['grain', 'fish'];
+    for (i = 0; i < kinds.length; i++) {
+      var k = kinds[i];
+      var cen = D.ensureCentral(cid);
+      var cost = costForKind(cid, k);
+      if ((cen.gold || 0) < (cost.gold || 0) + (E.goldReserve || 0)) return false;
+      var best = pickProv(cid, k);
+      if (!best) continue;
+      D.buildOne(best, k, true);
+      if (siteOf(best.id, k).site > 0) return true;
+    }
+    return false;
+  }
   function tryBuild(cid, persona) {
     var E = AO.AIECON, D = AO.resDebug;
     var provs = provsOf(cid);
@@ -480,6 +611,12 @@
     var cen = D.ensureCentral(cid);
     var war = atWarWithSomeone(cid) > 0;
     var order = buildOrderOf(cid, persona, war);
+    /* 缺矿反应（v18 / E）：排在人格建造表**之前** —— 饿着肚子的时候
+     * 先去找吃的，比按表盖学校要紧。 */
+    if (!war && tryMineOpen(cid)) return true;
+    /* 扩容本能（v18.2）：人挤到 85% 以上就先扩地 —— 和"缺矿先开矿"同一个道理，
+     * 饿着 / 挤着的时候，别的事都往后放。战时不动（战争档的建造白名单只有军备）。 */
+    if (!war && tryExpand(cid)) return true;
     /* 战时只盖军备类（§9 ⑤：兵营 / 军械坊 / 熔旧坊）。
      * 民用全停 —— 打仗的时候盖学校是白扔料，而且省下的维护费
      * 正是军费护栏要的那一笔。熔旧坊留着：它是战时的铁来源。 */
@@ -489,9 +626,11 @@
     for (var i = 0; i < order.length; i++) {
       var kind = order[i];
       if (war && warAllow && warAllow.indexOf(kind) < 0) continue;
-      /* 熔旧坊走自己的挑省逻辑（只有枯竭矿的省能改） */
+      /* 熔旧坊 / 淘金场走自己的挑省逻辑（只有枯竭矿的省能改）。
+       * v18：两种枯竭矿共用**同一个建造格** —— 先试铁、再试金。 */
       if (kind === 'smelt') {
-        if (trySmelt(cid, edu)) return true;
+        if (trySmelt(cid)) return true;
+        if (tryWash(cid)) return true;
         continue;
       }
       /* 经营：学校够用了就往下走（省数/3 是"扫盲"而不是"每省一座"） */
@@ -655,15 +794,20 @@
       return true;
     }
 
-    /* ② 池里有文官 → 派给无官省（人口最多的优先） */
+    /* ② 池里有文官 → 派给无官省。
+     * v13（B 批）：**未整合省优先** —— 一个 ×0.4 产出、+15 不安、还随时可能倒戈的省，
+     * 比一个只是人口多一点的正常省更急。同一优先级内部仍按人口排。 */
     if (T.pool && T.pool.length) {
-      var best = null, bestPop = -1;
+      var best = null, bestS = -1;
       for (i = 0; i < provs.length; i++) {
         var p = provs[i];
         if (AO.resOfficial[p.id]) continue;
         if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
-        var pv = popOf(p.id);
-        if (pv > bestPop) { bestPop = pv; best = p; }
+        /* 未整合的占领省：+1 亿"虚拟人口"直接把它顶到队首（比任何真省都大），
+         * 但只在"还没整合完"时有效 —— 整合完就不再特殊照顾 */
+        var score = popOf(p.id);
+        if (AO.resIntegOf && AO.resIntegOf(p.id)) score += 1e8;
+        if (score > bestS) { bestS = score; best = p; }
       }
       /* pool 里理论上不会有空洞，但"灭国 → 池子清空 → 读档"这条路上见过一次
        * undefined 混在里面（AI 挂机 60 回合后崩在 off0.id 上）。
@@ -697,6 +841,167 @@
       return !!(r && r.ok);
     }
     return false;
+  }
+
+  /* =============================================================
+   * 五b、军工产线（v17）：开科派匠 / 产能策略 / 机动军自动配装
+   *
+   * 这三件事都**不占内政的两个动作格**（和吏部巡查同一个理由：管炉子不是治国）：
+   *   aiMillPolicy  每回合跟着战况重排一次产线（交战 兵刃7:装备3 / 和平 装备6:兵刃4）
+   *   aiArtisans    军国与均衡：教育 ≥ 15 且国内有坊 → 开工科、派匠人
+   *   aiEquipFit    机动军（有进攻类命令）自动配齐装备；驻防军不配，省库存
+   *
+   * 为什么 AI 只在"开战/停战"上分两档、不做更细的分配：
+   * 它的目标不是打出最优解，而是"别让一座坊空转、也别在和平期白烧铁"。
+   * 真要玩混编的乐趣是玩家侧的（面板上那排 ± 就是给玩家的），
+   * 让 36 个国家都精细混编只会让纪要里全是别人的炉子。
+   * ============================================================= */
+  function aiMillPolicy(c, per) {
+    var D = AO.resDebug, E = (AO.AIECON && AO.AIECON.mill) || {};
+    if (!D || !D.setLineAlloc || !D.poolCap) return 0;
+    var cid = c.id | 0, M = AO.MILL, i;
+    var war = atWarWithSomeone(cid) > 0;
+
+    /* v19：**一次写全国分配表**（不再是逐省逐坊）。
+     * 两档策略照旧：交战 兵刃 7 : 装备 3；和平 装备 6 : 兵刃 4。
+     * 炮线交战开、和平归零；马厩只养驽马；船坞只在交战/海运需求时造最高档。
+     * AI 不玩类型 / 形制 / 品种（默认刀 + 驽马 + 平平无奇）—— 那是玩家侧的乐趣。 */
+    for (i = 0; i < M.lines.arm.length; i++) D.setLineAlloc(cid, M.lines.arm[i], 0, true);
+    for (i = 0; i < M.lines.hor.length; i++) D.setLineAlloc(cid, M.lines.hor[i], 0, true);
+    for (i = 0; i < M.lines.syd.length; i++) D.setLineAlloc(cid, M.lines.syd[i], 0, true);
+
+    /* --- 两道库存闸（v18 / C，v19 改读武库）---
+     *   ① 装备：军队数 × equipNeedPerArmy − 全国装备库存 ≤ 0 → 装备线归零
+     *   ② 兵刃：武库里最高代的队份 ≥ wpnStockCap → 兵刃线也归零
+     * 两闸都关 → 整池空转（不扣料、不产出）。战时同样生效。 */
+    var armies = 0, al = D.armiesOf ? D.armiesOf(cid) : [];
+    for (i = 0; i < al.length; i++) if (al[i] && al[i].type === 'army') armies++;
+    var equipHave = D.equipTotal ? D.equipTotal(cid) : 0;
+    var equipOff = (E.equipNeedPerArmy > 0) && (armies * E.equipNeedPerArmy - equipHave <= 0);
+    var wpnHave = D.arsTotal ? D.arsTotal(cid, 'wpn') : 0;
+    var wpnOff = (E.wpnStockCap > 0) && (wpnHave >= E.wpnStockCap);
+
+    var capA = D.poolCap(cid, 'arm');
+    if (capA > 0 && !(equipOff && wpnOff)) {
+      var share = war ? (E.warWpn === undefined ? 0.7 : E.warWpn)
+        : (E.peaceWpn === undefined ? 0.4 : E.peaceWpn);
+      var wpnPts = wpnOff ? 0 : Math.round(capA * share);
+      var eqPts = equipOff ? 0 : (capA - wpnPts);
+      if (!wpnOff) D.setLineAlloc(cid, 'dao', Math.min(wpnPts, M.work.dao), true);
+      if (eqPts > 0) {
+        var split = E.equipSplit || { helm: 0.4, chest: 0.35 };
+        D.setLineAlloc(cid, 'helm', Math.min(M.work.helm, Math.round(eqPts * split.helm)), true);
+        D.setLineAlloc(cid, 'chest', Math.min(M.work.chest, Math.round(eqPts * split.chest)), true);
+        D.setLineAlloc(cid, 'boots', Math.min(M.work.boots,
+          Math.max(0, eqPts - Math.round(eqPts * split.helm) - Math.round(eqPts * split.chest))), true);
+      }
+      /* 炮：交战才开，全给最高解锁那一档（AI 不铺低档炮） */
+      if (war) {
+        var guns = D.unlockedItems ? D.unlockedItems(cid, 'gun') : [];
+        if (guns.length) {
+          var gk = guns[guns.length - 1].key;
+          D.setLineAlloc(cid, gk, Math.min(M.work[gk], capA - wpnPts - eqPts + (equipOff ? eqPts : 0)), true);
+        }
+      }
+    }
+    /* --- 马厩：驽马（够一单就行，AI 不追品种） --- */
+    var capH = D.poolCap(cid, 'hor');
+    if (capH > 0 && !(E.mountOff)) {
+      D.setLineAlloc(cid, 'nag', Math.min(capH, M.work.nag), true);
+    }
+    /* --- 船坞：和平期归零（点让给军械），交战 / shipOnly 时造最高档 --- */
+    var capS = D.poolCap(cid, 'syd');
+    if (capS > 0 && (war || E.shipPeace)) {
+      var ships = D.unlockedItems ? D.unlockedItems(cid, 'ship') : [];
+      if (ships.length) {
+        var sk = ships[ships.length - 1].key;
+        D.setLineAlloc(cid, sk, Math.min(capS, M.work[sk]), true);
+      }
+    }
+    return 1;
+  }
+
+  /* 开科派匠：军国 / 均衡，累计教育 ≥ 15 且国内有坊。
+   * 宗师优先派兵最多的省 —— 高等级匠人在"装备线真的开得起来"的地方才值那个俸禄。 */
+  function aiArtisans(c, per) {
+    var D = AO.resDebug, E = AO.AIECON;
+    if (!D || !D.examArtisan || !D.artisanSpot) return 0;
+    if (per !== 'mil' && per !== 'balanced') return 0;
+    var cid = c.id;
+    if (D.edu(cid) < (AO.ARTISAN.aiEdu || 15)) return 0;
+    var provs = provsOf(cid), spots = [], i;
+    for (i = 0; i < provs.length; i++) if (D.artisanSpot(provs[i].id)) spots.push(provs[i]);
+    if (!spots.length) return 0;
+
+    var A = D.artisanPoolOf(cid);
+    /* ① 池里有匠人 → 派出去。目标 = 驻军/军队最多的省（装备是配给机动军的） */
+    if (A.pool.length) {
+      var best = null, bi = 0;
+      for (i = 0; i < A.pool.length; i++) {
+        if (!best || (A.pool[i].lv | 0) > (best.lv | 0)) { best = A.pool[i]; bi = i; }
+      }
+      if (!best) return 0;
+      var target = null, tScore = -1;
+      for (i = 0; i < spots.length; i++) {
+        var pid = spots[i].id;
+        if (A.post[pid]) continue;
+        var sc = (D.armiesIn(pid) || []).length * 1e9 + popOf(pid);
+        if (sc > tScore) { tScore = sc; target = spots[i]; }
+      }
+      /* 每省都有匠人了 → 挑一个等级最低的省换掉（升级版"换人"） */
+      if (!target) {
+        for (i = 0; i < spots.length; i++) {
+          var ap = A.post[spots[i].id];
+          if (ap && (ap.lv | 0) < (best.lv | 0)) { target = spots[i]; break; }
+        }
+      }
+      if (!target) return 0;
+      var r = D.postArtisan(target.id, best.id, true);
+      return (r && r.ok) ? 1 : 0;
+    }
+    /* ② 池空 → 人才点够就开科（留一份给文官，别把点数抽光） */
+    var T = AO.resTalentOf(cid), cost = AO.ARTISAN.examCost || AO.GOV.examCost;
+    if (T.pts < cost * (E.examMul || 1.5)) return 0;
+    var nPost = 0, pk;
+    for (pk in A.post) if (A.post[pk]) nPost++;
+    if (nPost >= spots.length) return 0;          // 每座坊都有人了，不再抽
+    var ex = D.examArtisan(cid, true);
+    return (ex && ex.ok) ? 1 : 0;
+  }
+
+  /* 机动军自动配装：只给"有进攻类命令"的军队（驻防军不配，省库存）。
+   * 一键配齐取的是库存里最优的三件，所以 AI 的军力曲线是"打得越久越肥"，
+   * 而玩家的策略是"要不要把库存留给主力" —— 同一条规则，两种取舍。 */
+  function aiEquipFit(c) {
+    var D = AO.resDebug;
+    if (!D || !D.arsBest) return 0;
+    var list = D.armiesOf(c.id), n = 0, i;
+    var wStock = D.arsTotal ? D.arsTotal(c.id, 'wpn') : 0;
+    for (i = 0; i < list.length; i++) {
+      var a = list[i];
+      if (!a || a.type === 'navy') continue;
+      var t = a.order ? a.order.type : '';
+      var front = (t === 'attack' || t === 'bombard' || t === 'siege');
+      /* 兵刃：主力发最优；驻防军也发（有富余就发，留 1 份底子）。
+       * v19 起"裸兵"是真实存在的状态（pow 0.5），所以这里比 v18 更积极一点 ——
+       * 不发武器，AI 的军队就只是站着的数字。 */
+      if (!a.weapon && (front || wStock > 1)) {
+        var w = D.arsBest(c.id, 'wpn');
+        if (w && D.issueWeapon(a, w.key, true).ok) { n++; wStock--; }
+      }
+      if (!front) continue;                    // 驻防到此为止：不抢马、不抢炮
+      if (!a.mount) {
+        var m = D.arsBest(c.id, 'mount');
+        if (m && D.issueMount(a, m.key, true).ok) n++;
+      }
+      if (!a.gun) {
+        var g = D.arsBest(c.id, 'gun');
+        if (g && D.issueGun(a, g.key, true).ok) n++;
+      }
+      var r = D.equipAutoFit(a, true);
+      if (r && r.ok && r.n > 0) n++;
+    }
+    return n;
   }
 
   /* =============================================================
@@ -737,8 +1042,10 @@
       var p = provs[i];
       if (AO.resOfficial[p.id]) continue;
       if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
-      /* 人口是主，省库金是次（每 1 金抵 1 万人）：大省先派，同规模派给有钱的省 */
+      /* 人口是主，省库金是次（每 1 金抵 1 万人）：大省先派，同规模派给有钱的省。
+       * v13：未整合的占领省整档提前（和 tryOfficers ② 同一口径）—— 那是最需要人的地方。 */
       var s = popOf(p.id) + stockOf(p.id, 'gold') * 10000;
+      if (AO.resIntegOf && AO.resIntegOf(p.id)) s += 1e8;
       if (s > bestS) { bestS = s; best = p; }
     }
     if (!best) return 0;
@@ -779,6 +1086,25 @@
       var r = AO.resReward(pid, true);
       if (r && r.ok) n++;
     }
+
+    /* ③ 安抚（v13，B3）：不安 ≥ aiAt（70）的省花**中央**金压一压。
+     * 和玩家点「安抚」是同一个函数（AO.resPacify + silent），规则一字不差；
+     * 只花中央金、不推纪要、不弹提示 —— 纪律 ③ 照旧。
+     *
+     * 为什么不给每一省都安抚：cd 3 回合 + 25 金/次，一国十几省全安抚会
+     * 把这个国家的国库抽干（而"省钱"恰恰是 AI 的另一条硬约束）。
+     * 权相 / 宰相**不自动安抚**（v1）：这是留给玩家的人工判断 ——
+     * 宰相会派官、会赏人，但"这一省值不值得花钱买平安"是他的权限之外。 */
+    var PU = (AO.INTEG && AO.INTEG.pacify) || null;
+    if (PU && AO.resPacify && AO.resUnrestOf) {
+      for (i = 0; i < provs.length; i++) {
+        var upid = provs[i].id;
+        if (AO.resUnrestOf(upid).v < PU.aiAt) continue;
+        if ((cen.gold || 0) < (E.minCentral || 30)) break;   // 国库比面子要紧
+        var rp = AO.resPacify(upid, true);
+        if (rp && rp.ok) n++;
+      }
+    }
     return n;
   }
 
@@ -786,18 +1112,22 @@
    * v11：战时经济换挡（§9）
    *
    * 打仗的时候钱只有一种花法：先保军队。宣战后一回合内换挡，停战恢复。
-   * 换的是**维修优先档**（19-repair 的那张表），不是军费本身：
-   *   军备类（兵营/军械坊/铸炮厂/造船厂/驯马场/城墙）→ 高
-   *   资源类（口粮与料）→ 中（断口粮会掉人口，不能一刀切停）
-   *   民用（市场/建造坊/学校/大学/粮仓/工厂）→ 低（只吃本省库存）
+   * 换的是**保留座数**（19-repair 的 KEEP 表），不是军费本身：
+   *   军备类（兵营/军械坊/铸炮厂/造船厂/驯马场/城墙）→ 全开
+   *   资源类（口粮与料）→ 全开（断口粮会掉人口，不能一刀切停）
+   *   民用（市场/建造坊/学校/大学/粮仓/工厂）→ 停一半
    * 另外两件：战时俸禄照付不欠（省库不够从中央补，**不加薪**）、
    * 建造只许盖军备类（见 tryBuild 的闸门）。
    *
-   * 和军费护栏的分工：换挡只是"重排优先级"，不减少任何一笔支出；
+   * 和军费护栏的分工：换挡只是"重排谁能开工"，不直接砍军费；
    * 真正的削减归 guardMil（军费 ≤ 收入 60%）。所以调用顺序是
    * **换挡在前、护栏在后** —— 护栏永远能盖掉换挡（"护栏优先"）。
+   *
+   * 为什么用"比例"而不是逐个省算座数：AI 有 64 个国家、每国几十个省，
+   * 逐个省拍数字既慢又没意义 —— 它要的是"这一类整体停一半"。
+   * rep.setKeepRatio 会把比例翻译成每个城的具体座数（至少留 1 座）。
    * ============================================================= */
-  var WECON = Object.create(null);      // cid -> { war, prev:{kind:prio} }（运行时，不进档）
+  var WECON = Object.create(null);      // cid -> { war, prev:{kind:ratio} }（运行时，不进档）
 
   function kindClass(W, kind) {
     if (W.milKinds.indexOf(kind) >= 0) return 'mil';
@@ -839,35 +1169,37 @@
   function canRecruit(cid) {
     var G = AO.AIWAR && AO.AIWAR.guard;
     if (!G) return true;
-    return milRatioOf(cid) <= (G.milShare || 0.6);
+    var cap = (G.milShare || 0.6);
+    return milRatioOf(cid) <= cap;
   }
   function warEcon(cid, per) {
     var W = AO.AIWAR && AO.AIWAR.warEcon, rep = AO.rep, D = AO.resDebug;
-    if (!W || !rep || !rep.setPrio) return 0;
+    if (!W || !rep || !rep.setKeepRatio) return 0;
     var war = atWarWithSomeone(cid) > 0;
     var st = WECON[cid];
     if (st && st.war === war) return 0;          // 状态没变：一个动作都不做
     var kinds = allKinds(), i, k, n = 0;
     if (war) {
-      /* 快照战前的档位：停战时原样还回去（玩家/AI 之前怎么调的，恢复就怎么调） */
+      /* 快照战前的保留比例：停战时原样还回去（玩家/AI 之前怎么调的，恢复就怎么调） */
       var prev = {};
-      for (i = 0; i < kinds.length; i++) prev[kinds[i]] = rep.prio(cid, kinds[i]);
-      /* 护栏优先：军费已经吃掉 90% 岁入的国家，换挡时连军备也不升档 ——
+      for (i = 0; i < kinds.length; i++) prev[kinds[i]] = rep.keepRatio(cid, kinds[i]);
+      /* 护栏优先：军费已经吃掉 90% 岁入的国家，换挡时连军备也一起停一半 ——
        * 那是"要破产了"的信号（这一档 guard 每回合还会再压一次，见 guardMil）。 */
       var broke = milRatioOf(cid) > (AO.AIWAR.guard.hardShare || 0.9);
       for (i = 0; i < kinds.length; i++) {
         k = kinds[i];
         var cls = kindClass(W, k);
-        var want = cls === 'mil' ? (broke ? (AO.AIWAR.guard.lowPrio || 'p3') : W.milPrio)
-          : (cls === 'res' ? W.resPrio : W.civPrio);
-        if (rep.prio(cid, k) !== want && rep.setPrio(cid, k, want)) n++;
+        var want = cls === 'mil' ? (broke ? (AO.AIWAR.guard.lowKeep || 0.34) : W.milKeep)
+          : (cls === 'res' ? W.resKeep : W.civKeep);
+        if (Math.abs(rep.keepRatio(cid, k) - want) > 0.01 && rep.setKeepRatio(cid, k, want)) n++;
       }
       WECON[cid] = { war: true, prev: prev, turn: D.turn() };
     } else {
       /* 停战恢复：只还"这一轮真的改过"的项；没有快照就什么都不做 */
       if (st && st.prev) {
         for (k in st.prev) {
-          if (rep.prio(cid, k) !== st.prev[k] && rep.setPrio(cid, k, st.prev[k])) n++;
+          if (Math.abs(rep.keepRatio(cid, k) - st.prev[k]) > 0.01 &&
+              rep.setKeepRatio(cid, k, st.prev[k])) n++;
         }
       }
       WECON[cid] = { war: false, prev: null, turn: D.turn() };
@@ -931,6 +1263,8 @@
     peace: 0,          // 成交的求和次数
     guard: 0,          // 军费护栏触发次数
     trade: 0,          // 成交的外国买货次数
+    export: 0,         // 成交的出口次数（v14：卖积压）
+    sell: 0,           // 成交的国内卖货手数（v18 / B：市场 5:1）
     wars: 0,           // 当前战争数（每回合刷新）
     deaths: 0,         // 已灭国数
     news: 0            // 累计放出的世界纪要条数
@@ -1016,6 +1350,9 @@
   }
   function tryDeclare(cid, per, q) {
     var A = AO.AIWAR, D = AO.resDebug, turn = D.turn();
+    /* 傀儡不主动宣战（v13）：它的外交权在宗主手里，宣战钮在 11-ui 那边就是灰的，
+     * 这里再挡一次 —— 挡的是"绕过面板直接调"的那条路。 */
+    if (AO.resPuppetOf && AO.resPuppetOf(cid)) return 0;
     if (turn % A.every !== (cid % A.every)) return 0;     // 各国错开，免得同回合一起动手
     if (warsOf(cid).length >= A.maxWars) return 0;
     var cd = D.peaceCd || {}, thr = A.threshold + dampAdd();
@@ -1032,6 +1369,9 @@
         if (D.atWar(cid, foe)) continue;
         if (AO.resIsAlly && AO.resIsAlly(cid, foe)) continue;   // 不打盟友
         if (AO.resIsNap && AO.resIsNap(cid, foe)) continue;     // 不打互不侵犯对象
+        /* 不打自己的属国（v13）：那是"我的兵、我的租"，打它等于打自己。
+         * 反过来（它的宗主）不挡：打别人的属国只惹到那一个，宗主不会下场 —— 可以去打。 */
+        if (AO.resPuppetOf && AO.resPuppetOf(foe) === (cid | 0)) continue;
         if ((cd[cid < foe ? cid + '|' + foe : foe + '|' + cid] || 0) > turn) continue;  // 停战冷却
         var sc = declareScore(cid, foe, q, per);
         if (sc.score < thr) continue;
@@ -1092,10 +1432,13 @@
     }
     return best;
   }
-  function tryAttack(cid, per, q) {
+  function tryAttack(cid, per, q, share) {
     var A = AO.AIWAR.attack, D = AO.resDebug;
     if (per === 'econ') return 0;                    // 经营不进攻（spec ②）
     var ratio = attackRatio(q.war);
+    /* 兵随宗主（v13）：傀儡的出兵力道是宗主的 0.5 倍 —— 它自己的野心不算数。
+     * 至少 1 支（下面的 max(1, …)），所以"属国永远只派一个象征性的偏师"成立。 */
+    if (share && share !== 1) ratio *= share;
     if (ratio <= 0) return 0;
     if (!warsOf(cid).length) return 0;
     var list = D.armiesOf(cid).filter(function (a) { return a.type === 'army'; });
@@ -1112,6 +1455,9 @@
     for (i = 0; i < cands.length && going.length < want; i++) {
       var a = cands[i];
       if ((a.men || 0) < 1000) continue;             // 残兵先补员，别送人头
+      /* v19：**裸兵只驻防**。没有兵刃的部队 pow 只有 0.5，派出去就是白送 ——
+       * 等武库发一份兵刃（aiEquipFit 每回合都在发）再谈进攻。 */
+      if (!a.weapon) continue;
       var tgt = pickTarget(cid, a);
       if (!tgt) break;
       var p = D.world().provinces[tgt - 1];
@@ -1199,14 +1545,25 @@
     return n;
   }
 
-  /* ---------------- ④b 贸易（AI 内政买货走外国货源） ----------------
-   * 只在"这种资源全国见底、手里还有金、有市场"的时候买 —— 那是应急口，
-   * 不是稳定的进货渠道（和玩家的买货同一个定位）。经营型看得最勤。 */
+  /* ---------------- ④b 贸易（v14：比价买货 + 卖积压） ----------------
+   * 【买】原来只在"中央见底"时找外国；现在会**比价**：
+   *   世界市场价（基准 × 本国 PI，v18 追加三前叫"中央价"）
+   *   vs 各 REL ≥ 20 国价（基准 × 溢价 × 对方 PI），取最便宜。
+   *   经营每 3 回合看一次、均衡 5、军国 12 —— 而且**军国不比价**（compare.mil = 0），
+   *   它只看"有没有"：军国的答案永远是"盖厂"，不是"进货"。
+   *   饥荒例外：粮食库存 < 口粮的省买粮**不看价**（饿肚子的人不讲价）——
+   *   这一条是老规矩，这里只是不去动它：比价只在"要不要买"上做选择，
+   *   从来不产出"太贵了所以不买"这个结论。
+   *
+   * 【卖】新增：经营型在本国某种资源积压（PI ≤ sellAt 0.7）、且有邻国出价更高时，
+   *   每回合出口一笔（5 单位，silent）。这是"倒卖"的另一半 ——
+   *   买是缺了去补，卖是多了去出，两条腿走起来经济才像个经济。 */
   function tryTrade(cid, per) {
     var T = AO.AIWAR.trade, D = AO.resDebug;
     var every = T.every[per] || 6;
     if ((D.turn() + cid) % every !== 0) return 0;
     var provs = provsOf(cid), i, k;
+    var compare = !!(T.compare && T.compare[per]);
     for (k = 0; k < T.keys.length; k++) {
       var key = T.keys[k];
       if (stockTotal(cid, key) >= T.minStock) continue;
@@ -1218,15 +1575,99 @@
         if (g > bestG) { bestG = g; best = provs[i]; }
       }
       if (!best || bestG < T.minGold) continue;
-      var srcs = D.foreignSources ? D.foreignSources(best, key) : [];
-      if (!srcs.length) continue;
-      /* 挑关系最好的那家（同关系时按货量，foreignSources 已经按货量排过） */
-      var pick = srcs[0];
-      for (i = 0; i < srcs.length; i++) if (srcs[i].rel > pick.rel) pick = srcs[i];
-      var r = D.aiBuy(best, key, pick.cid);
+
+      /* 候选一：世界市场（本国价，**供给无限**）。
+       * v18 追加三：国库不是商店 —— 中央不再卖货，所以这一档永远是候选，
+       * 不再有"中央没货 → 只能找外国"这条路。价格公式没变（基准 × 本国 PI）。 */
+      var fromW = { kind: 'w', price: D.buyGold(cid, key) };
+      /* 候选二：外国货源（对方价，已按便宜排序） */
+      var srcs = D.foreignSources ? D.foreignSources(best, key) : null;
+      var fromF = srcs && srcs.length ? { kind: 'f', cid: srcs[0].cid, price: srcs[0].price } : null;
+
+      var pick = null;
+      if (compare) {
+        /* 比价：谁便宜买谁（同价优先世界市场 —— 不用惊动外交关系） */
+        pick = (fromF && fromF.price < fromW.price) ? fromF : fromW;
+      } else {
+        /* 不比价：市场永远有货，直接走市场（外国只在"更便宜"时才有意义） */
+        pick = fromW;
+      }
+      if (!pick) continue;
+      var r = pick.kind === 'w' ? D.buyWorld(best, key) : D.aiBuy(best, key, pick.cid);
       if (r && r.ok) { WSTAT.trade++; return 1; }
     }
     return 0;
+  }
+
+  /* 出口：经营型把积压的货卖给价更高的邻国（每回合 1 笔，silent）。
+   * 只挑"本国价 ≤ sellAt"的资源 —— 那是真的卖不动，不是"暂时少了点"。 */
+  function trySell(cid, per) {
+    var T = AO.AIWAR.trade, D = AO.resDebug;
+    if (!(T.sellPersona && T.sellPersona[per])) return 0;
+    if ((D.turn() + cid) % (T.sellEvery || 3) !== 0) return 0;
+    var keys = T.sellKeys || ['grain', 'timber', 'fish', 'salt', 'iron', 'horse'];
+    var provs = provsOf(cid), i, k, lot = (AO.PRICES_CFG && AO.PRICES_CFG.exportLot) || 5;
+    for (k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      if (D.priceOf(cid, key) > T.sellAt) continue;      // 没积压 → 不卖
+      for (i = 0; i < provs.length; i++) {
+        var p = provs[i], mk = AO.resMarket && AO.resMarket[p.id];
+        if (!mk || !(mk.n > 0) || mk.halted) continue;
+        if (D.stockOf(p.id, key) < lot) continue;
+        if ((D.expTurn[p.id] | 0) === D.turn()) continue;
+        var srcs = D.exportSources ? D.exportSources(p, key) : null;
+        if (!srcs || !srcs.length) continue;
+        var r = D.aiExport(p, key, srcs[0].cid);
+        if (r && r.ok) { WSTAT.export++; return 1; }
+      }
+    }
+    return 0;
+  }
+
+  /* ---------------- ④c 卖货（v18 / B）：市场 5:1 终于对 AI 开门 ----------------
+   * 市场原来只有玩家能用（v1「只做手动」），于是 AI 的省库堆到 150 上限、
+   * 多出来的粮木鱼盐全当满仓损耗掉，而它连 1 金维护费都掏不出来。
+   *
+   * 规则（每国每回合，**不占内政动作格** —— 管铺子不是治国，同 aiMillPolicy）：
+   *   · 只卖本国有市场（n>0、未停产、未被围城/占领）的省
+   *   · 卖键 = grain / timber / fish / salt / **iron** / horse
+   *     （拍板改口：铁也可以交易 —— 攒过安全线的余量换金，比满仓损耗划算；
+   *       顺序照 AIWAR.trade.sellKeys：先出最不值钱的余货，铁排在马前面）
+   *   · 安全线：粮/鱼 库存 > 人口口粮×4 + 30；马 > 20；铁与其余 > 40
+   *   · 每省每回合至多 1 手（rate 5 单位 → PI 金进省库，攒整走 SELLACC）
+   *   · 每国每回合至多 AIECON.sellLots（占位 2）手
+   * 走的是玩家那个 sellResource(p, key, true)（silent）—— 同一段账，不另写一套。 */
+  function aiMarketSell(cid) {
+    var E = AO.AIECON, D = AO.resDebug, S = (E && E.sellSafe) || {};
+    if (!D || !D.sell) return 0;
+    var max = (E.sellLots === undefined) ? 2 : E.sellLots;
+    if (!(max > 0)) return 0;
+    var keys = ['grain', 'timber', 'fish', 'salt', 'iron', 'horse'];
+    var rate = (AO.MARKET && AO.MARKET.rate) || 5;
+    var provs = provsOf(cid), sold = 0, i, k;
+    for (i = 0; i < provs.length && sold < max; i++) {
+      var p = provs[i];
+      if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
+      var mk = AO.resMarket && AO.resMarket[p.id];
+      if (!mk || !(mk.n > 0) || mk.halted) continue;
+      /* 口粮口径和 settlePop 完全一致（每 200 万人 1 份）—— 两处算不同的话，
+       * "安全线"就成了另一套账，AI 会在饿肚子的边上卖粮。 */
+      var eat = Math.max(1, Math.round(popOf(p.id) / 2000000));
+      var done = false;
+      for (k = 0; k < keys.length && !done; k++) {
+        var key = keys[k];
+        var have = stockOf(p.id, key);
+        var line;
+        if (key === 'grain' || key === 'fish') line = eat * (S.foodMul || 4) + (S.foodAdd || 30);
+        else if (key === 'horse') line = S.horse || 20;
+        else line = S.other || 40;
+        if (have < rate || have <= line) continue;     // 不够一手 / 没过安全线
+        var r = D.sell(p, key, true);
+        if (r && r.ok) { sold++; done = true; }
+      }
+    }
+    if (sold) WSTAT.sell = (WSTAT.sell || 0) + sold;
+    return sold;
   }
 
   /* ---------------- ⑥ 军费护栏 ----------------
@@ -1234,8 +1675,8 @@
    * 做决策护栏：men/1000 × upkeepGoldPerK 当这一国每回合的军费，
    * 和它上回合的实际金收入比。超了就削：
    *   ① 机动军全部转驻防（先停进攻）
-   *   ② 非军备建筑降档（AO.rep.setPrio → p3：只吃本省库存，不动中央）
-   * 超 hardShare 连军备建筑也一起降 —— 那是"要破产了"的信号。 */
+   *   ② 非军备建筑停到只剩 lowKeep（AO.rep.setKeepRatio：每城留三分之一在跑）
+   * 超 hardShare 连军备建筑也一起停 —— 那是"要破产了"的信号。 */
   function guardMil(cid, per) {
     var G = AO.AIWAR.guard, D = AO.resDebug;
     if (D.turn() < 4) return 0;
@@ -1258,20 +1699,20 @@
     }
     if (back) act.push('停进攻 ' + back + ' 支');
     var rep = AO.rep;
-    if (rep && rep.setPrio) {
-      /* 用 allKinds()（含兵营/军械坊…）而不是 rep.kinds()：
-       * 军备建筑不在维修面板那张表上，但维护照付、优先档照读 ——
-       * 不列进来的话"超 90% 连军备一起降"这条永远落不了地。 */
+    if (rep && rep.setKeepRatio) {
+      /* 用 allKinds()（含兵营/军械坊…）而不是 rep.kinds()：军备建筑也照付维护，
+       * 不列进来的话"超 90% 连军备一起停"这条永远落不了地。 */
       var kinds = allKinds(), cut = 0;
       var hard = ratio > G.hardShare;
+      var low = G.lowKeep === undefined ? 0.34 : G.lowKeep;
       for (i = 0; i < kinds.length; i++) {
         var kind = kinds[i];
         if (!hard && G.keepKinds.indexOf(kind) >= 0) continue;
-        if (rep.prio(cid, kind) === G.lowPrio) continue;
-        rep.setPrio(cid, kind, G.lowPrio);
+        if (rep.keepRatio(cid, kind) <= low + 0.01) continue;
+        rep.setKeepRatio(cid, kind, low);
         cut++;
       }
-      if (cut) act.push('降档 ' + cut + ' 类');
+      if (cut) act.push('停 ' + cut + ' 类');
     }
     if (!act.length) return 0;
     MILG[cid] = { turn: D.turn(), ratio: ratio, act: act.join(' · ') };
@@ -1280,8 +1721,9 @@
     if (D.turn() - (MILG[cid].last || -99) >= 20) {
       MILG[cid].last = D.turn();
       if (AO.resWorldNews) {
+        /* v15：带上当事国 —— 消息要按玩家的情报档决定听不听得见、走几回合 */
         AO.resWorldNews(nameOfAi(cid) + ' 削减军费：常备军吃掉 ' + Math.round(ratio * 100) +
-          '% 岁入（' + act.join('、') + '）', 'warn');
+          '% 岁入（' + act.join('、') + '）', 'warn', { parties: [cid], kind: 'other' });
       }
     }
     return 1;
@@ -1294,12 +1736,32 @@
   /* ---------------- 一国一回合的战争格 ---------------- */
   function aiWarCountry(c, per, q) {
     var cid = c.id, n = 0;
+    /* 傀儡（v13）：仗不是它自己要打的 —— 出兵力道取**宗主**的 warBias × 0.5，
+     * 战术也跟着宗主的性格走（军国宗主 → 强攻，其余 → 围城）。
+     * 这样"兵随宗主"才有肉：宗主是个疯子，属国也跟着横冲直撞；
+     * 宗主是个商人，属国就只派一支偏师去站个场。
+     * 求和对它关闭：朝贡国的仗不由自己做主（能单独媾和的话，"强制参战"
+     * 两回合就会被它自己谈掉，那条关系等于不存在）。 */
+    var suz = AO.resPuppetOf ? AO.resPuppetOf(cid) : 0;
+    var share = 1;
+    if (suz) {
+      var sp = personaOf(suz), sq = quirkOf(suz);
+      per = sp === 'mil' ? 'mil' : 'balanced';
+      q = { war: sq.war || 1 };
+      share = (AO.DIPLO && AO.DIPLO.puppet && AO.DIPLO.puppet.attackWeight) || 0.5;
+    }
     n += guardMil(cid, per);
     n += tryRetreat(cid) ? 1 : 0;
-    n += tryPeace(cid) ? 1 : 0;
-    n += tryAttack(cid, per, q) ? 1 : 0;
+    if (!suz) n += tryPeace(cid) ? 1 : 0;
+    n += tryAttack(cid, per, q, share) ? 1 : 0;
     n += tryDeclare(cid, per, q) ? 1 : 0;
     n += tryTrade(cid, per) ? 1 : 0;
+    /* v14：卖积压（只有经营型做，见 trySell）。排在买之后 ——
+     * 同一回合先补缺口、再出余货，账面上不会出现"刚买进又卖出去"的荒唐事。 */
+    n += trySell(cid, per) ? 1 : 0;
+    /* v18：卖货（国内市场 5:1，卖积压换金进省库）。排在出口之后 ——
+     * 出口卖的是"卖不动的余货"，国内卖的是"多到爆仓的余货"，两边不抢同一笔。 */
+    if (aiMarketSell(cid) > 0) n++;
     return n;
   }
 
@@ -1354,12 +1816,14 @@
     var O = opt || {};
     var did = Object.create(null);
     var slots = Math.max(1, O.slots || E.actPerTurn || 2);
+    var bCap = (E.buildPerTurn || 1);
+    var didBuild = 0;
     var n = 0;
     for (var slot = 0; slot < slots; slot++) {
       var acted = false;
       /* 建造：每回合最多 buildPerTurn 座（默认 1）—— 这一格不做，第二格再试 */
-      if (P.build && !did.build && n < (E.buildPerTurn || 1) && tryBuild(cid, per)) {
-        did.build = true; acted = true; n++;
+      if (P.build && didBuild < bCap && tryBuild(cid, per)) {
+        didBuild++; did.build = true; acted = true; n++;
       } else if (P.research && !did.research && tryResearch(cid)) {
         did.research = true; acted = true;
       } else if (P.tax && !did.tax && tryTax(cid, per, O)) {
@@ -1420,7 +1884,8 @@
     }
     return n;
   }
-  /* 吏部巡查：每国每回合走一遍（不吃内政的两个动作格 —— 治官不是治国） */
+  /* 吏部巡查 + 军工产线：每国每回合走一遍（不吃内政的两个动作格 ——
+   * 治官不是治国，管炉子也不是）。 */
   function govTick() {
     var w = world();
     if (!w || !w.countries) return 0;
@@ -1429,7 +1894,14 @@
       var c = w.countries[i];
       if (!c || c.id === AO.resDebug.player()) continue;
       if (deadOf(c.id) || !provsOf(c.id).length) continue;
-      n += aiGovPatrol(c, personaOf(c.id));
+      var per = personaOf(c.id);
+      n += aiGovPatrol(c, per);
+      /* v17：产线按战况重排 → 有缺就抽匠派人 → 机动军配装。
+       * 顺序有讲究：先排产线（这一回合的炉子摆好），再派人（下一回合才有加成），
+       * 最后配装（吃的是**已经打出来**的库存）。 */
+      n += aiMillPolicy(c, per);
+      n += aiArtisans(c, per);
+      n += aiEquipFit(c);
     }
     return n;
   }
@@ -1601,6 +2073,15 @@
     peace: tryPeace,
     peaceScore: peaceScore,
     trade: tryTrade,
+    /* v14：出口（卖积压）单独一个入口 —— test/prices.js 要定点验"经营型会不会卖" */
+    sell: trySell,
+    /* v18：国内卖货（市场 5:1）/ 缺矿开矿 / 产线策略 —— test/lifeline.js 与
+     * bench-lifeline 定点验这三件事 */
+    sellMarket: aiMarketSell,
+    mineOpen: tryMineOpen,
+    expand: tryExpand,
+    wash: tryWash,
+    millPolicy: aiMillPolicy,
     guard: guardMil,
     milGuard: MILG,
     losing: LOSING,
@@ -1622,6 +2103,10 @@
     /* 单步入口（测试用）：只做一件事，不走"每回合两格"的调度 */
     build: tryBuild,
     buildOrder: function (cid) { return buildOrderOf(cid, personaOf(cid), false); },
+    /* v18.2：选省分数单独给出来 —— test/pop.js 要直接验"负载 > 85% 加分、
+     * < 50% 淘汰"，而不是靠挂机 60 回合去反推一个概率 */
+    provScore: provScore,
+    pickProv: pickProv,
     smelt: trySmelt,
     research: tryResearch,
     tax: tryTax,

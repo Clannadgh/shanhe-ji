@@ -301,14 +301,25 @@ function add(list) { for (const c of list) out.push(c); }
 
     /* 国家卡：别国按档 */
     const other = window.__NB.other;
+    /* v16 起国家卡分「概览 / 内政 / 外交」三页：国库/科技/治理都在内政页里，
+       所以要判"遮没遮"得先切到内政页 —— 不切的话它们是被页签藏起来的，
+       那样断言永远是 none，等于没验。页签只切类名，遮罩由 applyCountryMask 决定。 */
+    const toGovTab = () => {
+      const t = document.querySelector('#cTabs .itab[data-ctab="gov"]');
+      if (t) t.click();
+    };
     const show = (lv) => {
       D.fogSetBudget(P, lv);
       D.showCountry(other);
+      /* 先看概览页的两行（人口/经济），再切内政页看国库/科技/治理 */
+      document.querySelector('#cTabs .itab[data-ctab="ov"]').click();
+      const pop = seenRow('cPop'), econ = seenRow('cEcon');
+      toGovTab();
       return {
         bar: document.getElementById('cFogBar').hidden ? '' : document.getElementById('cFogBar').textContent,
         info: document.getElementById('cFogInfo').hidden ? '' : document.getElementById('cFogInfo').textContent,
         treasury: disp('#cTreasury'), tech: seenRow('cTech'), govern: seenRow('cGovern'),
-        pop: seenRow('cPop'), econ: seenRow('cEcon'), prov: document.getElementById('cProv').textContent
+        pop: pop, econ: econ, prov: document.getElementById('cProv').textContent
       };
     };
     const t0 = show(0);
@@ -321,11 +332,16 @@ function add(list) { for (const c of list) out.push(c); }
     const t2 = show(2);
     ok('⑦ 2 档：+ 国库约数 + 边境见闻', t2.treasury === 'none' && /国库/.test(t2.info) &&
       /边境见闻/.test(t2.info), t2.info.slice(0, 80));
-    /* 自己的国全透明 */
+    /* 自己的国全透明。三页分开验：国库/科技/治理在内政页，
+       人口在概览页 —— 一次只看得到一页，所以各切一次再判可见性。 */
     D.showCountry(P);
-    ok('⑦ 自己的国卡全透明', disp('#cTreasury') === 'shown' && seenRow('cTech') === 'shown' &&
-      seenRow('cGovern') === 'shown' && seenRow('cPop') === 'shown' &&
-      document.getElementById('cFogBar').hidden, '');
+    toGovTab();
+    const ownGov = { treasury: disp('#cTreasury'), tech: seenRow('cTech'), govern: seenRow('cGovern') };
+    document.querySelector('#cTabs .itab[data-ctab="ov"]').click();
+    const ownPop = seenRow('cPop');
+    ok('⑦ 自己的国卡全透明', ownGov.treasury === 'shown' && ownGov.tech === 'shown' &&
+      ownGov.govern === 'shown' && ownPop === 'shown' &&
+      document.getElementById('cFogBar').hidden, JSON.stringify({ ownGov, ownPop }));
     /* 治理面板：别国被遮蔽 */
     D.fogSetBudget(P, 2);
     D.openGov(P);

@@ -6,6 +6,9 @@
  *   3) 建造坊：有它的省工地行尾有 ＋（扣金、倒计时 −1、砍到 0 立即完工）；
  *      没有它的省没有这个钮；研究冲刺从中央扣费
  *   4) 全局科技四条各有效；队列：入队不扣费、队头开研才扣、扣不起停摆
+ *   4b) 铁矿「深层休眠」（v18 追加一补课）：采空 → 面板写「休眠 48」→ 倒数到点
+ *      回满复产；金矿仍永久枯竭（cool 0）——**旧断言"铁矿采空即永久枯竭"已作废**，
+ *      改由这一节验"休眠回满"。
  *   5) 存档 → 刷新 → 读档：同世界、同库存、同回合；不点读档刷新 = 纯工坊
  *   7) 六张新图标存在且能显示（市场/建造坊行、四条全局科技节点）
  *
@@ -191,8 +194,10 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
   await sleep(160);
   const sellUi = await ev(() => {
     const panel = document.querySelector('#iSchoolList .qinfo.on');
-    const rows = [...panel.querySelectorAll('.sellbox:not(.buy) .srow')];
-    const buys = [...panel.querySelectorAll('.sellbox.buy .srow')];
+    /* v14：卖货格 = 纯 .sellbox（buy / fbuy / exp 都是别节），所以三个 :not 都要排除；
+     * v18/B2 又加了兑换格（.xchg：付出/换回/这一手），照样排除 —— 卖货行还是七行 */
+    const rows = [...panel.querySelectorAll('.sellbox:not(.buy):not(.fbuy):not(.exp):not(.xchg) .srow')];
+    const buys = [...panel.querySelectorAll('.sellbox.buy:not(.fbuy) .srow')];
     return {
       n: rows.length,
       labels: rows.map(r => r.querySelector('span').textContent),
@@ -201,22 +206,61 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
       bbtns: buys.map(r => ({ t: r.querySelector('button').textContent, dis: r.querySelector('button').disabled }))
     };
   });
-  ck('市场 ? 面板：七种资源各一行「卖 5 → +1 金」',
-    sellUi.n === 7 && sellUi.btns.every(b => /卖 5 → \+1 金/.test(b.t)),
-    sellUi.n + ' 行：' + sellUi.labels.join('/'));
-  ck('市场 ? 面板：七种资源各一行买货「买 5 ← 8 金」',
-    sellUi.bn === 7 && sellUi.bbtns.every(b => /买 5 ← 8 金/.test(b.t)),
-    sellUi.bn + ' 行' + (sellUi.bn ? '' : '（买货格没画出来）'));
+  /* v14：价格不再固定 —— 按钮上的数必须等于**物价板上的数**（同一个 sellGold/buyGold）。
+   * 这一条就是任务书验收 ②「卖/买/外国买三处价格与价格板一致」的手算对表版。 */
+  const priceChk = await ev((pid) => {
+    const D = window.AO.resDebug, prov = D.world().provinces[pid - 1], cid = prov.owner;
+    const box = document.querySelector('#iSchoolList .qinfo.on');
+    const rows = [...box.querySelectorAll('.sellbox:not(.buy):not(.fbuy):not(.exp):not(.xchg) .srow')];
+    const buys = [...box.querySelectorAll('.sellbox.buy:not(.fbuy) .srow')];
+    const board = [...box.querySelectorAll('.pbrow')].map(r => ({
+      k: r.querySelector('.nm').textContent,
+      v: r.querySelector('b').textContent
+    }));
+    return {
+      sellOk: rows.every(r => {
+        const b = r.querySelector('button');
+        return b.textContent.indexOf('+' + D.priceNum(D.sellGold(cid, b.getAttribute('data-sell')))) >= 0;
+      }),
+      buyOk: buys.every(r => {
+        const b = r.querySelector('button');
+        return b.textContent.indexOf('← ' + D.buyGold(cid, b.getAttribute('data-buy')) + ' 金') >= 0;
+      }),
+      sellSample: rows[0] ? rows[0].querySelector('button').textContent.trim() : '',
+      buySample: buys[0] ? buys[0].querySelector('button').textContent.trim() : '',
+      boardN: board.length,
+      boardSample: board[0] ? board[0].k + ' ' + board[0].v : ''
+    };
+  }, P.id);
+  ck('市场 ? 面板：七种资源各一行卖货（价 = 本国物价指数）',
+    sellUi.n === 7 && priceChk.sellOk,
+    sellUi.n + ' 行 · ' + priceChk.sellSample + ' · ' + sellUi.labels.join('/'));
+  ck('市场 ? 面板：七种资源各一行买货（价 = 基准 × 本国物价）',
+    sellUi.bn === 7 && priceChk.buyOk,
+    sellUi.bn + ' 行 · ' + priceChk.buySample);
+  ck('市场 ? 面板：顶部价格板七行（现价 + 趋势 + 库存/需求）',
+    priceChk.boardN === 7, priceChk.boardN + ' 行 · ' + priceChk.boardSample);
 
   const goldBefore = await ev((id) => window.AO.resSim[id].gold.stock, P.id);
   const timBefore = await ev((id) => window.AO.resSim[id].timber.stock, P.id);
+  /* v14：卖价 = 本国物价指数（可能 1.3 / 0.7），所以这里验的是
+   * **"落袋 + 零头 = 物价"** —— 那正是"小数攒整不吞钱"那句话。
+   * 顺手记下卖前卖后的 PI：卖货本身不改价（价只在回合结算时动）。 */
+  const sellPre = await ev((pid) => {
+    const D = window.AO.resDebug, prov = D.world().provinces[pid - 1];
+    return { pi: D.priceOf(prov.owner, 'timber'), acc: D.sellAcc[pid] || 0 };
+  }, P.id);
   await ev(() => document.querySelector('#iSchoolList .qinfo.on button[data-sell="timber"]').click());
   await sleep(200);
   const goldAfter = await ev((id) => window.AO.resSim[id].gold.stock, P.id);
   const timAfter = await ev((id) => window.AO.resSim[id].timber.stock, P.id);
-  ck('卖 5 木材 → +1 金（本省库存直接扣）',
-    goldAfter === goldBefore + 1 && timAfter === timBefore - 5,
-    '木材 ' + timBefore + '→' + timAfter + '，金 ' + goldBefore + '→' + goldAfter);
+  const sellPost = await ev((pid) => (window.AO.resDebug.sellAcc[pid] || 0), P.id);
+  const gotGold = goldAfter - goldBefore;
+  ck('卖 5 木材 = 本国木价（落袋 + 零头，一分不吞）',
+    Math.abs((gotGold + sellPost - sellPre.acc) - sellPre.pi) < 1e-9 && timAfter === timBefore - 5,
+    '木材 ' + timBefore + '→' + timAfter + '，金 ' + goldBefore + '→' + goldAfter +
+    '（落袋 ' + gotGold + ' + 零头 ' + Math.round(sellPost * 100) / 100 + ' = 木价 ' +
+    Math.round(sellPre.pi * 100) / 100 + '）');
 
   /* 库存不足置灰 */
   await ev((id) => { window.AO.resSim[id].salt.stock = 1; }, P.id);
@@ -241,12 +285,15 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
   await sleep(150);
   const haltedSell = await ev(() => {
     const btns = [...document.querySelectorAll('#iSchoolList .qinfo.on button[data-sell]')];
+    const add = document.querySelector('#iSchoolList .rr[data-univ="market"] .add');
     return { n: btns.length, allOff: btns.every(b => b.disabled),
-             addOff: document.querySelector('#iSchoolList .rr[data-univ="market"] .add').disabled };
+             addOff: add.disabled, addTitle: add.title };
   });
-  ck('市场停产只停「卖」（建造钮仍然可用）',
-    haltedSell.allOff && haltedSell.addOff === false,
-    '卖货 ' + haltedSell.n + ' 个全灰=' + haltedSell.allOff + '，＋建造 disabled=' + haltedSell.addOff);
+  /* v18 追加三：市场每省一座 —— 这一行建满之后 ＋ 本来就灰了，
+   * 灰的原因是「每省一座」而不是「停产」。停产仍然只停卖货。 */
+  ck('市场停产只停「卖」；＋ 灰是"每省一座"，不是停产',
+    haltedSell.allOff && haltedSell.addOff === true && /每省一座市场/.test(haltedSell.addTitle),
+    '卖货 ' + haltedSell.n + ' 个全灰=' + haltedSell.allOff + '，＋建造 title=' + haltedSell.addTitle);
   await ev((id) => { window.AO.resMarket[id].halted = false; }, P.id);
   await clickSel(uniRow('market') + ' .qbtn');
   await sleep(100);
@@ -553,6 +600,103 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
   await ev(() => document.getElementById('ttClose').click());
   await sleep(120);
 
+  /* ---------- 4b) 铁矿深层休眠（v18 追加一补课） ----------
+   * 旧断言是"铁矿采空即永久枯竭（gone）"—— 铁 cool 改成 48 之后那条不成立了，
+   * 换成"采空 → 休眠 48 → 倒数到点回满复产"。金矿仍是 cool 0（永久枯竭），
+   * 两种"没矿"从此不是一回事，这条对照一起验。 */
+  const coolDefs = await ev(() => ({
+    iron: window.AO.RESOURCE_BY_KEY.iron.cool,
+    gold: window.AO.RESOURCE_BY_KEY.gold.cool
+  }));
+  ck('铁矿 cool = 48（深层休眠）· 金矿仍是 0（永久枯竭）',
+    coolDefs.iron === 48 && coolDefs.gold === 0, '铁 ' + coolDefs.iron + ' · 金 ' + coolDefs.gold);
+
+  /* 把这一省的铁矿捏成"只剩 1 点储量"：跑一回合就采空 */
+  await ev((id) => {
+    const s = window.AO.resSim[id].iron;
+    s.built = 2; s.tiers = { 1: 2, 2: 0 };
+    s.gone = false; s.cool = 0; s.halted = false; s.left = 1;
+    s.stock = 60;
+    window.AO.resSim[id].gold.stock = 150;          // 付得起维护，别让停产混进来
+  }, P.id);
+  await ev(() => { const D = window.AO.resDebug; D.settleTurn(); if (D.evtPending()) D.evtPick(0); });
+  await sleep(200);
+  const depleted = await ev((id) => {
+    const s = window.AO.resSim[id].iron;
+    return { cool: s.cool, gone: s.gone, left: s.left };
+  }, P.id);
+  ck('采空 → 进休眠 48 回合（不再 gone）',
+    depleted.cool === 48 && depleted.gone === false,
+    'cool=' + depleted.cool + ' gone=' + depleted.gone + ' left=' + depleted.left);
+
+  /* 面板：行上要出现蓝色的「休眠 48」小标，×N 也转蓝 */
+  await ev((id) => {
+    window.AO.resDebug.showInfo(id);
+    const body = document.getElementById('infoBody');
+    if (!body.classList.contains('tab-bld')) {
+      document.querySelector('#infoTabs .itab[data-tab="bld"]').click();
+    }
+  }, P.id);
+  await sleep(220);
+  const sleepRow = await ev(() => {
+    const row = document.querySelector('#iBldList .rr[data-key="iron"]');
+    const slp = row && row.querySelector('.sleep');
+    const qty = row && row.querySelector('.qty');
+    return { txt: slp ? slp.textContent : '', qty: qty ? qty.className : '',
+             title: row ? row.title : '' };
+  });
+  ck('面板转蓝：行上写「休眠 48」，×N 也转蓝',
+    /休眠\s*48/.test(sleepRow.txt) && /cool/.test(sleepRow.qty),
+    '标「' + sleepRow.txt + '」 · qty=' + sleepRow.qty);
+
+  /* 倒数到点：把 cool 压到 2 再跑两回合（走的是同一条 `s.cool--` → `left = n`），
+   * 这样不必真的等 48 回合，也不会被半路的事件改掉储量。 */
+  await ev((id) => {
+    const s = window.AO.resSim[id].iron;
+    s.cool = 2;
+  }, P.id);
+  await ev(() => {
+    const D = window.AO.resDebug;
+    for (let i = 0; i < 2; i++) { D.settleTurn(); if (D.evtPending()) D.evtPick(0); }
+  });
+  await sleep(200);
+  const woke = await ev((id) => {
+    const s = window.AO.resSim[id].iron;
+    return { cool: s.cool, left: s.left, n: s.n, gone: s.gone };
+  }, P.id);
+  ck('倒数到点回满：cool 归零、left 回满 n、没有 gone',
+    woke.cool === 0 && woke.left === woke.n && woke.gone === false,
+    'cool=' + woke.cool + ' left=' + woke.left + '/' + woke.n);
+
+  await ev((id) => {
+    const A = window.AO;
+    A.resSim[id].gold.stock = 150; A.resSim[id].iron.stock = 150;
+    const D = A.resDebug; D.settleTurn(); if (D.evtPending()) D.evtPick(0);
+  }, P.id);
+  await sleep(160);
+  const resumed = await ev((id) => {
+    const A = window.AO, s = A.resSim[id].iron;
+    return { left: s.left, prod: ((A.resFlow[id] || {}).d.prod || {}).iron || 0 };
+  }, P.id);
+  ck('醒了就复产（储量被采掉 / 流水里有产出）',
+    resumed.left < woke.n || resumed.prod > 0,
+    'left ' + woke.n + ' → ' + resumed.left + '，d.prod.iron=' + resumed.prod);
+
+  /* 对照：金矿采空还是 gone（永久枯竭，淘金场入口不变） */
+  await ev((id) => {
+    const s = window.AO.resSim[id].gold;
+    s.built = 2; s.tiers = { 1: 2, 2: 0 };
+    s.gone = false; s.cool = 0; s.halted = false; s.left = 1;
+  }, P.id);
+  await ev(() => { const D = window.AO.resDebug; D.settleTurn(); if (D.evtPending()) D.evtPick(0); });
+  await sleep(160);
+  const goldEnd = await ev((id) => {
+    const s = window.AO.resSim[id].gold;
+    return { cool: s.cool, gone: s.gone };
+  }, P.id);
+  ck('金矿采空仍是永久枯竭（cool 0 / gone）',
+    goldEnd.gone === true && goldEnd.cool === 0, 'cool=' + goldEnd.cool + ' gone=' + goldEnd.gone);
+
   /* ---------- 5) 存档 / 读档 ---------- */
   const saved = await ev((id, o) => {
     // 先把这一局捏成一个有辨识度的状态
@@ -563,6 +707,9 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
     return { gold: window.AO.resSim[id].gold.stock, school: window.AO.resSchool[id].n,
              turn: window.AO.resDebug.turn() };
   }, P.id, owner);
+  /* v16：存档/读档/科技/治理/编年史 收进了 ☰ 菜单，先把菜单打开再点 */
+  await page.click('#menuBtn');
+  await sleep(150);
   await page.click('#saveBtn');
   await sleep(200);
   const hasSave = await ev(() => {
@@ -589,6 +736,9 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
   ck('刷新后不点读档 = 纯工坊（回合 1、没被存档劫持）',
     fresh.hasWorld && fresh.turn === 1, '回合 ' + fresh.turn);
 
+  /* v16：存档/读档/科技/治理/编年史 收进了 ☰ 菜单，先把菜单打开再点 */
+  await page.click('#menuBtn');
+  await sleep(150);
   await page.click('#loadBtn');
   await sleep(3600);
   const loaded = await ev((id, o) => ({

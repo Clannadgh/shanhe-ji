@@ -52,6 +52,9 @@ const md5 = (f) => crypto.createHash('md5').update(fs.readFileSync(f)).digest('h
   await sleep(2600);
 
   /* ---- 1) 科技树：每条科技的图标都必须是 Lv2 图 ---- */
+  /* v16：存档/读档/科技/治理/编年史 收进了 ☰ 菜单，先把菜单打开再点 */
+  await page.click('#menuBtn');
+  await sleep(150);
   await page.click('#techBtn');
   await sleep(300);
   const nodes = await page.evaluate(() => [...document.querySelectorAll('#ttNodes .ttnode')].map(n => {

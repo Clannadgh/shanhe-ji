@@ -163,6 +163,23 @@
     return false;
   }
 
+  /* 按年分组（v13）：YEARLOG 是按**回合**存的，史书要按**年**分节。
+   * 一年 12 回合，硬按回合分会得到 12 倍厚的年表 —— 那不是史书，是流水账。
+   * 拎成函数是为了测试能直接验"同年的几条并到一节"，
+   * 而不用去 canvas 上数像素。 */
+  function yearsOf(limit) {
+    var out = [], gy = -1, g = null, i, rec, yr;
+    for (i = 0; i < YL.length; i++) {
+      rec = YL[i];
+      if (rec.turn > limit || !rec.entries.length) continue;
+      yr = AO.calOf ? AO.calOf(rec.turn).year : rec.turn;
+      if (yr !== gy) { gy = yr; g = { year: yr, recs: [] }; out.push(g); }
+      g.recs.push(rec);
+    }
+    return out;
+  }
+  AO.chronoYears = yearsOf;
+
   function capSnapshot(world) {
     var m = Object.create(null), i, c, p;
     for (i = 0; i < world.countries.length; i++) {
@@ -198,6 +215,29 @@
   /* 把当前 NOTES / WARLOG 里还没进年表的东西抄进去。
    * 空回合不建空年（一条都没有就什么都不做）—— 否则一千回合会攒下
    * 一千个空壳，读档还得多走一遍排序。 */
+  /* 文本的"骨头"：去掉 emoji、括号、标点、空白，只留字。
+   * 用来判"是不是同一件事" —— 战报和邸报的措辞差一个【十年七月】前缀、
+   * 一个（后闻），逐字比是比不出来的，去掉装饰之后就能互相包含。 */
+  function bone(s) {
+    return String(s == null ? '' : s).replace(EMOJI, '')
+      .replace(/[【】（）()「」『』·—：:，,。.\s]/g, '');
+  }
+  /* 迟到的一条进来时，这一年可能已经有同一件事了（战报也并进来了）。
+   * 那就只在旧条目末尾补一个「（后闻）」—— 史书是事后修订过的，
+   * 这个记号正是"史官后来才听说"的味道，而不是再抄一遍。 */
+  function markRear(rec, core) {
+    var c = bone(core);
+    if (c.length < 4) return false;
+    for (var i = 0; i < rec.entries.length; i++) {
+      var e = rec.entries[i], b = bone(e.text);
+      if (b.length < 4) continue;
+      if (c.indexOf(b) < 0 && b.indexOf(c) < 0) continue;
+      if (e.text.indexOf('（后闻）') < 0) e.text += '（后闻）';
+      return true;
+    }
+    return false;
+  }
+
   function archive() {
     if (!B) return 0;
     var world = B.world();
@@ -210,7 +250,21 @@
       n = notes[i];
       if (!n || !n.text || n.__yl) continue;
       n.__yl = 1;
-      rec.entries.push({ text: clean(n.text), cls: n.cls || '', tag: tagOf(n.text) });
+      /* 世界消息（v15）三条归位规矩：
+       *   ① 风闻不进年表（它只留在纪要里，等被更正）；
+       *   ② 更正条不进年表（实情那一条本来就在里面，再记一条等于记两遍）；
+       *   ③ 迟到的按**事件发生的年份**归位 —— 不是得知的年份。
+       *      史书是编年的，不是邮局的收发登记簿。 */
+      if (n.rumour || n.noYl) continue;
+      var et = n.evtTurn | 0, tr = rec;
+      if (et > 0 && et !== t) {
+        tr = findYear(et) || yearOf(et);
+        if (markRear(tr, n.core || n.text)) continue;
+      }
+      /* 迟到的那条在文末带「（后闻）」—— 史书不会假装当年就知道，
+       * 它老老实实写"后来才听说"。 */
+      var etxt = clean(n.text) + (et > 0 && et !== t ? '（后闻）' : '');
+      tr.entries.push({ text: etxt, cls: n.cls || '', tag: tagOf(n.text) });
     }
     /* 战报：新的在前 → 倒着并入，年表里就是正序 */
     var wl = B.warLog() || [];
@@ -450,6 +504,7 @@
           '<span id="chFlag"></span>' +
           '<div class="chn"><b id="chName"></b><i id="chNameEn"></i></div>' +
           '<div class="chsub" id="chSub"></div>' +
+          '<button id="chTurn" type="button" class="primary" title="结算本回合，进入下一回合">下一回合 ▸</button>' +
           '<button id="chClose" type="button" title="关闭（ESC）">×</button>' +
         '</header>' +
         '<div id="chMark"></div>' +
@@ -470,6 +525,19 @@
     built = true;
 
     $('chClose').addEventListener('click', close);
+    /* 书里也能走回合（v17）：全屏 z=44，把右上角那颗主线钮整个盖住了。
+     * 走完立刻重画 —— 年表多一行、终局度支变数、三张图可能换了疆域。
+     * 三张快照是按 world **对象**认缓存的，走回合不换对象，所以先手动丢缓存，
+     * 不然点完还是旧疆域（真机上看不出来，但对拍图的人就是 bug）。 */
+    $('chTurn').addEventListener('click', function () {
+      if (!AO.resNextTurn) return;
+      var sc = $('chScroll'), keep = sc ? sc.scrollTop : 0;
+      SHOTS = null; SHOTW = null;
+      AO.resNextTurn();
+      if (!OPEN) return;                 // 回合结算里若把书关了（读档/终局）就到此为止
+      render();
+      if (sc) sc.scrollTop = keep;       // 别把正在读的那一年弹回卷首
+    });
     $('chFoot').addEventListener('click', function (e) {
       var b = e.target;
       if (!b || !b.id) return;
@@ -619,7 +687,7 @@
     var box = $('chData');
     if (!box) return;
     var rows = [
-      ['在位', d.turn + ' 年'],
+      ['在位', (AO.calOf ? AO.calOf(d.turn).year : d.turn) + ' 年（' + d.turn + ' 回合）'],
       ['疆域', d.provN + ' 省 · ' + d.areaPct.toFixed(1) + '%'],
       ['人口', AO.formatPop ? AO.formatPop(Math.round(d.pop)) : num(d.pop)],
       ['国库存金', num(d.gold) + ' 金'],
@@ -929,45 +997,51 @@
     txt('编 年', M, y, '700 22px ' + FAM, INK);
     y += 30;
     var limit = FINAL ? FINAL.turn : (B.turn() | 0);
-    var picked = [], i, j, rec, e;
-    for (i = 0; i < YL.length; i++) {
-      rec = YL[i];
-      if (rec.turn > limit || !rec.entries.length) continue;
-      picked.push(rec);
-    }
+    /* grp 必须**声明**：本文件是 'use strict'，下面那句 `grp = years[i]` 是
+     * 给未声明标识符赋值 —— 一进循环就 ReferenceError（"grp is not defined"），
+     * 表现是"编年史里只要有年表，导出长卷就崩"。年表为空时循环不执行，
+     * 所以这个坑在空局里看不出来（本批就是这么撞上的）。 */
+    var years = yearsOf(limit), i, j, rec, e, grp;
     /* 全量太长：只取带 tag 的条目 + 每年首条（史书本来就是"择要而书"） */
     var budget = 170, used = 0;
     var lineH = 27;
-    for (i = 0; i < picked.length && used < budget; i++) {
-      rec = picked[i];
+    for (i = 0; i < years.length && used < budget; i++) {
+      grp = years[i];
       y += 34;                              // 年与年之间留一口气
-      txt('第 ' + rec.turn + ' 年', M, y, '700 17px ' + FAM, '#3c4147');
+      txt('第 ' + grp.year + ' 年', M, y, '700 17px ' + FAM, '#3c4147');
       y += 30;                              // 标题基线 → 第一条基线
       var shown = 0;
-      for (j = 0; j < rec.entries.length && used < budget; j++) {
-        e = rec.entries[j];
-        var keep = !!e.tag || j === 0;
-        if (!keep) continue;
-        var ef = '400 14px ' + SANS;
-        font(ef);                             // 量宽之前必须先把字号设上（dry 也一样）
-        var lines = wrapText(ctx, e.text, cw - 26);
-        if (lines.length > 4) lines = lines.slice(0, 4);
-        for (var k = 0; k < lines.length; k++) {
-          txt(lines[k], M + 26, y + k * lineH, ef,
-            e.tag && MILESTONE[e.tag] ? INK : INK2);
+      for (var g = 0; g < grp.recs.length && used < budget; g++) {
+        rec = grp.recs[g];
+        for (j = 0; j < rec.entries.length && used < budget; j++) {
+          e = rec.entries[j];
+          var keep = !!e.tag || shown === 0;
+          if (!keep) continue;
+          var ef = '400 14px ' + SANS;
+          /* 里程碑带年月小字（"十年七月"式）：哪一年做的事转眼就忘，
+           * 但"那年七月打的那一仗"记得住 —— 年月是史书里最便宜的锚点。 */
+          var body = e.text;
+          if (e.tag && AO.calTag) body = AO.calTag(rec.turn) + ' · ' + body;
+          font(ef);                             // 量宽之前必须先把字号设上（dry 也一样）
+          var lines = wrapText(ctx, body, cw - 26);
+          if (lines.length > 4) lines = lines.slice(0, 4);
+          for (var k = 0; k < lines.length; k++) {
+            txt(lines[k], M + 26, y + k * lineH, ef,
+              e.tag && MILESTONE[e.tag] ? INK : INK2);
+          }
+          if (!dry && e.tag && MILESTONE[e.tag]) {
+            ctx.fillStyle = RED;
+            ctx.beginPath();
+            ctx.arc(M + 9, y - 5, 3.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          y += lineH * lines.length;
+          shown++; used++;
         }
-        if (!dry && e.tag && MILESTONE[e.tag]) {
-          ctx.fillStyle = RED;
-          ctx.beginPath();
-          ctx.arc(M + 9, y - 5, 3.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        y += lineH * lines.length;
-        shown++; used++;
       }
       if (!shown) y += 2;
     }
-    if (!picked.length) {
+    if (!years.length) {
       txt('史册尚空。', M + 26, y + 20, '400 14px ' + SANS, INK2);
       y += 40;
     } else if (used >= budget) {
@@ -982,7 +1056,7 @@
     txt('终 局 度 支', M, y, '700 22px ' + FAM, INK);
     y += 28;
     var rows = [
-      ['在位', d.turn + ' 年'],
+      ['在位', (AO.calOf ? AO.calOf(d.turn).year : d.turn) + ' 年（' + d.turn + ' 回合）'],
       ['疆域', d.provN + ' 省 · ' + d.areaPct.toFixed(1) + '%'],
       ['人口', AO.formatPop ? AO.formatPop(Math.round(d.pop)) : num(d.pop)],
       ['国库存金', num(d.gold) + ' 金'],

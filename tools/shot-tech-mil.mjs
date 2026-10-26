@@ -41,7 +41,7 @@ async function runRound(opts) {
   /* 每轮一个全新上下文：第二轮必须零缓存，"删图"才测得出来 */
   const ctx = opts.incognito ? await browser.createBrowserContext() : browser.defaultBrowserContext();
   const page = await ctx.newPage();
-  await page.setViewport({ width: 1600, height: 1000, deviceScaleFactor: 1.5 });
+  await page.setViewport({ width: 1600, height: 1000, deviceScaleFactor: 2 });
 
   const errs = [];
   page.on('pageerror', e => errs.push('pageerror: ' + e.message));

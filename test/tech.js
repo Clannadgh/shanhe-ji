@@ -308,6 +308,17 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const dotHalt = await dotOf('伐木场');
   const titleHalt = await page.evaluate((e) => eval(e).getAttribute('title'), row('伐木场'));
   const stockHalt0 = haltedBag.stock;
+  /* 再穷一回合：把这一省和中央的铁/金**再清零一次**。
+   * 为什么要补这一下：抽税和人口税在维护之后结算，一回合下来中央又会攒出
+   * 够付 0.4 铁/0.4 金的零钱，伐木场下一回合就自己复工了 —— 那时测的已经不是
+   * "停产期间产量 0"，而是"财政恢复得多快"（秋季每笔 +1 会让它更早复工，
+   * 这条断言因此变得和季节版本绑定）。清干净才能只测这一条不变量。 */
+  await page.evaluate((id) => {
+    const bag = window.AO.resSim[id];
+    bag.iron.stock = 0; bag.gold.stock = 0;
+    const c = window.AO.resCentral[window.__world.provinces[id - 1].owner];
+    c.iron = 0; c.gold = 0;
+  }, P.id);
   await turns(1);
   const stockHalt1 = (await bagOf('timber')).stock;
   ck('铁/金造空 → 停产 + 红灯', haltedBag.halted && /halt/.test(dotHalt) && /维护欠费，停产中/.test(titleHalt),

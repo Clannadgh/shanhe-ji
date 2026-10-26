@@ -129,8 +129,12 @@
       /* 代表点落在没测绘的地方：地图上还是羊皮纸，名字无从落笔 */
       if (opt.vis && opt.vis(pt.id) === 0) continue;
       var size = sizeFor(c.area, cMax, tier.cLo, tier.cHi);
+      /* 傀儡国（v13）：国名后面挂"（臣）"。用函数探一下而不是直接读表 ——
+       * 这个文件在 Node 自检里会被单独加载（那会儿没有 11-ui，没有那张表）。 */
+      var pvTag = (typeof AO.puppetTagOf === 'function') ? AO.puppetTagOf(c.id) : '';
       item = {
-        kind: 'country', id: c.id, pid: pt.id, text: c.name, sub: tier.subCountry ? c.name_en : '',
+        kind: 'country', id: c.id, pid: pt.id, text: c.name + pvTag,
+        sub: tier.subCountry ? c.name_en : '',
         x: pt.x, y: pt.y, size: size, subSize: size - 1.5, weight: 700,
         color: INK_COUNTRY, priority: c.area * 4
       };

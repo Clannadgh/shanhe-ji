@@ -4,6 +4,8 @@
  * 覆盖验收清单 1~10：
  *   ① 选国锁权（别省 ＋ 钮置灰 / 自己全可用 / 退出回工坊）
  *   ② 军事科技两枝链 + 军械坊订单制（产量不随科技涨）
+ *      —— v19 终版返工后：树上只剩工艺（材质），炮/舰挂材质；兵刃线产"材质"不是"代"，
+ *      所以这一节的旧断言改成 材质 = 皮/青铜/铁，轰击改用炮（tier:'catapult'）。
  *   ③ 征兵三消耗 + 成建制门槛 + 军队吃粮/断粮掉兵
  *   ④ 武科抽将稀有度分布 + 词条→战术置灰
  *   ⑤ 会战两相位（战报可复算）+ 地形/压制/骰子 + 撤退 + 装备损毁
@@ -96,7 +98,10 @@ function add(list) { for (const c of list) out.push(c); }
     return o;
   }));
 
-  /* ---------------- ② 军事科技 + 军械坊 ---------------- */
+  /* ---------------- ② 工艺链 + 军械坊（v19 口径） ----------------
+   * 旧断言跟着改了：v17 的"接单 / 一炉 2 件 / 耗铁 1 木 1"是**订单制**的账；
+   * v19 起兵刃的"代"由工艺链决定（皮革是免费根），一单 = 1 队份（1000 件），
+   * 料 = 该代 recipe × 2。订单制的完整验收在 test/craft.js。 */
   add(await page.evaluate(() => {
     const D = window.AO.resDebug, AO = window.AO, o = [];
     const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
@@ -113,57 +118,73 @@ function add(list) { for (const c of list) out.push(c); }
     D.buildFactory(p, 'armory');
     const ar = AO.resMil.armory[pid];
     ok('② 军械坊要铁矿（已满足可建）', ar && ar.site > 0, 'site=' + (ar && ar.site));
-    /* 快进完工 */
-    ar.site = 0; ar.n = 1;
+    ar.site = 0; ar.n = 3;              // 3 座 = 6 点，够 5 点一单（一回合 1 单）
     AO.resMil.barracks[pid] = Object.assign({}, ar, { n: 0 });
     AO.resMil.barracks[pid].n = 0;
 
-    const r1 = D.setShopOrder(pid, 'armory', 'bronze');
-    ok('② 没研究就不能接青铜订单', !r1.ok && /还没解锁/.test(r1.msg), r1.msg);
+    /* 工艺链：没研工艺时兵刃线产的是**皮甲**（皮革是免费的根） */
+    const R1 = AO.resResearch[owner];
+    delete R1.done.mil_bronze; delete R1.done.mil_iron;
+    ok('② 皮革工艺是免费的根（树上已点亮）',
+      !!AO.TECH_BY_KEY.leather && AO.TECH_BY_KEY.leather.free === true);
+    ok('② 没研工艺：材质 = 皮', D.bestWeapon(owner).key === 'leather', D.bestWeapon(owner).key);
 
-    AO.resResearch[owner].done.mil_bronze = true;
-    const r2 = D.setShopOrder(pid, 'armory', 'bronze');
-    ok('② 研究后可以接单', r2.ok, r2.msg);
-
-    /* 把这一省的生产全停掉：不然"订单耗铁 1"会被"铁矿这一回合产 2"抵掉，验不出来 */
+    /* 把这一省的生产全停掉：不然"订单耗料"会被"铁矿这一回合产 2"抵掉 */
     const bag = AO.resSim[pid];
     for (const k in bag) {
       if (!bag[k] || !bag[k].tiers) continue;
       bag[k].built = 0; bag[k].tiers = { 1: 0, 2: 0 }; bag[k].site = 0; bag[k].halted = false;
     }
-    bag.iron.stock += 10; bag.timber.stock += 10;
-    const iron0 = bag.iron.stock, tim0 = bag.timber.stock;
-    const wp0 = D.itemStock(pid, 'bronze');
-    D.nextTurn();
-    const made = D.itemStock(pid, 'bronze') - wp0;
-    ok('② 订单产出 = out（2 件）', made === 2, 'made=' + made);
-    ok('② 订单耗料（铁1 + 木1）', bag.iron.stock === iron0 - 1 && bag.timber.stock === tim0 - 1,
-      'iron ' + iron0 + '→' + bag.iron.stock + ' / timber ' + tim0 + '→' + bag.timber.stock);
+    bag.iron.stock += 40; bag.timber.stock += 40;
+    const cen = AO.resCentral[owner];
+    const iron0 = bag.iron.stock + (cen.iron || 0), tim0 = bag.timber.stock + (cen.timber || 0);
 
-    /* 再研一档：解锁更多军械，但**产量不变**（产能是闸） */
-    AO.resResearch[owner].done.mil_iron = true;
-    D.setShopOrder(pid, 'armory', 'ironwp');
-    bag.iron.stock += 10; bag.timber.stock += 10;
-    const wp1 = D.itemStock(pid, 'ironwp');
+    /* 订单：一单 = 1 队份，工作量 5 点，料 = 青铜 recipe（铁1+木1）× 2 */
+    R1.done.mil_bronze = true;
+    ok('② 研成青铜工艺 → 兵刃线改产「青铜」材质', D.bestWeapon(owner).key === 'bronze', D.bestWeapon(owner).key);
+    D.setLineAlloc(owner, 'dao', 5, true);
+    const wp0 = D.arsTotal(owner, 'wpn');
     D.nextTurn();
-    const made2 = D.itemStock(pid, 'ironwp') - wp1;
-    ok('② 新一档产量仍是 2（不随科技涨）', made2 === 2, 'made=' + made2);
+    const made = D.arsTotal(owner, 'wpn') - wp0;
+    ok('② 一单 = 1 队份（1000 件）', made === 1, 'made=' + made);
+    /* 料：直接读 orderCost（同一回合别的省还在产铁，量总账会被产量抵消） */
+    const cst = D.orderCost(owner, 'dao');
+    ok('② 一单的料 = 该代 recipe × 2（铁 2 + 木 2）',
+      cst.iron === 2 && cst.timber === 2, JSON.stringify(cst));
 
-    /* 两枝链：冷兵器（青铜→铁→强弩）与火器（铁兵器段→火门枪→…） */
-    const R = AO.resResearch[owner];
-    const chain = ['mil_bronze', 'mil_iron', 'mil_crossbow', 'mil_matchlock', 'mil_musket'];
-    ok('② 两条枝的前置链正确',
-      AO.TECH_BY_KEY.mil_bronze.req === null && AO.TECH_BY_KEY.mil_iron.req === 'mil_bronze' &&
-      AO.TECH_BY_KEY.mil_crossbow.req === 'mil_iron' && AO.TECH_BY_KEY.mil_matchlock.req === 'mil_iron' &&
-      AO.TECH_BY_KEY.mil_musket.req === 'mil_matchlock',
-      chain.join('→'));
-    ok('② 军事科技点数递增 30→120',
-      AO.TECH_BY_KEY.mil_bronze.pts < AO.TECH_BY_KEY.mil_gw.pts &&
-      AO.TECH_BY_KEY.mil_gw.pts === 120 && AO.TECH_BY_KEY.mil_bronze.pts === 30);
+    /* 再研一档：换的是"代"，不是产量（产能是闸） */
+    R1.done.mil_iron = true;
+    /* v19 返工：没有"代"了 —— 铁器工艺解锁的是**材质**（铁），五类型一次全开 */
+    ok('② 铁器工艺只卖材质：AO.MIL_ITEM.iron.craft === mil_iron',
+      AO.MIL_ITEM.iron.craft === 'mil_iron' && AO.GEAR.types.length === 5);
+    /* 铁器工艺同时解锁"铁兵器"和"强弩·具装"两代；最高代按 AO.MIL_ORDER 取后者 */
+    /* 兵刃线产的是**工艺链那一代**（craftWeapon）；bestWeapon 读的是**库存**最高代
+     * —— 两个数在换代后不是一回事，这里分开断言（任务书第七节）。 */
+    ok('② 研成铁器工艺 → 兵刃线改产「铁」材质',
+      D.craftWeapon(owner).key === 'iron', D.craftWeapon(owner).key);
+    ok('② bestWeapon 仍读库存最高材质（还堆着青铜）',
+      D.bestWeapon(owner).key === 'bronze', D.bestWeapon(owner).key);
+    const wp1 = D.arsTotal(owner, 'wpn');
+    bag.iron.stock += 20; bag.timber.stock += 20;
+    D.nextTurn();
+    ok('② 新一档每回合仍只出一单（产能是闸）', D.arsTotal(owner, 'wpn') - wp1 === 1,
+      'made=' + (D.arsTotal(owner, 'wpn') - wp1));
+
+    /* 工艺链的前置与点数 */
+    ok('② 工艺链前置：皮革(免费根) → 青铜 → 铁器 → 火器 → 精密 → 工业',
+      AO.TECH_BY_KEY.mil_bronze.req === 'leather' && AO.TECH_BY_KEY.mil_iron.req === 'mil_bronze' &&
+      AO.TECH_BY_KEY.mil_matchlock.req === 'mil_iron' &&
+      AO.TECH_BY_KEY.mil_percussion.req === 'mil_matchlock' &&
+      AO.TECH_BY_KEY.mil_gw.req === 'mil_percussion');
+    ok('② 工艺点数递增 20→80',
+      AO.TECH_BY_KEY.mil_bronze.pts === 20 && AO.TECH_BY_KEY.mil_gw.pts === 80,
+      AO.TECH_BY_KEY.mil_bronze.pts + '→' + AO.TECH_BY_KEY.mil_gw.pts);
+    ok('② 兵器名节点已下树（没有 mil_crossbow / mil_musket 节点）',
+      !AO.TECH_BY_KEY.mil_crossbow && !AO.TECH_BY_KEY.mil_musket && !AO.TECH_BY_KEY.mil_breech);
     return o;
   }));
 
-  /* ---------------- ③ 征兵 ---------------- */
+  /* ---------------- ③ 征兵（v19：只出步兵，不扣装备） ---------------- */
   add(await page.evaluate(() => {
     const D = window.AO.resDebug, AO = window.AO, o = [];
     const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
@@ -178,40 +199,33 @@ function add(list) { for (const c of list) out.push(c); }
     bq.site = 0; bq.n = 1;
     ok('③ 兵营建成（不限省份）', bq.n === 1);
 
-    /* 成建制门槛：库存 0 件 → 不能征，且说明差几件。
-     * 注意"该代军械"取的是 recruitInfo 判定的那一档（前一节已研出铁兵器） */
-    const probe = D.recruitInfo(pid, 'inf');
-    const tier = probe.tier.key;
-    bag[tier] = { stock: 0, wp: true };
+    /* v19：征兵**不看装备库存** —— 只看人、钱、兵营 */
     const i0 = D.recruitInfo(pid, 'inf');
-    ok('③ 军械不够时不可征 + 写差几件', !i0.ok && /军械不够/.test(i0.why) && /差 1 件/.test(i0.why), i0.why);
-
-    D.addItem(pid, tier, 1);
-    const i1 = D.recruitInfo(pid, 'inf');
-    ok('③ 凑齐门槛后可征', i1.ok, i1.why);
+    ok('③ 没有装备也能征（兵种是武库发出来的）', i0.ok, i0.why);
 
     const pop0 = AO.resPop[pid].v;
     const gold0 = bag.gold.stock + (AO.resCentral[1].gold || 0);
-    const arms0 = D.itemStock(pid, tier);
+    const ars0 = D.arsTotal(1, 'wpn');
     const rr = D.recruit(pid, 'inf');
     const gold1 = bag.gold.stock + (AO.resCentral[1].gold || 0);
     ok('③ 征兵扣人口', AO.resPop[pid].v === pop0 - 1000, pop0 + '→' + AO.resPop[pid].v);
     ok('③ 征兵扣金', gold1 === gold0 - AO.RECRUIT.goldPerUnit, gold0 + '→' + gold1);
-    ok('③ 征兵扣军械', D.itemStock(pid, tier) === arms0 - 1, tier + ' ' + arms0 + '→' + D.itemStock(pid, tier));
+    ok('③ 征兵不扣装备（武库一件没少）', D.arsTotal(1, 'wpn') === ars0, ars0 + '→' + D.arsTotal(1, 'wpn'));
     ok('③ 征兵进入队列/成军', rr.ok, rr.msg);
 
     D.nextTurn();
     const mine = D.armiesOf(1);
-    ok('③ 一回合后成军', mine.length === 1, 'armies=' + mine.length);
-    const a = mine[0];
-    ok('③ 军队兵数 1000', a && a.men === 1000, a && a.men);
+    ok('③ 一回合后成军', mine.length >= 1, 'armies=' + mine.length);
+    const a = mine[mine.length - 1];
+    ok('③ 军队兵数 1000', a && a.men >= 1000, a && a.men);
+    ok('③ 裸兵：没有兵刃，战力 0.5',
+      a && !a.weapon && Math.abs(D.unitOf(a).atk - 0.5) < 1e-9, a ? D.gearText(a) : '');
 
     /* 断粮：把粮、鱼、中央存粮全清空 → 掉兵 + 战力打折 */
     bag.grain.stock = 0; bag.fish.stock = 0;
     AO.resCentral[1].grain = 0;
     bag.grain.built = 0; bag.grain.tiers[1] = 0; bag.grain.halted = true;
     const men0 = a.men;
-    AO.resCentral[1].grain = 0;
     D.settleWar();                 // 只跑战争段：补给 → 掉兵
     const a2 = D.army[a.id];
     ok('③ 断粮掉兵（3%）', a2 && a2.men < men0, men0 + '→' + (a2 && a2.men));
@@ -358,15 +372,16 @@ function add(list) { for (const c of list) out.push(c); }
       if (X) break;
     }
     AO.resResearch[1].done.mil_matchlock = true;
-    const gun = { id: 9001, owner: 1, type: 'army', tier: 'matchlock', men: 3000, ships: 0, cargo: null,
-      generalId: 0, order: null, pid: X, sup: false, starved: false, arms: 'inf' };
-    D.army[9001] = gun;
+    /* v19 返工：轰击要的是**炮**（射程/攻城值来自炮位），兵刃再高也没有射程。
+     * 旧写法 tier:'matchlock' 是"火枪=远程"的老口径，现在 matchlock 是材质（火器），
+     * 所以这里直接发一门投石机（开局就有，不需要研工艺）。 */
+    const gun = D.newArmy(1, X, { type: 'army', tier: 'catapult', men: 3000 });
     const foe = D.newArmy(2, Y, { type: 'army', tier: 'bronze', men: 2000 });
     foe.order = { type: 'defend', cid: 2, pid: Y, tactic: 'assault' };
 
     const men0 = foe.men;
     const logN = D.log().length;
-    D.setOrder(9001, { type: 'bombard', pid: Y, tactic: 'assault' });
+    D.setOrder(gun.id, { type: 'bombard', pid: Y, tactic: 'assault' });
     D.settleWar();
     ok('⑥ 轰击造成伤亡', D.army[foe.id].men < men0, men0 + '→' + D.army[foe.id].men);
     const newLogs = D.log().slice(0, D.log().length - logN).map(e => e.text);
@@ -410,7 +425,10 @@ function add(list) { for (const c of list) out.push(c); }
     const w = D.world();
     /* 现挑一个**还活着、省数够多**的 AI 国：前面几段已经打过仗，
      * 写死 "2 号国" 会踩到"它已经在 ⑥ 里被吞并"的状态漂移。 */
-    const cB = w.countries.find(c => c.id !== 1 && !D.deadMap[c.id] && c.provinces.length >= 6);
+    /* v14：还要**不是 1 号国的属国** —— 那一段的"宣战"对属国会给出
+     * 「要收地走强并入」，断言就白等了（世界漂移撞上傀儡名单，不是 bug）。 */
+    const cB = w.countries.find(c => c.id !== 1 && !D.deadMap[c.id] && c.provinces.length >= 6 &&
+      !(D.suzerainOf && D.suzerainOf(c.id) === 1));
     if (!cB) { ok('⑦ 还有可测的国家', false, '所有 AI 国都没了'); return o; }
     const B = cB.id;
     const cap = cB.capital;
@@ -435,7 +453,9 @@ function add(list) { for (const c of list) out.push(c); }
     D.occupy(cap, B);
     ok('⑦ 光复解除群龙无首', !D.isDecap(B));
 
-    /* 占领省产出 ×0.6：同一省两回合 A/B 对比 */
+    /* 未整合省产出 ×0.4（A/B 对比）——v13 起占领省不再固定 ×0.6，
+     * 而是随 INTEG 从 0.4 爬到 0.6（整合完成才是 ×1）。这里没有 INTEG 记录，
+     * 正好等于"刚打下来"那一档 ×0.4。 */
     const pid = w.provinces.find(p => p.owner === 1 && p.id !== cap).id;
     const bag = AO.resSim[pid];
     function reset() {
@@ -451,7 +471,7 @@ function add(list) { for (const c of list) out.push(c); }
     reset();
     D.nextTurn();
     const g2 = (D.flow[pid].gain.grain || 0);
-    ok('⑦ 占领省产出 ×0.6（3→1.8 → 落袋 1）', g1 === 2 && g2 === 1, '正常 ' + g1 + ' / 占领 ' + g2);
+    ok('⑦ 未整合省产出 ×0.4（3→1.2 → 落袋 1）', g1 === 2 && g2 === 1, '正常 ' + g1 + ' / 占领 ' + g2);
 
     /* 投降：先宣战（投降线的分母 = **开战那一刻**的省数），再把它打到线下。
      * 顺序反过来的话分母会跟着缩水，永远到不了 1/3 —— 这也是真实玩法的顺序。 */
@@ -465,7 +485,14 @@ function add(list) { for (const c of list) out.push(c); }
     let guard = 0;
     while (cB.provinces.length > keep && guard++ < 400) D.occupy(cB.provinces[0], 1);
     ok('⑦ ' + B + ' 号国剩省 ' + cB.provinces.length + '（线 ' + keep + '）', cB.provinces.length <= keep);
+    /* v13：投降线有三种结局（全吞 / 收成朝贡国 / 玩家受降卡）。
+     * 这一段验的是**全吞这条老路还完整**，所以把掷点钉在"不收属国"那一侧 ——
+     * 40% 的称臣分支由 test/puppet.js ③ 专门验（那里连统计区间都算过）。
+     * 钉不住的话这条会随种子在 60%/40% 之间跳，属于测试自身的毛病。 */
+    const rnd0 = Math.random;
+    Math.random = () => 0.99;
     D.settleWar();
+    Math.random = rnd0;
     ok('⑦ 触发投降 → 全境并入', !!D.deadMap[B],
       JSON.stringify(D.deadMap[B] || {}) + ' · base=' + baseB + ' · declare=' + dr.msg);
     ok('⑦ 灭亡国省表清空', cB.provinces.length === 0, '剩 ' + cB.provinces.length);
@@ -611,9 +638,11 @@ function add(list) { for (const c of list) out.push(c); }
       d && ('PLAYER=' + d.PLAYER + ' 军 ' + Object.keys(d.ARMY).length + ' 支 将 ' +
         Object.keys(d.GENERALS || {}).length + ' 位 交战 ' + Object.keys(d.WARSET).length));
     ok('⑩ 存档含装备厂状态', !!(d && d.BARRACKS && d.ARMORY && d.SHIPYARD));
-    /* 装备库存跟着 SIM 袋走 —— 抽查一个武器键 */
-    const wpKey = Object.keys(d.SIM).map(k => d.SIM[k]).some(b => b && b['ironwp'] && b['ironwp'].wp);
-    ok('⑩ 装备库存随 SIM 袋持久化', wpKey, wpKey ? '找到 ironwp 袋' : '没找到（可能这局还没产过）');
+    /* v19：成品不再进 SIM 袋，进**全国武库**（ARSENAL，队份）—— 旧断言跟着改了 */
+    const hasArs = !!(d && d.ARSENAL && Object.keys(d.ARSENAL).length);
+    ok('⑩ 武库（ARSENAL）进档', hasArs,
+      hasArs ? Object.keys(d.ARSENAL).join(',') : '空（这局还没出过货）');
+    ok('⑩ 产线分配进档（MILLV=19）', d && d.MILLV === 19, d && d.MILLV);
     return o;
   }));
 

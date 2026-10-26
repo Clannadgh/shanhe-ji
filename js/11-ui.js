@@ -77,6 +77,8 @@
     /* 熔旧坊 + 铁税零头也是"这一局"的：不清的话上一局的 2 座炉会挂到
      * 新世界同号省的铁矿场行上，把"铁矿场"显示成"熔旧坊" */
     for (var smk in SMELT) delete SMELT[smk];
+    /* 淘金场（v18）：同理 —— 不清的话上一局的淘金场会挂到新世界同号省的金矿行上 */
+    for (var wsk in WASH) delete WASH[wsk];
     for (var iak in IRONACC) delete IRONACC[iak];
     for (var pk in POP) delete POP[pk];
     for (var hk in SCHOOL) delete SCHOOL[hk];
@@ -94,6 +96,8 @@
     for (var xk in TAXRATE) delete TAXRATE[xk];
     for (var hk2 in HAPPY) delete HAPPY[hk2];
     for (var ak in TAXACC) delete TAXACC[ak];
+    /* 上解统计是"这一局"的（bench 读它看这条规则有没有在动） */
+    REMIT.n = 0; REMIT.gold = 0;
     /* v12：宰相也是"这一局"的 —— 不清的话新世界的 1 号国直接继承上一局的宰相 */
     for (var ck in CHANCELLOR) delete CHANCELLOR[ck];
     GOV_ID = 1;
@@ -103,13 +107,24 @@
     for (var mk2 in BARRACKS) delete BARRACKS[mk2];
     for (var am in ARMORY) delete ARMORY[am];
     for (var sb in STABLE) delete STABLE[sb];
-    for (var fd in FOUNDRY) delete FOUNDRY[fd];
     for (var sy in SHIPYARD) delete SHIPYARD[sy];
     for (var ay in ARMY) delete ARMY[ay];
     for (var gn in GENERALS) delete GENERALS[gn];
     for (var ws in WARSET) delete WARSET[ws];
     for (var wb in WARBASE) delete WARBASE[wb];
     for (var oc in OCCUPY) delete OCCUPY[oc];
+    /* 不安 / 整合 / 安抚冷却 / 匪患标记全是"这一局"的 —— 不清的话新世界的
+     * 3 号省会扛着上一局的 80 点不安开局就叛乱 */
+    for (var ug in UNREST) delete UNREST[ug];
+    for (var ig in INTEG) delete INTEG[ig];
+    for (var bg in BANDIT) delete BANDIT[bg];
+    for (var pc in PACIFY) delete PACIFY[pc];
+    for (var uw in UNWARN) delete UNWARN[uw];
+    /* 物价也是"这一局"的：不清的话新世界的 5 号国会继承上一局的粮价 */
+    for (var prc in PRICES) delete PRICES[prc];
+    for (var psh in PRICESHOCK) delete PRICESHOCK[psh];
+    for (var slc in SELLACC) delete SELLACC[slc];
+    for (var expk in EXP1) delete EXP1[expk];
     for (var sg in SIEGE) delete SIEGE[sg];
     for (var bl in BLOCKADE) delete BLOCKADE[bl];
     for (var dd in DEAD) delete DEAD[dd];
@@ -125,8 +140,15 @@
     for (var ta in TRADEACC) delete TRADEACC[ta];
     for (var ra in RELACC) delete RELACC[ra];
     for (var rh in RELHIT) delete RELHIT[rh];
+    /* 傀儡表（v13）：也是"这一局"的。不清的话新世界的同号国家会凭空变成
+     * 上一局某个人的属国 —— 而且这种脏表最难查（面板上有字，但你从没立过表）。 */
+    for (var pp2 in PUPPET) delete PUPPET[pp2];
+    SURR.open = false; SURR.loser = 0; SURR.winner = 0;
     TALK.open = false; TALK.to = 0;
     WARLOG.length = 0;
+    /* 世界消息（v15）：上一条"在路上"的邸报不能送进新世界的同号国家 ——
+     * 那会变成"这局还没开打，你先收到一封别处的战报"。 */
+    PNEWS.length = 0; RUMOURS.length = 0; newsFogTouch();
     ARMY_ID = 1; GEN_ID = 1; PLAYER = 0;
     /* 迷雾（v6）：换世界 = 换一张没人测绘过的地图。不清的话上一局的
      * 已探省 / 关系值 / 情报预算会挂到新世界的同号省份上。 */
@@ -137,8 +159,10 @@
     closeGovPanel();
     /* 编年史（v5）：年表 / 定稿 / 首都快照都是"这一局"的，换世界一并清掉 */
     if (AO.chronoReset) AO.chronoReset();
-    /* 维修档（19-repair.js）：优先档 / 停修名单 / 维修队都是"这一局"的 */
+    /* 维修档（19-repair.js）：保留座数 / 停修名单都是"这一局"的 */
     if (AO.repLoad) AO.repLoad(null);
+    /* 平衡分析（20-balance.js）：历史曲线也是"这一局"的 —— 换世界就清空 */
+    if (AO.balReset) AO.balReset();
     state.openKey = null;
     state.infoId = 0;
     // 让浏览器先把"生成中"画出来，再释放一次垃圾，最后才做重活
@@ -310,8 +334,18 @@
    *     iAcc   铁的小数零头（每座 0.5~0.6 铁/回合，攒整才入得了库）
    * 惰性创建（smeltOf）：1100 个省里绝大多数矿还没枯，别开局就给每省塞一条空记录。 */
   var SMELT = Object.create(null);
-  /* 人口铁税的小数零头（照 TAXACC）：每 200 万人 0.1~0.4 铁，
-   * 一个中位省要几十回合才攒出 1 块 —— 不攒整就永远收不上来。 */
+  /* 淘金场（枯竭金矿场的改建，v18 / A）：金的熔旧坊，**逐条镜像 SMELT**。
+   *   pid -> { n, site, halted, mAcc:{iron,gold}, iAcc, tAcc }
+   *     n      已改建几座（≤ AO.WASH.maxPer = 2）
+   *     site   改建工地剩几回合（0 = 没在改）
+   *     halted 这一回合没木 → 停淘（当回合不出金，不倒扣）
+   *     mAcc   备用零头（和 SMELT 同形状，存档/面板共用一条归一化路）
+   *     iAcc   金的小数零头（每座 0.25~0.4 金/回合，攒整才入得了库）
+   *     tAcc   木材的小数零头（1 金 = 2 木，攒整才扣得动）
+   * 惰性创建（washOf）：1100 个省里绝大多数金矿还没枯。 */
+  var WASH = Object.create(null);
+  /* 人口铁税的小数零头（照 TAXACC）：每 ironUnit（10 万）人 0.1~0.4 铁，
+   * 一个中位省一回合 0.2~0.4 块，仍要攒整才落得了袋。 */
   var IRONACC = Object.create(null);
   var SCHOOL = Object.create(null);   // pid -> { n, site, halted, mAcc }（每省的学校）
   var MARKET = Object.create(null);   // pid -> 同款结构（市场：卖资源换金）
@@ -331,7 +365,6 @@
   var BARRACKS = Object.create(null); // pid -> 同款结构（兵营：征兵入口）
   var ARMORY = Object.create(null);   // pid -> 同款 + { order: 军械键 }
   var STABLE = Object.create(null);   // pid -> 同款结构（驯马场：产战马）
-  var FOUNDRY = Object.create(null);  // pid -> 同款 + { order: 炮键 }
   var SHIPYARD = Object.create(null); // pid -> 同款 + { order: 舰种键 }
   /* 十种"通用设施"形状完全一样（n / site / halted / mAcc），
    * 用一个注册表把它们当成同一种东西处理 —— 维护、工地推进、完工、冲刺
@@ -340,14 +373,14 @@
   var UNIV = {
     school: SCHOOL, market: MARKET, builder: BUILDER,
     granary: GRANARY, university: UNIVERSITY,
-    barracks: BARRACKS, armory: ARMORY, stable: STABLE, foundry: FOUNDRY, shipyard: SHIPYARD,
+    barracks: BARRACKS, armory: ARMORY, stable: STABLE, shipyard: SHIPYARD,
     factory: FACTORY_BLD
   };
   var UNIV_KINDS = ['school', 'market', 'builder', 'granary', 'university',
-    'barracks', 'armory', 'stable', 'foundry', 'shipyard', 'factory'];
+    'barracks', 'armory', 'stable', 'shipyard', 'factory'];
   /* 民用四件套 + 大学（顺序就是面板里的行序：学校 → 市场 → 建造坊 → 粮仓 → 大学） */
   var UNIV_CIVIL = ['school', 'market', 'builder', 'granary', 'university'];
-  var UNIV_MIL = ['barracks', 'armory', 'stable', 'foundry', 'shipyard', 'factory'];
+  var UNIV_MIL = ['barracks', 'armory', 'stable', 'shipyard', 'factory'];
   function univDef(kind) {
     if (kind === 'market') return AO.MARKET;
     if (kind === 'builder') return AO.BUILDER;
@@ -376,7 +409,22 @@
    * 不是需求额，所以对不上账时一眼能看出是欠费还是没产。 */
   var FLOW = Object.create(null);
   var FLOWC = Object.create(null);
+  /* 一份空流水。抽成函数是因为**回合外**也会记账（出口 / 商队：玩家在面板上
+   * 点一下就要落账，不能等到下回合结算才建表 —— 否则"读档后第一次出口"
+   * 和"新开一局第一回合出口"都会静默丢掉两笔账）。 */
+  function newFlow() {
+    return { gain: Object.create(null), loss: Object.create(null),
+             d: { eat: Object.create(null), tax: Object.create(null),
+                  maint: Object.create(null), maintC: Object.create(null),
+                  cap: Object.create(null), prod: Object.create(null) } };
+  }
+  function flowOf(pid) { return FLOW[pid | 0] || (FLOW[pid | 0] = newFlow()); }
   var turnNo = 1;
+  /* 年 / 月全从 turnNo 派生，不单独存字段 —— 存档里只有回合数，
+   * 旧档读进来也立刻有正确的年号（这就是"纯派生"的好处）。
+   * 挂在 AO 上是因为 15-resources 的 AO.calOf / AO.calTag 要读它，而那两个
+   * 文件的加载顺序是 15 在前、11 在后。 */
+  AO.curTurn = function () { return turnNo; };
 
   /* ---------------- 治理层（官员 / 人口税 / 幸福度） ----------------
    * 四张表 + 两个零头，形状都照 RESEARCH / SCHOOL 的老路子来（对象按 id 挂）：
@@ -394,6 +442,10 @@
   var TAXRATE = Object.create(null);
   var HAPPY = Object.create(null);
   var TAXACC = Object.create(null);
+  /* 省库上解的累计（v18 / D，**运行时统计，不进档**）：
+   * { n: 搬过几笔, gold: 一共搬了多少金 }。bench 与 test 用它回答
+   * "这条规则到底有没有在动" —— 只看某一回合的流水会被"这一回合没到线"骗过去。 */
+  var REMIT = { n: 0, gold: 0 };
   var GOV_ID = 1;                     // 官员 id 计数器（存档里存的是 id，不重排）
 
   /* ---------------- 官员的"人味"（v11：资历 / 怨气） ----------------
@@ -676,6 +728,11 @@
    *   ARMY          军队 id → { owner,type,tier,men,ships,cargo,generalId,order,pid,sup }
    *   GENERALS      将领 id → { id,name,traitKey,owner,armyId }
    *   OCCUPY        省 id → { by, turn }（占领：产出×0.6、民心−10、不产科研）
+   *   INTEG         省 id → { v }（整合度 0~100：只有占领省才有，完成即删除）
+   *   UNREST        省 id → { v, target, drivers }（不安 0~100：只涨不降，见 15-resources）
+   *   BANDIT        省 id → { turn, left }（匪患标记：下一回合产出归零 + 不安 +10）
+   *   PACIFY        省 id → 上次安抚的回合号（冷却 3 回合）
+   *   UNWARN        省 id → 已报过的预警档（0 未报 / 1 警戒 70 / 2 危急 90）
    *   SIEGE         省 id → { by }（围城中：产出归零、守军吃存粮）
    *   BLOCKADE      省 id → owner（舰队封锁：断渔获、禁买货、民心−5）
    *   DEAD          国 id → { turn, by }（已灭亡，投降后全境并入）
@@ -689,6 +746,18 @@
   var GENERALS = Object.create(null);
   var ARMY_ID = 1, GEN_ID = 1;
   var OCCUPY = Object.create(null);
+  var INTEG = Object.create(null);
+  var UNREST = Object.create(null);
+  var BANDIT = Object.create(null);
+  var PACIFY = Object.create(null);
+  var UNWARN = Object.create(null);
+  /* 动态市场（v14）：PRICES[cid][key] = { v, target, trend }。
+   * PRICESHOCK 是事件冲击（旱情 / 商队），SELLACC 是卖货的小数零头，
+   * EXP1 记"这个省本回合已经出口过"（存回合号，占位：每省每回合 1 笔）。 */
+  var PRICES = Object.create(null);
+  var PRICESHOCK = Object.create(null);
+  var SELLACC = Object.create(null);
+  var EXP1 = Object.create(null);
   var SIEGE = Object.create(null);
   var BLOCKADE = Object.create(null);
   var DEAD = Object.create(null);
@@ -748,13 +817,45 @@
   var TRADEACC = Object.create(null);
   var RELACC = Object.create(null);
   var RELHIT = Object.create(null);
+  /* 傀儡与朝贡（v13）：'a|b'（warKey，无序）→ { s: 宗主, p: 傀儡, since, annexCd, warT }
+   *
+   * 键还是老规矩的无序对，**方向写在记录里**（s / p）—— 因为这张表不是对称的：
+   * "甲是乙的宗主"和"乙是甲的宗主"是两件事，用一张单向表就够，查的时候按字段找。
+   * 一国同时只能有一条（当傀儡 or 当宗主），所以按 p 找唯一。
+   *
+   *   since    称臣的回合（"已 N 回合"读它）
+   *   annexCd  **绝对回合号**：到这个回合之后才能提「和平并入」（和 TALKCD 同一种写法）
+   *   warT     最近一次被宗主拖进战争的回合（"未被卷入 10 回合"读它）
+   *
+   * 朝贡不存账 —— 每回合现算现转，FLOWC 上记一笔（gain.tribute / loss.tribute），
+   * 和贸易、俸禄同一套流水，国家卡的收支行里能直接对账。 */
+  var PUPPET = Object.create(null);
+  /* 受降选择卡（v13）：玩家在投降线上是胜方时弹一张「全吞 / 扶植傀儡」。
+   * 和谈判桌共用同一个弹窗（同一套纸面语汇），所以这里只存"谁向谁受降"。
+   * open 为真时 trySurrender 不再重复掷 —— 否则玩家还没选，下回合又弹一次。 */
+  var SURR = { open: false, loser: 0, winner: 0 };
   /* 停战冷却（v10）：'a|b' → 到这个回合之前不许重新宣战。
    * AI 互战要"打了就别隔回合又打"，否则同一对邻居会变成永动机。
    * 玩家不受它限制（按钮本来就在玩家手里），所以只给 AI 决策读。 */
   var PEACECD = Object.create(null);
-  /* 「遥远的战争」（v10）：AI 之间的宣战 / 灭国 / 都城易手，攒在这里，
-   * 每回合最多往 NOTES 里放 AO.AIWAR.newsPerTurn 条 —— 64 国一起喊会糊成一片。 */
-  var WNEWS = [];
+  /* 「世界消息」（v15，前身是 v10 的 WNEWS）：AI 之间的事攒在这里等送达。
+   * 和 v10 的区别：v10 是**当回合就推**（地图有迷雾、纪要却全知），
+   * 现在每一条入队时都记下 evtTurn / delay / tier，结算尾只放**到期**的。
+   * 结构（也原样进存档）：
+   *   { text, cls, kind, parties:[a,b], evtTurn, delay, tier,
+   *     rumour:0|1, mis:[…]（风闻误指的国家）, rt（风闻正文） } */
+  var PNEWS = [];
+  /* 还没被更正的「风闻」：等**同一对国家（或被误指的那国）**再出实讯、
+   * 或者玩家的密探探到它，就补一条「更正：前讯有误」。最多挂 12 条 ——
+   * 风闻本来就不该记得太清楚。 */
+  var RUMOURS = [];
+  /* bench 三项（验收 ⑥）：各档平均送达延迟 / 被"未知国"丢弃的条数 / 风闻率。
+   * 风闻率的分母是**0 档入队条数**而不是全部入队条数 —— 1/2 档永不走样，
+   * 混着算会把 15% 稀释成个位数，那个数就没法验收了。 */
+  var NSTAT = {
+    byTier: [{ n: 0, sum: 0 }, { n: 0, sum: 0 }, { n: 0, sum: 0 }],
+    enq0: 0, rumour: 0, dropped: 0, delivered: 0
+  };
   /* 谈判卡：open = 开着没；to = 正在谈的那个国家 */
   var TALK = { open: false, to: 0 };
 
@@ -769,6 +870,7 @@
   AO.resFreight = FREIGHT_LV;
   AO.resWall = WALL;
   AO.resSmelt = SMELT;
+  AO.resWash = WASH;
   AO.resIronAcc = IRONACC;
   AO.resSchool = SCHOOL;
   AO.resMarket = MARKET;
@@ -776,6 +878,12 @@
   AO.resGranary = GRANARY;
   AO.resUniversity = UNIVERSITY;
   AO.resFactory = FACTORY_BLD;
+  /* 整张通用设施表（学校/市场/兵营/军械坊…都在这张 UNIV 里）。
+   * 导出它是为了测试能直接给某一国"造"一座兵营来验保留座数 ——
+   * 逐个 kind 各导一个 AO.resXxx 只会让出口越来越长。
+   * **故意不叫 resXxx**：测试里有"扫所有 res* 表来数工地"的写法，
+   * 叫 resUniv 会让学校/兵营这些表被数两遍（踩过一次）。 */
+  AO.univAll = UNIV;
   AO.resResearch = RESEARCH;
   AO.resFlow = FLOW;
   AO.resFlowC = FLOWC;
@@ -791,7 +899,7 @@
   AO.resWarLog = function () { return WARLOG; };
   AO.resPlayer = function () { return PLAYER; };
   AO.resMil = {
-    barracks: BARRACKS, armory: ARMORY, stable: STABLE, foundry: FOUNDRY, shipyard: SHIPYARD,
+    barracks: BARRACKS, armory: ARMORY, stable: STABLE, shipyard: SHIPYARD,
     factory: FACTORY_BLD
   };
   AO.resWar = {
@@ -802,38 +910,360 @@
    * 不再各自去摸闭包里的变量名。 */
   AO.resDiplo = {
     allies: ALLIES, naps: NAPS, score: WSCORE, cd: DIPCD, talkCd: TALKCD,
-    prop: DIPPROP, tradeAcc: TRADEACC, relAcc: RELACC
+    prop: DIPPROP, tradeAcc: TRADEACC, relAcc: RELACC,
+    /* v13：傀儡表（读）+ 受降卡状态。写一律走下面那几个函数。 */
+    puppet: PUPPET, surrender: SURR
   };
 
   /* 一回合里攒下的提示（科研解锁/完成、本省欠费停产），
    * 等 nextTurn 刷完界面再挑当前看得见的国家/省份报出来 —— 64 个国家一起喊会糊成一片。 */
   var NOTES = [];
 
-  /* ---------------- 「遥远的战争」（v10） ----------------
-   * AI 之间的宣战 / 灭国 / 都城易手，玩家**应该**知道 —— 那是"别处的历史"，
-   * 编年史年表从此不只是自己这一亩三分地。
-   * 但 36 国 × 每回合都可能出事，全推给玩家等于把纪要变成滚动条：
-   * 所以先攒进 WNEWS，结算尾按 AIWAR.newsPerTurn 定量放出去（默认 2 条）。
-   * 谁算"遥远"：**双方都不是玩家国**。玩家参与的战争本来就有自己的 NOTES。 */
-  function worldNews(text, cls) {
-    WNEWS.push({ text: text, cls: cls || 'warn' });
-  }
-  function flushWorldNews() {
-    if (!WNEWS.length) return 0;
-    var cap = (AO.AIWAR && AO.AIWAR.newsPerTurn) || 2;
-    if (!PLAYER) { WNEWS.length = 0; return 0; }     // 工坊模式：没有"玩家"，也就没人要听
-    var n = Math.min(cap, WNEWS.length);
-    for (var i = 0; i < n; i++) {
-      NOTES.push({ owner: PLAYER, cls: WNEWS[i].cls, text: '🌍 ' + WNEWS[i].text });
+  /* =============================================================
+   * 「世界消息」：新闻也走情报渠道（v15）
+   *
+   * v10 的做法是"AI 之间出事 → 攒进 WNEWS → 结算尾推给玩家"。问题一眼可见：
+   * **地图有迷雾，纪要却是全知的** —— 两支你从没听说过的军队在千里之外互宣，
+   * 下个回合你就收到了消息，情报署形同虚设。
+   *
+   * 现在这条管线是一份**要走完路才送得到的邸报**，三个环节各管一件事：
+   *
+   *   ① worldNews(text, cls, meta)  入队时按**事件发生时**的预算档判定两件事：
+   *      "能不能听到"（边境 / 已知国 / 已知国+战况）和"要走多久"（5~8 / 3~4 / 1 回合）。
+   *      0 档另有 15% 会走样 —— 传到耳朵里的不是消息，是风闻。
+   *   ② flushWorldNews()  逐条查 turnNo − evtTurn ≥ delay，到期的才进纪要，
+   *      每回合仍 cap 条；**没到期的留队下回合再查**（晚到，不是丢弃）。
+   *      中途升档 → 按新档更短的时滞重判，够久就提前送达（花钱买到了快讯）。
+   *   ③ 送达  每条带【十年七月】式的事件时间戳 +「（数月前）」的迟到换算；
+   *      迟报淡黄斜体、风闻虚线框、即时确报照旧墨色。
+   *
+   * 三条纪律（写在这里是因为它们都是"为什么"）：
+   *   · 涉玩家的事件**不进这个队** —— 那是你自己的仗，当回合就该知道；
+   *   · 双方都未知的国家 → 静默丢弃：你连这两个国家都没听说过，哪来的消息；
+   *   · 时滞在**入队那一刻**掷定，之后不再重掷 —— 否则读一次档就能刷出更快的消息。
+   * ============================================================= */
+
+  function newsCfg() { return (AO.INTEL && AO.INTEL.news) || {}; }
+
+  /* 玩家国的"耳目圈"：自国省份 + 已探省份的邻国。
+   * 为什么把已探省份也算进来：你测绘过的那片地就是你的耳目所及 ——
+   * "我踏勘过的山口那边打起来了"比"我领土那边"更符合情报工作的直觉。
+   * 一回合算一次（按 turnNo 缓存）：worldNews 一回合可能被调十几次，
+   * 而每次都要扫 1100 个省的话，结算尾就是白白多出几万次邻接遍历。 */
+  var NEWS_ADJ = null, NEWS_ADJ_T = -1;
+  function newsAdjSet() {
+    if (NEWS_ADJ && NEWS_ADJ_T === turnNo) return NEWS_ADJ;
+    var set = Object.create(null), w = state.world, i, j;
+    if (w && PLAYER) {
+      var E = EXPLORED[PLAYER] || {};
+      for (i = 0; i < w.provinces.length; i++) {
+        var p = w.provinces[i];
+        if (!p || !p.owner) continue;
+        if (p.owner !== PLAYER && !E[p.id]) continue;
+        var nb = p.neighbors || [];
+        for (j = 0; j < nb.length; j++) {
+          var q = pOf(nb[j]);
+          if (q && q.owner && q.owner !== PLAYER) set[q.owner] = 1;
+        }
+      }
     }
-    WNEWS.length = 0;
-    /* 统计回填给 18-ai（bench 策略 H 要读"放出了几条远方大事"） */
-    if (AO.aiDebug && AO.aiDebug.war) AO.aiDebug.war.news += n;
-    return n;
+    NEWS_ADJ = set; NEWS_ADJ_T = turnNo;
+    return set;
   }
+  /* 迷雾一变（探到新省 / 换国 / 读档），耳目圈就作废 */
+  function newsFogTouch() { NEWS_ADJ = null; NEWS_ADJ_T = -1; }
+
+  /* 事件时间戳：【十年七月】。历法算不出来时退回【第37回合】——
+   * 那种档里"几年几月"是编不出来的，硬编就是假古董。 */
+  function newsStamp(t) {
+    t = t === undefined ? turnNo : (t | 0);
+    if (AO.calTag) return '【' + AO.calTag(t) + '】';
+    return '【第' + t + '回合】';
+  }
+  /* 迟到换算：迟 1~11 回合 = 数月前；12~23 = 去年；再往上按年数说。
+   * 为什么不写"迟 5 个月"：驿马不会告诉你它走了几个月，只会告诉你"这是早几个月的事"。 */
+  function newsLateWord(age) {
+    var N = newsCfg(), per = (AO.CAL && AO.CAL.perYear) || 12;
+    age = age | 0;
+    if (age < 1) return '';
+    if (age < (N.lateMid || 12)) return '（数月前）';
+    if (age < (N.lateOld || 24)) return '（去年）';
+    return '（' + Math.max(2, Math.floor(age / per)) + '年前）';
+  }
+
+  /* 这一段消息，玩家这个档位听不听得见？ */
+  function newsHeard(it, tier) {
+    var P = it.parties || [], i;
+    if ((tier | 0) <= 0) {
+      /* 无预算：只听得见**边境**的事 —— 任一方与玩家国或已探省份接壤。
+       * 内陆两国互宣？那是别人的历史，你连信儿都没有。 */
+      var adj = newsAdjSet();
+      for (i = 0; i < P.length; i++) if (adj[P[i] | 0]) return true;
+      return false;
+    }
+    /* 常规 / 重金：**已知国家**的事。判据和情报署「已知国家」那张表同一把尺
+     * （治理面板 :6869 —— 已探集里有它的省，或者就挨着我），
+     * 所以面板上列得出来的国家，它的事才听得见； inland 那些从没见过的？
+     * 那是别人的历史，跟你没关系。 */
+    if (!P.length) return true;          // 没点名国家的消息（旧调用点）：不拦
+    var adj2 = newsAdjSet();
+    for (i = 0; i < P.length; i++) {
+      var c2 = P[i] | 0;
+      if (countryKnown(c2) || adj2[c2]) return true;
+    }
+    return false;
+  }
+  /* 时滞：按档掷。入队那一刻掷一次，之后不再改 —— 见上面第③条纪律。 */
+  function newsDelayRoll(tier) {
+    var N = newsCfg(), r = (N.delay && N.delay[tier | 0]) || [1, 1];
+    var lo = r[0] | 0, hi = Math.max(lo, r[1] | 0);
+    return lo + Math.floor(Math.random() * (hi - lo + 1));
+  }
+  function newsDelayLo(tier) {
+    var N = newsCfg(), r = (N.delay && N.delay[tier | 0]) || [1, 1];
+    return Math.max(1, r[0] | 0);
+  }
+
+  /* 风闻（0 档，15%）：两种走样，按"事件是什么"改写。
+   *   张冠李戴  说反方向，或把一方换成**另一个接壤邻国**
+   *             （边境上传来传去，张三李四本来就分不清）；
+   *   夸大其词  宣战说成"灭国在即"，都城易手说成"王国已亡"。
+   * 只改写 kind 认得的几种，其余照抄原文再加一句"传言如此"——
+   * 为了改几句自由文案去解析句法，那才是真的会出错。 */
+  function newsAltNeighbor(P) {
+    var adj = newsAdjSet(), cand = [], i;
+    for (i in adj) {
+      var cid = +i;
+      if (!cid || (P || []).indexOf(cid) >= 0) continue;
+      if (countryDead(cid)) continue;
+      cand.push(cid);
+    }
+    return cand.length ? cand[Math.floor(Math.random() * cand.length)] : 0;
+  }
+  function newsRumour(it) {
+    var P = it.parties || [], A = P[0] ? nameOf(P[0]) : '', B = P[1] ? nameOf(P[1]) : '';
+    var alt = newsAltNeighbor(P), k = it.kind || '', mix = Math.random() < 0.5;
+    var t = '', mis = P.slice();
+    if (mix) {
+      /* 张冠李戴 */
+      if (k === 'war' && A && B) {
+        if (alt) { t = nameOf(alt) + ' 向 ' + (Math.random() < 0.5 ? A : B) + ' 宣战'; mis = [alt, P[0]]; }
+        else { t = B + ' 向 ' + A + ' 宣战'; mis = [P[1], P[0]]; }
+      } else if (k === 'capital' && A && B) {
+        t = (alt ? nameOf(alt) : B) + ' 攻破了 ' + A + ' 的都城';
+        mis = [alt || P[1], P[0]];
+      } else if (A && B) {
+        t = (alt ? nameOf(alt) : B) + ' 与 ' + A + ' 起了刀兵';
+        mis = [alt || P[1], P[0]];
+      }
+    } else {
+      /* 夸大其词 */
+      if (k === 'war' && A && B) t = A + ' 兴兵伐 ' + B + '，' + B + ' 灭国在即';
+      else if (k === 'capital' && B) t = B + ' 王国已亡 —— 都城陷落，宗庙倾覆';
+      else if ((k === 'fall' || k === 'annex') && A) t = A + ' 举国震恐，宗庙将不保';
+      else if (A && B) t = A + ' 与 ' + B + ' 已成死局，' + B + ' 恐难久持';
+    }
+    if (!t) t = it.text + '（传言如此，未得其详）';
+    return { text: t, mis: mis };
+  }
+
+  /* 重金档附的那一行：战况。分数表的方向写在 WSCORE 里（a = 小 id 那方），
+   * 这里只负责按同一个方向念出来，免得面板上 A 的分记到 B 头上。 */
+  function newsScoreLine(a, b) {
+    a = a | 0; b = b | 0;
+    if (!a || !b || a === b) return '';
+    var s = WSCORE[warKey(a, b)];
+    if (!s) return '';
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    return '（战况 ' + ownerName(lo) + ' ' + (s.a | 0) + ' : ' + (s.b | 0) + ' ' + ownerName(hi) + '）';
+  }
+
+  /* 入队。meta = { evtTurn, parties:[a,b], kind } —— 三个都能省，省了就是
+   * "当回合、没点名、说不清是什么事"（旧调用点的形状）。 */
+  function worldNews(text, cls, meta) {
+    meta = meta || {};
+    var parties = [], i;
+    if (meta.parties) for (i = 0; i < meta.parties.length; i++) {
+      var cid = meta.parties[i] | 0;
+      if (cid) parties.push(cid);
+    }
+    var evt = meta.evtTurn === undefined ? turnNo : (meta.evtTurn | 0);
+    /* 工坊模式：没有"玩家"，也就没人要听 */
+    if (!PLAYER) return false;
+    /* 涉玩家 → 不进队（调用点自己已经推了 NOTES，那一条是即时的）。
+     * 这里再审一次不是多余：将来新加的调用点忘了判玩家，也不会变成"你自己的仗
+     * 还要等五回合才知道"这种荒唐事。 */
+    if (parties.indexOf(PLAYER) >= 0) return false;
+    var tier = budgetOf(PLAYER), N = newsCfg();
+    var it = {
+      text: text, cls: cls || 'warn', kind: meta.kind || 'other',
+      parties: parties, evtTurn: evt, tier: tier, rumour: 0, mis: null, rt: ''
+    };
+    if (!newsHeard(it, tier)) { NSTAT.dropped++; return false; }
+    it.delay = newsDelayRoll(tier);
+    if (tier <= 0) {
+      NSTAT.enq0++;
+      if (Math.random() < (N.rumourP === undefined ? 0.15 : N.rumourP)) {
+        var rm = newsRumour(it);
+        if (rm) { it.rumour = 1; it.mis = rm.mis; it.rt = rm.text; NSTAT.rumour++; }
+      }
+    }
+    PNEWS.push(it);
+    var qmax = N.queueMax || 160;
+    if (PNEWS.length > qmax) PNEWS.splice(0, PNEWS.length - qmax);
+    return true;
+  }
+
+  /* 送达：这一条从"在路上"变成"你知道了"。
+   * 只进 NOTES —— 不写战报。为什么：战报是"天下共读的战事记录"（会战、攻城、
+   * 无路可走这些逐条都在里面），它本来就是另一条线；把邸报再抄一份进去，
+   * 同一件事会在战报里出现两次（一次"发生"，一次"听说"），读起来更乱。
+   * 玩家真正读的那份"纪要"就是提示条这一行 + 编年史里按事件年份归位的那一条。 */
+  function deliverNews(it, tier) {
+    var age = turnNo - (it.evtTurn | 0);
+    /* 风闻带「风闻：」前缀 —— 提示条上只有一行字，语气得自己说出来：
+     * 这一条没核实过，别拿它当国书。 */
+    var body = it.rumour ? ('风闻：' + (it.rt || it.text)) : it.text;
+    var txt = '🌍 ' + newsStamp(it.evtTurn) + newsLateWord(age) + body;
+    if (!it.rumour && (tier | 0) >= (newsCfg().scoreLine || 2) && (it.parties || []).length >= 2) {
+      var ws = newsScoreLine(it.parties[0], it.parties[1]);
+      if (ws) txt += ws;
+    }
+    var late = age >= (newsCfg().styleLate || 3);
+    var cls = it.rumour ? 'rumour' : (late ? 'late' : (it.cls || 'warn'));
+    NOTES.push({
+      owner: PLAYER, cls: cls, text: txt,
+      /* src：这一条是"世界新闻"（邸报），不是玩家自己的事 ——
+       * 纪要的三档过滤就按它分（旧读取不看这个字段，结构向后兼容）。 */
+      src: 'world',
+      evtTurn: it.evtTurn | 0, late: age | 0, rumour: it.rumour ? 1 : 0,
+      /* core = 不带时间戳的正文：编年史拿它和战报里那一条对暗号，
+       * 对上了就说明"这件事史书里已经有了"，只补一个「（后闻）」。 */
+      core: body
+    });
+    NSTAT.delivered++;
+    var slot = NSTAT.byTier[(it.tier | 0)] || NSTAT.byTier[0];
+    slot.n++; slot.sum += Math.max(0, age);
+    if (it.rumour) {
+      RUMOURS.push({ mis: (it.mis || it.parties || []).slice(0, 4), text: body, at: turnNo });
+      if (RUMOURS.length > 12) RUMOURS.shift();
+    } else {
+      newsCorrectBy(it.parties || [], body);
+    }
+  }
+
+  /* 实讯到了 → 之前说错的那条当场"打脸"。
+   * 只认**同一个国家（或被误指的那个国家）**：这条更正是给玩家的一个交代，
+   * 不是全天下的勘误表。 */
+  function newsCorrectBy(parties, realText) {
+    for (var i = RUMOURS.length - 1; i >= 0; i--) {
+      var r = RUMOURS[i], hit = false;
+      for (var j = 0; j < (r.mis || []).length; j++) {
+        if ((parties || []).indexOf(r.mis[j]) >= 0) hit = true;
+      }
+      if (!hit) continue;
+      RUMOURS.splice(i, 1);
+      NOTES.push({ owner: PLAYER, cls: 'warn', noYl: 1, src: 'world',
+        text: '更正：前讯有误，实为「' + realText + '」' });
+    }
+  }
+  /* 密探回报 → 就地更正。风闻说的是"某国如何如何"，密探亲眼看过了，
+   * 那就没有"再等等看"的道理。 */
+  function newsProbeCorrect(cid) {
+    cid = cid | 0;
+    for (var i = RUMOURS.length - 1; i >= 0; i--) {
+      var r = RUMOURS[i];
+      if ((r.mis || []).indexOf(cid) < 0) continue;
+      RUMOURS.splice(i, 1);
+      NOTES.push({ owner: PLAYER, cls: 'ok', noYl: 1,
+        text: '更正：前讯有误 —— 密探自 ' + nameOf(cid) + ' 回报，前番风闻不实' });
+    }
+  }
+
+  /* 结算尾：只放**到期**的，剩下的留队。
+   * 提前送达的条件是"中途升了档，且已经过了新档的时滞"——
+   * 花钱买快讯这件事，本来就不该等原来那匹驿马。 */
+  function flushWorldNews() {
+    if (!PLAYER) { PNEWS.length = 0; return 0; }   // 工坊模式：没人要听
+    if (!PNEWS.length) return 0;
+    var cap = (AO.AIWAR && AO.AIWAR.newsPerTurn) || newsCfg().cap || 2;
+    var tier = budgetOf(PLAYER), out = 0, keep = [], i, it;
+    for (i = 0; i < PNEWS.length; i++) {
+      it = PNEWS[i];
+      if (out >= cap) { keep.push(it); continue; }
+      var age = turnNo - (it.evtTurn | 0), d = it.delay | 0;
+      if (tier > (it.tier | 0)) {
+        var d2 = newsDelayLo(tier);
+        if (age >= d2) d = Math.min(d, d2);
+      }
+      if (age < d) { keep.push(it); continue; }
+      deliverNews(it, tier);
+      out++;
+    }
+    PNEWS.length = 0;
+    for (i = 0; i < keep.length; i++) PNEWS.push(keep[i]);
+    /* 统计回填给 18-ai（bench 策略 H 要读"放出了几条远方大事"） */
+    if (AO.aiDebug && AO.aiDebug.war) AO.aiDebug.war.news += out;
+    return out;
+  }
+
+  /* 存档：队列 + 待更正的账 + 统计（**不升 SAVE_VER**，旧档缺这一块 = 空队） */
+  function newsSave() {
+    return { Q: PNEWS.slice(0, 160), R: RUMOURS.slice(0, 12), S: NSTAT };
+  }
+  function newsLoad(d) {
+    PNEWS.length = 0;
+    RUMOURS.length = 0;
+    NSTAT = {
+      byTier: [{ n: 0, sum: 0 }, { n: 0, sum: 0 }, { n: 0, sum: 0 }],
+      enq0: 0, rumour: 0, dropped: 0, delivered: 0
+    };
+    newsFogTouch();
+    if (!d || typeof d !== 'object') return;      // 旧档：空队起步，和新开一局同一条路
+    var i, it, q = d.Q || [];
+    for (i = 0; i < q.length && i < 160; i++) {
+      it = q[i];
+      if (!it || !it.text) continue;
+      PNEWS.push({
+        text: String(it.text), cls: it.cls || 'warn', kind: it.kind || 'other',
+        parties: (it.parties || []).slice(0, 4),
+        evtTurn: it.evtTurn | 0,
+        delay: Math.max(0, it.delay | 0) || 1,
+        tier: it.tier | 0,
+        rumour: it.rumour ? 1 : 0,
+        mis: (it.mis || []).slice(0, 4),
+        rt: it.rt || ''
+      });
+    }
+    var r = d.R || [];
+    for (i = 0; i < r.length && i < 12; i++) {
+      if (!r[i] || !r[i].mis) continue;
+      RUMOURS.push({ mis: r[i].mis.slice(0, 4), text: r[i].text || '', at: r[i].at | 0 });
+    }
+    var s = d.S || {};
+    if (s.byTier && s.byTier.length) {
+      for (i = 0; i < 3; i++) {
+        var b = s.byTier[i] || {};
+        NSTAT.byTier[i] = { n: Math.max(0, b.n | 0), sum: Math.max(0, +b.sum || 0) };
+      }
+    }
+    NSTAT.enq0 = Math.max(0, s.enq0 | 0);
+    NSTAT.rumour = Math.max(0, s.rumour | 0);
+    NSTAT.dropped = Math.max(0, s.dropped | 0);
+    NSTAT.delivered = Math.max(0, s.delivered | 0);
+  }
+
   AO.resWorldNews = worldNews;
   AO.resFlushWorldNews = flushWorldNews;
-  AO.resWorldNewsQueue = WNEWS;
+  AO.resWorldNewsQueue = PNEWS;
+  /* 测试 / bench 只从这里读新闻管线的三样：队列、待更正、统计 */
+  AO.resNews = {
+    queue: PNEWS, rumour: RUMOURS, stat: function () { return NSTAT; },
+    save: newsSave, load: newsLoad,
+    stamp: newsStamp, lateWord: newsLateWord,
+    heard: newsHeard, adj: newsAdjSet, correct: newsProbeCorrect,
+    reset: function () { PNEWS.length = 0; RUMOURS.length = 0; NEWS_ADJ = null; NEWS_ADJ_T = -1; }
+  };
 
   /* 当前正在结算的那个省/国。settleTurn 里设、结束时清。
    * 有了它，payMaint / settlePop 这些老函数不用加参数就能把账记进 FLOW ——
@@ -990,7 +1420,9 @@
   function effectiveTurns(pid, owner, base) {
     var t = (base === undefined || base === null)
       ? AO.FREIGHT.turnsAt(FREIGHT_LV[pid] || 0) : base;
-    return Math.max(1, t - (PMOD(pid, owner).turnCut || 0));
+    t -= (PMOD(pid, owner).turnCut || 0);
+    /* 下限 1 回合：能不能"一回合起一座"是另一条平衡线。 */
+    return Math.max(1, t);
   }
   AO.resEffectiveLoss = effectiveLoss;
   AO.resEffectiveTurns = effectiveTurns;
@@ -1128,18 +1560,59 @@
     return SIM;
   }
 
-  /* 单座建筑每回合产多少 → 该资源这一回合总产出（分档求和）。
-   * 签名保持不变：调用方只知道"这个资源袋每回合产多少"。 */
-  function simPerTurn(s, def) {
+  /* ---------------- 保留座数（19-repair.js 的 KEEP 表） ----------------
+   * 一座城某类建筑可能有 N 座，玩家可以只留 K 座在跑（见 js/19-repair.js）。
+   * 停掉的座**不缴维护、不产出**，但也不失修 —— 所以这里只做一件事：
+   * 把 tiers / 座数裁到 K。裁的时候**先保 Lv2**（同样维护费，产量翻倍），
+   * 剩下的名额才给 Lv1。
+   *
+   * 为什么裁在"计算入口"而不是结算时扣产量：维护费和产量必须同源。
+   * 如果只把产量砍半、维护费照全收，玩家就会觉得"停了还要交钱"，
+   * 那这个开关就没人敢用了。 */
+  function keepCap(pid, kind) {
+    var R = AO.rep;
+    if (!R || !R.keep || pid === undefined || pid === null || !kind) return null;
+    return R.keep(pid, kind);
+  }
+  /* 资源建筑：{1:n1, 2:n2} 裁到保留座数 */
+  function activeTiers(pid, kind, s) {
     var t = s.tiers || { 1: s.built || 0, 2: 0 };
+    var k = keepCap(pid, kind);
+    if (k === null) return t;
+    var n2 = Math.min(t[2] || 0, k);
+    var n1 = Math.min(t[1] || 0, k - n2);
+    return { 1: Math.max(0, n1), 2: Math.max(0, n2) };
+  }
+  /* 通用设施（学校/市场/兵营…）：只有座数，直接裁 */
+  function activeN(pid, kind, n) {
+    var k = keepCap(pid, kind);
+    if (k === null) return n | 0;
+    return Math.max(0, Math.min(k, n | 0));
+  }
+  /* 玩家把这一类这一省**主动停了**（保留 0 座）。
+   * 主动停 ≠ 失修：不缴维护、不产出，但耐久/座数一点不掉，随时能开回来。
+   * 面板上"失修"一列不计它们。 */
+  function keepOff(pid, kind) {
+    var k = keepCap(pid, kind);
+    return k !== null && k <= 0;
+  }
+
+  /* 单座建筑每回合产多少 → 该资源这一回合总产出（分档求和）。
+   * pid/kind 给了就按"在跑的座数"算 —— 面板上显示的产量和结算扣的钱必须同源。 */
+  function simPerTurn(s, def, pid, kind) {
+    var t = activeTiers(pid, kind, s);
     return (def.per || 0) * (t[1] || 0) + (def.per2 || def.per || 0) * (t[2] || 0);
   }
 
   /* 这一袋建筑这一回合的维护需求（铁 + 金），按档位加权。
    * owner 给了就把「标准工料」的折扣算进去（−25%），没给按原价 ——
-   * 老调用点（预览、对比文案）不传 owner 也不会算错，只是不含科技加成。 */
-  function maintDue(s, def, owner) {
-    var t = s.tiers || { 1: s.built || 0, 2: 0 };
+   * 老调用点（预览、对比文案）不传 owner 也不会算错，只是不含科技加成。
+   * pid/kind 给了就只算**在跑的座**（停掉的座不缴维护，见 activeTiers）。 */
+  function maintDue(s, def, owner, pid, kind) {
+    /* 枯竭 / 铁矿休眠的座数不收维护 —— 和结算里那条 `continue` 同一口径，
+     * 否则维修面板会劝玩家去"修"一座根本不收费的矿（面板数字必须等于真扣的数）。 */
+    if (s && (s.gone || (kind === 'iron' && s.cool > 0))) return { iron: 0, gold: 0 };
+    var t = activeTiers(pid, kind, s);
     var a = def.maint || {}, b = def.maint2 || a, out = {};
     var cut = owner ? 1 - (MODS(owner).maintCut || 0) : 1;
     var ks = ['iron', 'gold'], i, k;
@@ -1150,16 +1623,15 @@
     return out;
   }
 
-  /* 付维护：**本省库存 → 中央国库**（按优先档，见 js/19-repair.js）。
+  /* 付维护：**本省库存 → 中央国库**。
    * 维护是日常开销，不是一次性工程；而且没有矿的省根本没有铁/金袋子，
    * 只能靠中央接济 —— 所以抽税那条规则必须先落地。
    * 小数用 eatAcc 同款"攒整"法：0.2 个/座看着像没付，攒五回合就是 1。
    * 返回 false = 有缺口 → 调用方把这一类建筑标成停产。
    *
-   * 「优先档」只影响**中央那一段**：
-   *   高/中档 → 动用本回合批给本国的中央拨款；
-   *   低/停档 → 不动中央（中央的钱留给更高档），只吃本省库存；
-   *   「停」档在 19-repair.js 里就整笔短路了，根本不会走到这里。
+   * 「这一回合能花中央多少」由 19-repair.js 在结算开始时批的一笔**拨款**决定
+   * （见那里的"四、中央配给"）：省库先掏，不够的从拨款里划，拨款见底就停产。
+   * 谁先花由结算顺序决定，玩家真正能调的是"留几座在跑"（保留座数）。
    *
    * 记账：CUR 正指着这个省时，把"本省扣的"和"中央垫的"分别记进两本流水 ——
    * 省卡的收支小结要能说清"维护里有多少是我自己掏的、多少是中央接济的"。 */
@@ -1187,9 +1659,8 @@
         bag[k].stock -= t1; got += t1;
         if (F) { F.loss[k] = (F.loss[k] || 0) + t1; F.d.maint[k] = (F.d.maint[k] || 0) + t1; }
       }
-      if (got < need && (!canPool || canPool(owner, kind))) {
-        /* 从中央拨款里划：够多少划多少，不够就是不够 —— 低档不让路，
-         * 高档也只是"能拿多少拿多少"（拨款花完就该轮到后面的省了）。 */
+      if (got < need && (!canPool || canPool())) {
+        /* 从中央拨款里划：够多少划多少，不够就是不够（拨款花完就该轮到后面的省了）。 */
         var want = Math.min(cen[k] || 0, need - got);
         var t2 = takePool ? takePool(want) : want;
         if (t2 > 0) {
@@ -1204,7 +1675,7 @@
       acc[k] -= got;
       if (got < need) ok = false;
     }
-    if (R && fromPool > 0 && R.noteSpent) R.noteSpent(owner, kind, fromPool);
+    if (R && fromPool > 0 && R.noteSpent) R.noteSpent(owner, fromPool);
     return ok;
   }
 
@@ -1235,6 +1706,20 @@
       if (!st) return false;
       st.site = 0;
       st.n++;
+      /* 产线中心刚建成 → 默认**全产能给第一条线**（军械坊 = 兵刃）。
+       * 为什么不像旧版那样"等玩家下单"：旧版面板上是一排「接单」按钮，
+       * 不点也知道该点；现在是一张分配表，全 0 的坊看起来像坏了。
+       * 玩家随时可以在 ? 面板里改（或「清空」让它空转）。 */
+      if (MILL_KINDS.indexOf(key) >= 0 && st.n === 1) {
+        var p0 = pOf(pid), ow0 = p0 ? p0.owner : 0;
+        var pool0 = AO.MILL.poolOf[key], first0 = AO.MILL.lines[pool0][0];
+        var m0 = millOf(ow0);
+        if (!allocSum(ow0, pool0)) {
+          /* 刚建成 → 默认把这一池的点给第一条线（军械=刀 / 马厩=驽马 / 船坞=桨帆）。
+           * 全 0 的池看起来像坏了，而"先动起来"永远比"先想清楚"更不容易卡住玩家。 */
+          setLineAlloc(ow0, first0, Math.min(lineWork(ow0, first0), millCap(pid, key)), true);
+        }
+      }
       return true;
     }
     return false;
@@ -1252,10 +1737,7 @@
      * 它不进 gain / loss —— 那两份记的是真正落袋与真正流出的钱粮，
      * 满仓浪费的东西从来没进过库存，混进去会让库存变化对不上账。 */
     for (pid in SIM) {
-      FLOW[pid] = { gain: Object.create(null), loss: Object.create(null),
-                    d: { eat: Object.create(null), tax: Object.create(null),
-                         maint: Object.create(null), maintC: Object.create(null),
-                         cap: Object.create(null) } };
+      FLOW[pid] = newFlow();
     }
     for (var co in CENTRAL) {
       FLOWC[co] = { gain: Object.create(null), loss: Object.create(null),
@@ -1288,30 +1770,40 @@
       /* ① 维护：**在产出之前**算，按建筑类型各自付、各自停。
        * 付得起 → 当回合照常出产；付不起 → 这一类当回合起产量 0，凑齐了自动复工。
        * 枯竭的不收维护（矿脉都没了，没什么可养的），否则那些省会永远失血。
-       * 「谁先付」由 js/19-repair.js 的优先档决定：高/中档吃本回合的中央拨款，
-       * 低/停档只吃本省库存 —— 玩家在右上「维修」面板里自己调。 */
+       * 维护只按**在跑的座数**收（玩家在右上「维修」里按城调保留几座）。 */
       var haltedNow = [];
       for (key in bag) {
         s = bag[key];
         def = AO.RESOURCE_BY_KEY[key];
         if (!def) continue;
         if (!s.built || s.gone) { s.halted = false; continue; }
+        /* 铁矿「深层休眠」（v18 追加一补课）：和枯竭一样不产、不收维护 ——
+         * 48 回合的等待期还要按座收铁收金，那不是在等矿醒，是在等死。
+         * 别的资源的冷静期照旧收（3~9 回合的短休耕，是"地还在，只是歇一季"）。 */
+        if (key === 'iron' && s.cool > 0) { s.halted = false; continue; }
         was = s.halted;
-        s.halted = !payMaint(pid, owner, maintDue(s, def, owner), s.mAcc, key);
+        s.halted = !payMaint(pid, owner, maintDue(s, def, owner, pid, key), s.mAcc, key);
         if (s.halted && !was) haltedNow.push(def.build);
       }
-      /* 学校 / 市场 / 建造坊：同一种形状，一遍循环处理完 */
+      /* 学校 / 市场 / 建造坊…：同一种形状，一遍循环处理完。
+       * 通用设施的产出是**离散**的（学校产科研点、兵营征兵、工厂开一条产线），
+       * "留半座"没有意义 —— 所以它们的保留座数只有两态：全开 / 全停（见面板）。
+       * 全停的时候直接把 halted 挂上：下面所有 `!st.halted` 的产出判断
+       * 就自动全关了，不必在二十几处产出点各加一个 if。 */
       for (ki = 0; ki < UNIV_KINDS.length; ki++) {
         var kind = UNIV_KINDS[ki], udef = univDef(kind), ust = UNIV[kind][pid];
         if (!ust) continue;
         var wasU = ust.halted;
-        /* kind 就是这一类的设施键（school / market / …），19-repair 拿它查优先档 */
+        /* kind 就是这一类的设施键（school / market / …），19-repair 拿它查保留座数 */
         var uk = kind;
-        ust.halted = ust.n > 0 ? !payMaint(pid, owner, {
+        var uoff = keepOff(pid, uk);
+        if (!(ust.n > 0)) ust.halted = false;
+        else if (uoff) ust.halted = true;              // 玩家停的：不缴费、不产出
+        else ust.halted = !payMaint(pid, owner, {
           iron: (udef.maint.iron || 0) * ust.n,
           gold: (udef.maint.gold || 0) * ust.n
-        }, ust.mAcc, uk) : false;
-        if (ust.halted && !wasU) haltedNow.push(udef.cn);
+        }, ust.mAcc, uk);
+        if (ust.halted && !wasU && !uoff) haltedNow.push(udef.cn);
       }
       /* 城墙维护（铁 + 金）：和资源建筑同一套 payMaint —— 付不起就 halted，
        * 区别是墙"停产"的表现是**年久失修**（耐久每回合 −5），不是产量归零。
@@ -1319,8 +1811,12 @@
       var wst = WALL[pid];
       if (wst && wst.lv > 0) {
         var wasW = wst.halted;
-        wst.halted = !payMaint(pid, owner, wallMaintDue(wst, owner), wst.mAcc, 'wall');
-        if (wst.halted && !wasW) haltedNow.push('城墙');
+        /* 城墙也是"开/停"二态：停了就不缴维护，耐久原地不动（不烂，但也不修） */
+        if (keepOff(pid, 'wall')) wst.halted = true;
+        else {
+          wst.halted = !payMaint(pid, owner, wallMaintDue(wst, owner), wst.mAcc, 'wall');
+          if (wst.halted && !wasW) haltedNow.push('城墙');
+        }
       } else if (wst) {
         wst.halted = false;
       }
@@ -1329,8 +1825,8 @@
         NOTES.push({ owner: owner, pid: pid | 0,
           text: haltedNow.join('、') + ' 维护欠费，停产中（铁/金见底 —— 右上「维修」里调优先档或点「修」）', cls: 'warn' });
       }
-      /* ①b 维修队：修好当回合就得出产，所以排在这里（上面的失修标记已经定完）。
-       * 中央拨款在 ⓪b 就批好了，这里只花它。 */
+      /* ①b 中央拨款位次（19-repair 的 repStep：批"这一回合能动的维护钱"）。
+       * 拨款额度按上回合实付估，必须每个省轮到之前都批着。 */
       if (AO.repStep) AO.repStep(owner | 0);
 
       /* ② 工地推进（枯竭了也照盖完，不半路烂尾） */
@@ -1343,6 +1839,11 @@
       if (SMELT[pid] && SMELT[pid].site > 0) {
         SMELT[pid].site--;
         if (!SMELT[pid].site) finishSmelt(pid | 0);
+      }
+      /* 淘金场改建：和熔旧坊同一位次（金矿枯竭后金矿场行不再有工地） */
+      if (WASH[pid] && WASH[pid].site > 0) {
+        WASH[pid].site--;
+        if (!WASH[pid].site) finishWash(pid | 0);
       }
       for (ki = 0; ki < UNIV_KINDS.length; ki++) {
         var u2 = UNIV[UNIV_KINDS[ki]][pid];
@@ -1382,16 +1883,26 @@
          * 占领省不是归零，而是 ×0.6（见下面的 mul）—— 打下来的地方还能用，只是不顺手。 */
         if (SIEGE[pid]) continue;
         if (key === 'fish' && BLOCKADE[pid]) continue;
+        /* 匪乱：爆发后的**下一回合**产出归零（此刻产出已经算完，只能挂在下一回合）。
+         * 只看"上一回合爆发的"那一条 —— 标记本身还要挂 3 回合给不安 +10，
+         * 但那 3 回合里只有第一回合断产（否则一次匪乱等于三回合绝收，太狠）。 */
+        if (BANDIT[pid] && BANDIT[pid].turn === turnNo - 1) continue;
         /* 官员产量加成（劝农使）：乘在**毛产**上，再攒整成整数。
          * 为什么要 pAcc 攒零头：3 × 1.25 = 3.75，直接 round 成 4 等于白送 25%，
          * floor 成 3 等于白干 —— 攒起来下一回合补上，长期平均才真是 1.25 倍。
          * （和 eatAcc / mAcc 是同一套办法，见 payMaint 的注释。） */
         var mul = (pmod.prodMul && pmod.prodMul[key]) || 1;
-        if (OCCUPY[pid]) mul *= AO.BATTLE.occupyProd;   // 占领省：产出 ×0.6
+        /* 占领省：产出乘数随**整合度**爬（0.4 → 0.6），整合完成（OCCUPY 删除）
+         * 才回到正式国土的 ×1.0。旧档没有 INTEG 的占领省按 0 算 = ×0.4，
+         * 于是"读旧档"和"刚打下来"是同一条路。 */
+        if (OCCUPY[pid]) {
+          var itg = INTEG[pid];
+          mul *= AO.INTEG.prodMul(itg ? itg.v : 0);
+        }
         /* 事件带来的临时乘数（渔汛 ×2 / 大旱 ×0.5），和官员加成同一层。
          * 放在这里而不是改 def.per：乘数是有回合数的，改表就回不去了。 */
         if (AO.evtProdMul) mul *= AO.evtProdMul(pid, key);
-        var grossF = simPerTurn(s, def) * mul;
+        var grossF = simPerTurn(s, def, pid, key) * mul;
         var gross = Math.floor(grossF + (s.pAcc || 0));
         s.pAcc = grossF + (s.pAcc || 0) - gross;
         if (!gross) continue;
@@ -1409,6 +1920,9 @@
         var kept = gainStock(pid, key, net, CUR.F);
         /* 流水：落袋的才算 gain（居民吃掉的、满仓损耗的都没进过库存） */
         CUR.F.gain[key] = (CUR.F.gain[key] || 0) + kept;
+        /* gain 里"纯产出"的那一份单独记一格（d.prod）：gain 还混着熔旧坊/淘金场
+         * 的涓流和出口卖货，不拆开的话，20-balance 的干跑预测永远对不出残差。 */
+        CUR.F.d.prod[key] = (CUR.F.d.prod[key] || 0) + kept;
         /* 人口增速看的是**真进了仓**的粮：满仓浪费掉的粮不养人，
          * 否则"囤到上限就停"这条规则对人口完全无效。 */
         if (key === 'grain' || key === 'fish') foodProd += kept;
@@ -1417,7 +1931,9 @@
         /* 抽税：这一省这一种资源本回合产得够多，就抽一份进中央。
          * 中央要养全国的维护费，没有这条，没矿的省会集体停产。
          * 「复式账簿」让每笔多抽 fx.tax —— 先算总量，抽不起就整笔不抽
-         * （抽一半比不抽更难看懂）。 */
+         * （抽一半比不抽更难看懂）。
+         * 这是"每笔 +1"，不是"抽成 ×1.1" —— 后者在有科技加成时算出来是小数，
+         * 又得回到攒整那套账，不如直接给一个整数。 */
         var taxN = AO.TAX.take + (mods.tax || 0);
         if (take >= AO.TAX.min && s.stock >= taxN) {
           s.stock -= taxN;
@@ -1439,10 +1955,12 @@
        * 放在资源产出之后 —— 它和矿场产出同属"这一回合的 gain"，
        * 但不吃储量、不吃维护，只吃"每炼一块铁半块钱"。 */
       settleSmelt(pid | 0, owner | 0);
+      /* ③a 淘金场：枯竭金矿场的涓流（金的熔旧坊，和上面同一位次）。
+       * 它产金、吃省库木材 —— 木不够就这一回合不出金，不扣料不倒扣。 */
+      settleWash(pid | 0, owner | 0);
 
-      /* ③b 装备厂：军械坊/铸炮厂/造船厂按订单产装备，驯马场产战马。
-       * 放在产出之后（这一回合的料才有着落）、人口税之前（不干扰省库金）。 */
-      settleIndustry(pid, owner);
+      /* ③b 军工产线（v19）：**不在这里算** —— 产能是全国的，
+       * 逐省算会把"同一个池"拆成 1100 份。全国那一遍在省循环之后（见 ④a）。 */
 
       /* ④ 人口税：省向人民收金 → **省库**（就是本省的金锭库存，不另开池子）。
        * 和生产抽税（③ 里那一段，产出去中央）是两本账：这里收的金留在省里，
@@ -1454,14 +1972,36 @@
       /* ⑤ 民心：用本回合**已经发生**的事实（吃没吃饱、停了几类产）算 target，
        * 再往它靠 30%。放在 settlePop 之后是因为"缺粮"要看 eat / need。 */
       settleHappy(pid, prov);
+      /* ⑤b 不安（A 批）：吃民心 + 停产 + 未整合 + 异信仰 + 贪墨 + 匪患六项。
+       * 必须排在 settleHappy **之后** —— 它的基线项就是本回合刚算出来的民心，
+       * 停产类数也直接借 happy.drivers.haltN（两处数出不同的数会很难解释）。 */
+      settleUnrest(pid, prov);
+      /* ⑤c 整合推进（B 批）：占领省往"正式国土"爬一步，满 100 就删 OCCUPY。
+       * 排在产出之后 —— 这一回合的产量仍按**推进前**的整合度算，下回合才涨。 */
+      settleInteg(pid, prov);
     }
 
     CUR.pid = 0; CUR.owner = 0; CUR.F = null; CUR.FC = null;
+
+    /* ④a 军工产线（v19，全国口径）：三个产能池 → 20 条线 → 出单。
+     * 排在省循环**之后**：这一回合的料（含刚抽完的税）才有着落；
+     * 排在人口税之前那一位次的口径不变 —— 它不碰省库金。 */
+    if (state.world) {
+      for (var co2 = 0; co2 < state.world.countries.length; co2++) {
+        var cw2 = state.world.countries[co2];
+        if (cw2 && !countryDead(cw2.id)) settleIndustry(cw2.id);
+      }
+    }
 
     /* ④b 官员资历与怨气（v11）：ten++ / 怨气累积 / 每 24 回合掷一次去留。
      * 必须排在省循环**之后** —— 怨气要看"这一回合到底欠没欠饷"（owed 在
      * settleTax 里才定下来）。偷金那一步留在 settleTax 里（那里有 FLOW 上下文）。 */
     settleOfficials();
+
+    /* ④d 匠人俸禄（v17）：和官员同一位次 —— 都是"人"的开销。
+     * 从**省库**发、发不起就欠着（和官员的 owed 一个口径），
+     * 因为停发匠人 = 装备线全锁，那等于"没钱就别玩这一层"，太硬。 */
+    for (var aow in ARTISANS) settleArtisans(+aow);
 
     /* ④c 宰相（v12）：俸禄 / 权相偷金 / 贤相罢工与进言 / 权相弹劾。
      * 和官员同一位次（人口税段）—— 都是"人"的开销，先把账算清再谈干活。 */
@@ -1475,6 +2015,11 @@
      * 放在最后：这一回合的产出/人口/民心都算完了，战斗才拿得到"现在的兵和粮"。 */
     settleWar();
 
+    /* ⑦a 叛乱（A2）：所有 UNREST ≥ 80 的省各掷一次（玩家与 AI 同规则）。
+     * 必须排在战争之后 —— 倒戈/独立会改归属，得看到**打完之后的版图**；
+     * 也要排在内政 AI 之前 —— 新独立出来的国这一回合就能被 AI 接管。 */
+    settleRevolt();
+
     /* ⑦b 情报署（v6）：扣经费 → 自动织网 → AI 密探。
      * 排在战争之后（要看到打完之后的新版图）、事件之前（事件弹窗不该挡住情报提示）。 */
     settleIntel();
@@ -1483,6 +2028,14 @@
      * 排在 AI 内政之前：下一批 AI 的缔约/求和判断读的是**这一回合**的 REL，
      * 先缓释再决策，面板上看到的数和 AI 用的是同一个。 */
     settleDiplo();
+
+    /* ⑦b3 傀儡与朝贡（v13）：清死表 → 朝贡（FLOWC 双方记账）→ 补跟战 → 独立掷点。
+     * 排在 settleDiplo 之后：那一回合的 REL 锁刚写完，属国这一侧读到的是一致的；
+     * 也排在 AI 内政/战争之前 —— 这一回合的朝贡先落袋，AI 的军费护栏读到的
+     * 收入才是"上贡之后"的那个数（不然属国永远以为自己很有钱）。
+     * 独立掷点会宣战（改 WARSET），排在战争段之后是刻意的：揭竿而起这一回合
+     * 不打，下一回合才见血 —— 消息和战报才对得上。 */
+    settlePuppets();
 
     /* ⑦c 敌国内政 AI（v7）：建造 / 研究 / 调税 / 开科派官，每国每回合最多两个动作。
      * 排在情报 tick 之后 —— AI 的决策只看**自己省**的实时数据（SIM / HAPPY 里
@@ -1497,14 +2050,22 @@
      * 排在世界纪要之前：他的进言要走同一条 flush（不然要等下一回合才见报）。 */
     chancellorAct();
 
-    /* ⑦d 世界纪要（v10）：AI 之间这一回合出的大事，最多放 AIWAR.newsPerTurn 条。
-     * 排在 AI tick 之后 —— 不然这一回合刚打起来的仗要等到下回合才见报。 */
+    /* ⑦d 世界消息（v15，v10 起是"当回合直推"）：AI 之间这一回合出的大事
+     * 里**到期的那几条**才放出来，最多 AIWAR.newsPerTurn 条，其余留队。
+     * 排在 AI tick 之后 —— 不然这一回合刚打起来的仗要晚一整轮才排进队。 */
     flushWorldNews();
 
     /* ⑧ 事件：传教倒计时 → 产量 buff 倒计时 → 重算国教 → 掷一件事件。
      * 也放在最后 —— 它要看到**打完之后的版图**（占领会让传教作废，
      * 新占的省会改掉"该国信仰占比最大者"）。 */
     if (AO.evtSettle) AO.evtSettle();
+
+    /* ⑨ 物价（v14）：每国每种资源按"库存 / 需求"分档，v 向目标靠 25%。
+     * **排在事件之后是刻意的** —— 大旱 / 丰年这些事当回合就进价格，
+     * 不然玩家看到"旱情"要再等一回合才见价动，因果就断了。
+     * AI 与面板读的是这一回合结算出来的价（等于"拿昨天的行情做决定"）。 */
+    settlePrices();
+
     /* ⓫ 编年史归档（v5）：把这一回合攒下的 NOTES 全量抄进年表，顺带判一次
      * 统一 / 灭亡。放在最后一行 —— 它要看到"打完之后"的版图和纪要。 */
     if (AO.chronoArchive) AO.chronoArchive();
@@ -1517,8 +2078,10 @@
    *   goldPerUnit 税率档（轻 0.5 / 常 1 / 暴 2，每 popUnit=10 万人）
    *   taxMul      官员（理财能手 1.2 / 贪墨 1.4 / 治世能臣 1.25；无官 = 0.6）
    *   happyTaxMul 民心（0.6 ~ 1.2，民心 60 时正好 0.96）
-   * 铁税故意换了一个更大的计量单位（200 万人）：它只是"锅碗瓢盆回炉"的涓流，
-   * 一省一回合通常攒不出 1 块铁，靠 IRONACC 攒整；军备产能仍然只认矿场和熔旧坊。
+   * 铁税与金税**同单位**（v18 追加二：ironUnit = 10 万人，原来是 200 万）：
+   * 它从"锅碗瓢盆回炉"的涓流提成了常脉 —— 13 省小国约 80 万人，常规档
+   * 约 1.6 铁/回合、横征约 3.1。但大头仍然撑不起成建制扩军（3 铁/回合一炉刀），
+   * 军备主力仍是矿场 + 熔旧坊；税铁保的是"不饿死"。
    * 小数攒整（TAXACC / IRONACC）：一个 3 万人的小省在轻税档一回合只有 0.15 金，
    * 直接 round 会永远收不上来 —— 攒到整数才落袋，长期平均才准。
    *
@@ -1548,10 +2111,10 @@
         F.d.popTax = (F.d.popTax || 0) + kept;    // 数字，不是资源袋：省卡只显示一行
       }
     }
-    /* 铁税（人口铁税）：**同档、同系数、同攒整法**，只是计量单位不同 ——
-     * 金是 popUnit=10 万人，铁是 ironUnit=200 万人，所以一个中位省
-     * 一回合只有 0.01 铁，要几十回合才落一块（民间铁器熔缴，涓流量级）。
-     * 它**不构成军备产能**：军备的铁仍然只能来自矿场与熔旧坊。 */
+    /* 铁税（人口铁税）：**同档、同系数、同攒整法**，v18 追加二起**也同单位** ——
+     * 金是 popUnit=10 万人，铁是 ironUnit=10 万人，一个中位省一回合约 0.2~0.4 块。
+     * 它是矿休眠期的第二脉（保"不饿死"），不是军备主力：军备的铁仍然主要来自
+     * 矿场与熔旧坊。 */
     if (bag.iron) {
       var rawI = popV / G.ironUnit * G.ironPer2M[rate] * mul;
       IRONACC[pid] = (IRONACC[pid] || 0) + rawI;
@@ -1590,9 +2153,49 @@
         }
       }
     }
+    /* ⑤ 省库上解（v18 / D）：人口税只进省库、中央只出不进 —— 这一笔把散在
+     * 省里的金聚回中央。放在**最末**（俸禄、偷金都算完之后）：
+     * 上解的是"这个省真的剩下来的钱"，不是它收上来还没花的那一笔。
+     * 规则在 AO.GOV.remit（floor 80 / rate 25%），玩家与 AI 同一条。 */
+    settleRemit(pid, owner);
     return gain;
   }
   AO.resSettleTax = settleTax;
+
+  /* 省库上解：省库金超过 floor 的部分搬 rate 给中央。
+   * **超出 ≥4 才动**（至少搬 1 金）—— 否则一个刚过线的小省会每回合搬 0.3 金，
+   * 流水上多一条永远 0 的记录，读起来像 bug。
+   * 只走金不走铁：铁的家在矿脉和熔旧坊，这条别扩散。
+   * 单独成函数是为了测试能定点验（settleTax 里还混着人口税与俸禄）。 */
+  function settleRemit(pid, owner) {
+    var R = AO.GOV && AO.GOV.remit;
+    if (!R || !owner) return 0;          // 无主省不搬（别给 CENTRAL[0] 造一本假账）
+    var bag = SIM[pid | 0];
+    var g = bag && bag.gold;
+    if (!g) return 0;
+    var floor = R.floor === undefined ? 80 : R.floor;
+    var excess = (g.stock || 0) - floor;
+    if (excess < 4) return 0;
+    var move = Math.max(1, Math.floor(excess * (R.rate === undefined ? 0.25 : R.rate) + 1e-9));
+    if (move > g.stock) move = Math.floor(g.stock);
+    if (move <= 0) return 0;
+    g.stock -= move;
+    var cen = ensureCentral(owner | 0);
+    cen.gold = (cen.gold || 0) + move;
+    var F = FLOW[pid | 0];
+    if (F) {
+      F.loss.gold = (F.loss.gold || 0) + move;
+      F.d.remit = (F.d.remit || 0) + move;
+    }
+    var FC = FLOWC[owner | 0] || ensureFlowC(owner | 0);
+    if (FC) {
+      FC.gain.gold = (FC.gain.gold || 0) + move;
+      FC.d.remit = (FC.d.remit || 0) + move;
+    }
+    REMIT.n++; REMIT.gold += move;
+    return move;
+  }
+  AO.resSettleRemit = settleRemit;
 
   /* ---------------- ④b 官员资历与怨气（v11） ----------------
    * 每回合一遍，全部官员走同一条时间线：
@@ -1704,6 +2307,7 @@
       base: G.happyBase,
       rate: G.happyHit[rate],          // 税率压力（0 / −4 / −12）
       food: 0,                         // 缺粮
+      crowd: 0,                        // 人满为患（v18.2：人口压过承载力）
       halt: 0, haltN: 0,               // 停产（每类 −3，封顶 −9）
       official: 0,                     // 官员 happyAdd
       market: 0,                       // 有在营市场
@@ -1712,6 +2316,13 @@
     };
     var pop = POP[pid];
     if (pop && pop.need > 0 && pop.eat < pop.need) d.food = G.happyLackFood;
+    /* 人满为患（v18.2）：人口**压过**承载力才扣 —— 摸顶（pop = cap）不扣，
+     * 那是"刚好住满"，不是"挤爆了"。回落是每回合 −1%，所以这 −2 会挂几回合，
+     * 面板上能清楚看到"人太多，心不安"这一项在扣。 */
+    if (pop && pop.v > 0 && AO.POPCAP) {
+      var pcap = popCapOf(pid);
+      if (pcap > 0 && pop.v > pcap) d.crowd = AO.POPCAP.overHappy;
+    }
 
     /* 战争层的民心项，四项各管一件事（明细照样存进 drivers，面板能逐项回答）：
      *   占领   −10  （OCCUPY：地是你打下来的，人不是你的人）
@@ -1763,8 +2374,8 @@
      * 按 owner 查表：没有宰相的国家恒 0，所以这一段对 AI 国天然无影响。 */
     d.chancellor = chHappyOf(owner);
 
-    var target = d.base + d.rate + d.food + d.halt + d.official + d.market + d.faith +
-      d.war + (d.chancellor || 0);
+    var target = d.base + d.rate + d.food + d.crowd + d.halt + d.official + d.market +
+      d.faith + d.war + (d.chancellor || 0);
     h.target = AO.clamp(target, 0, 100);
     h.drivers = d;
     h.v = AO.clamp(h.v + (h.target - h.v) * G.happyLerp, 0, 100);
@@ -1784,6 +2395,13 @@
       lines.push('基准 +' + d.base);
       lines.push('税率「' + rn + '」 ' + (d.rate >= 0 ? '+' : '') + d.rate);
       lines.push('缺粮 ' + (d.food ? d.food : '0') + (d.food ? '（口粮不够吃）' : '（吃饱了）'));
+      /* 人满为患只在真超限时出现 —— 平时不占一行，免得"0"把明细撑长 */
+      if (d.crowd) {
+        var pc2 = popCapOf(pid);
+        lines.push('人满为患 ' + d.crowd + '（' + AO.formatPop(Math.round((POP[pid] || {}).v || 0)) +
+          ' 挤在 ' + AO.formatPop(Math.round(pc2)) + ' 的地上，每回合 −' +
+          Math.round(AO.POPCAP.overRate * 100) + '% 往外走）');
+      }
       lines.push('停产 ' + (d.haltN ? d.haltN + ' 类 → ' + d.halt : '0') + (d.haltN >= 3 ? '（已封顶）' : ''));
       lines.push('官员 ' + (d.official >= 0 ? '+' : '') + d.official);
       lines.push('市场 ' + (d.market ? '+' + d.market : '0'));
@@ -1810,6 +2428,546 @@
   }
   AO.resHappyTitle = happyTitle;
 
+  /* =============================================================
+   * ⑤b 不安与叛乱（A 批）
+   *
+   * 位置说明：settleUnrest / settleInteg 都排在 settleHappy **之后**、同一个省循环里 ——
+   * 它们要读本回合刚算完的民心与停产状态；settleRevolt 排在 settleWar 之后
+   * （叛乱会改归属，得看到打完之后的版图）。
+   *
+   * 三个状态都跟 OCCUPY 一样是"按 pid 挂的普通对象"，JSON 原样进存档。
+   * ============================================================= */
+
+  /* 不安：没有就给一条 0 起的记录（老档补默认全靠这里） */
+  function unrestOf(pid) {
+    pid = pid | 0;
+    var u = UNREST[pid];
+    if (!u) u = UNREST[pid] = { v: 0, target: 0, drivers: null };
+    if (typeof u.v !== 'number' || !isFinite(u.v)) u.v = 0;
+    if (typeof u.target !== 'number' || !isFinite(u.target)) u.target = u.v;
+    return u;
+  }
+  AO.resUnrestOf = unrestOf;
+
+  /* 整合度：**只有占领省才有**（没占领就是 0，不建记录 —— 1100 个省全建一份
+   * 会让存档凭空胖一圈，而"没占领"这个状态本身就是默认值） */
+  function integOf(pid) {
+    var it = INTEG[pid | 0];
+    if (!it) return null;
+    if (typeof it.v !== 'number' || !isFinite(it.v)) it.v = 0;
+    return it;
+  }
+  AO.resIntegOf = integOf;
+
+  /* 本省有没有驻军（≥1 支）。镇压倒戈/独立、加速整合都用它 ——
+   * 一支舰队不算：船在港里压不住城里的人 */
+  function hasGarrison(pid) {
+    var list = armiesIn(pid | 0);
+    for (var i = 0; i < list.length; i++) if (list[i].type === 'army') return true;
+    return false;
+  }
+  AO.resHasGarrison = hasGarrison;
+
+  /* 匪患标记还挂着吗（事件与不安共用一条标记） */
+  function banditOf(pid) {
+    var b = BANDIT[pid | 0];
+    return b && b.left > 0 ? b : null;
+  }
+  AO.resBanditOf = banditOf;
+
+  /* ---------------- 不安的六个驱动 ----------------
+   * 每一项都写进 drivers，省卡的悬停明细逐条回答"我为什么这么不稳"。
+   * 顺序和面板上的顺序一致，改一处不会漏另一处。 */
+  function settleUnrest(pid, prov) {
+    var U = AO.UNREST, u = unrestOf(pid);
+    var G = AO.GOV, h = happyOf(pid);
+    if (!prov && state.world) prov = state.world.provinces[(pid | 0) - 1];
+    var owner = prov ? prov.owner : 0;
+    var d = {
+      base: Math.max(0, U.gapFrom - h.v) * U.gapMul,   // 民心塌陷
+      halt: 0, haltN: 0,                                // 停产三类以上
+      occupy: 0,                                        // 未整合
+      faith: 0,                                         // 异信仰被强压
+      graft: 0,                                         // 贪墨官
+      bandit: 0,                                        // 匪患未平
+      calm: 0                                           // 民心回上去了 → 回落
+    };
+
+    /* 停产：和 settleHappy 同一口径（数"类"不数"座"）——
+     * happy.drivers 已经算好了，直接借过来，免得两处数出不同的数 */
+    var hd = h.drivers;
+    if (hd && hd.haltN >= U.haltN) { d.haltN = hd.haltN; d.halt = U.haltAdd; }
+
+    if (OCCUPY[pid]) d.occupy = U.occupyAdd;
+
+    /* 异信仰 + 强制改宗：和 settleHappy 的 faith 段同源（AO.faithDriver），
+     * 但只有"强制"档才积不安 —— 宽容档本来就不压人 */
+    if (AO.faithDriver && prov && AO.faithPolOf(owner) === 'force' &&
+        AO.faithDriver(pid, owner) < 0) d.faith = U.faithAdd;
+
+    var off = OFFICIAL[pid | 0];
+    if (off && off.traitKey === 'greedy') d.graft = U.graftAdd;
+
+    var bt = banditOf(pid);
+    if (bt) d.bandit = U.banditAdd;
+
+    var t = d.base + d.halt + d.occupy + d.faith + d.graft + d.bandit;
+    if (h.v >= U.calmHappy) {
+      /* 民心好了：目标往下走 5 —— 这一项单独记一格，悬停里能看见"民心回来了" */
+      d.calm = -U.calmFall;
+      t = Math.max(0, t + d.calm);
+    } else {
+      /* 其余情况**只涨不降**：目标不低于现在这个值。
+       * 于是"闹过一次"的省不会因为某个 driver 消失就自己好透，
+       * 要么把民心抬到 55 以上，要么花钱安抚 —— 这就是"金能买人心"。 */
+      t = Math.max(t, u.v);
+    }
+    u.target = AO.clamp(t, 0, U.max);
+    u.drivers = d;
+    u.v = AO.clamp(u.v + (u.target - u.v) * U.lerp, 0, U.max);
+
+    /* 匪患标记的寿命在这里走一格（**先算 driver 再减**，所以设标记那一回合
+     * 之后的 banditTurns 个回合都吃得到 +10）。散场之后不安自己慢慢回落 ——
+     * 除非民心和别的项还撑着它，这正是"怨是攒出来的"那句话。 */
+    if (bt) {
+      bt.left--;
+      if (bt.left <= 0) delete BANDIT[pid | 0];
+    }
+    return u;
+  }
+  AO.resSettleUnrest = settleUnrest;
+
+  /* 不安明细 → 悬停文本（省卡 / 国家卡共用） */
+  function unrestTitle(pid) {
+    var U = AO.UNREST, u = unrestOf(pid), d = u.drivers;
+    var lines = ['安定 ' + Math.round(u.v) + ' / 100（不安值，越高越不稳）' +
+      (d ? '　目标 ' + Math.round(u.target) : '')];
+    if (!d) {
+      lines.push('（还没结算过，开局 0）');
+    } else {
+      lines.push('民心塌陷 +' + Math.round(d.base) +
+        '（民心 ' + Math.round(happyOf(pid).v) + '，低于 ' + U.gapFrom + ' 才开始积）');
+      lines.push('停产 +' + d.halt + (d.haltN ? '（' + d.haltN + ' 类建筑停产）' : '（未达 ' + U.haltN + ' 类）'));
+      if (d.occupy) lines.push('未整合 +' + d.occupy + '（打下来的地还没消化）');
+      if (d.faith) lines.push('异信仰受压制 +' + d.faith + '（政策强制）');
+      if (d.graft) lines.push('贪墨官在任 +' + d.graft);
+      if (d.bandit) lines.push('匪患未平 +' + d.bandit);
+      if (d.calm) lines.push('民心已回 55 以上 → 回落 ' + d.calm + '/回合');
+      lines.push('→ 目标 ' + Math.round(u.target) + '，本回合往它靠 ' + Math.round(U.lerp * 100) + '%');
+    }
+    lines.push('');
+    lines.push('不安 ≥ ' + U.revoltAt + '：每回合 ' + Math.round(U.revoltChance * 100) +
+      '% 爆发（' + U.wBandit + '% 匪乱 · ' + U.wDefect + '% 倒戈 · ' + U.wSecede + '% 独立）');
+    lines.push('自己的省会先报「警戒」（' + U.warnAt + '）与「危急」（' + U.warnAt2 + '）两档纪要');
+    lines.push('有驻军时倒戈与独立各减半（' + (U.wDefect / 2) + '% / ' + (U.wSecede / 2) + '%），匪乱照发');
+    lines.push('民心 ≥ ' + U.calmHappy + ' 时不安每回合 −' + U.calmFall + '；其余情况只涨不降');
+    lines.push('「安抚」花 ' + AO.INTEG.pacify.cost + ' 金：不安 −' + AO.INTEG.pacify.unrestOnly +
+      '（未整合省另有整合 +' + AO.INTEG.pacify.integ + '、不安 −' + AO.INTEG.pacify.unrest + '）');
+    return lines.join('\n');
+  }
+  AO.resUnrestTitle = unrestTitle;
+
+  /* ---------------- 整合推进 ----------------
+   * 每回合 +1（同信仰 / 有官 / 民心≥55 / 有驻军 各再 +1）→ 最快 5/回合、最慢 1/回合。
+   * 民心 < 35 → 本回合不推进（连饭都吃不上，没人替你办差）。
+   * 整合满 → **OCCUPY 删除**：这一省从此是正式国土（×1.0、可传教、产科研）。 */
+  function settleInteg(pid, prov) {
+    if (!OCCUPY[pid]) {                      // 不是占领省 → 不该有整合记录
+      if (INTEG[pid]) delete INTEG[pid];
+      return null;
+    }
+    var I = AO.INTEG, h = happyOf(pid);
+    var it = integOf(pid) || (INTEG[pid] = { v: 0 });
+    if (!prov && state.world) prov = state.world.provinces[(pid | 0) - 1];
+
+    var gain = 0, why = [];
+    if (h.v < I.stallHappy) {
+      why.push('民心 ' + Math.round(h.v) + ' < ' + I.stallHappy + '，本回合停摆');
+    } else {
+      gain += I.base;
+      var sf = AO.stateFaithOf(prov ? prov.owner : 0);
+      if (sf >= 0 && prov && prov.faithIdx === sf) { gain += I.sameFaith; why.push('同信仰'); }
+      if (OFFICIAL[pid | 0]) { gain += I.officer; why.push('有官'); }
+      if (h.v >= I.happyAt) { gain += I.happy; why.push('民心'); }
+      if (hasGarrison(pid)) { gain += I.garrison; why.push('驻军'); }
+    }
+    it.gain = gain;
+    it.why = why;
+    it.v = AO.clamp(it.v + gain, 0, I.max);
+
+    if (it.v >= I.max) {
+      /* 整合完成：这一省归附。OCCUPY 一删，产出乘数自动回到 ×1.0，
+       * 科研与传教资格也跟着回来（那两处判的就是 OCCUPY） */
+      delete OCCUPY[pid];
+      delete INTEG[pid];
+      var owner = prov ? prov.owner : 0;
+      var txt = '🏛 ' + (prov ? prov.name : '?') + '：' + I.doneText + '（整合完成，恢复全产出）';
+      WARLOG.unshift({ turn: turnNo, cls: 'ok', text: txt });
+      if (PLAYER && owner === PLAYER) {
+        NOTES.push({ owner: PLAYER, pid: pid | 0, cls: 'ok', text: txt });
+      } else if (PLAYER) {
+        worldNews(txt.replace('🏛 ', ''), 'ok', { parties: [owner], kind: 'other' });
+      }
+      return null;
+    }
+    return it;
+  }
+  AO.resSettleInteg = settleInteg;
+
+  function integTitle(pid) {
+    var I = AO.INTEG, it = integOf(pid);
+    if (!it) return '这一省不是占领省 —— 已经是正式国土（产出 ×1.0）';
+    var lines = ['整合 ' + Math.round(it.v) + ' / ' + I.max +
+      '（未整合省产出 ×' + I.prodMul(it.v).toFixed(2) + '，完成即正式国土 ×1.00）'];
+    lines.push('本回合 +' + (it.gain || 0) + (it.why && it.why.length ? '（' + it.why.join(' / ') + '）' : ''));
+    lines.push('加速项：基础 +' + I.base + ' · 同信仰 +' + I.sameFaith + ' · 有官 +' + I.officer +
+      ' · 民心≥' + I.happyAt + ' +' + I.happy + ' · 驻军 +' + I.garrison);
+    lines.push('民心 < ' + I.stallHappy + ' → 停摆；被敌国夺回 → 归零重算');
+    lines.push('「安抚」花 ' + I.pacify.cost + ' 金：整合 +' + I.pacify.integ +
+      '、不安 −' + I.pacify.unrest + '（冷却 ' + I.pacify.cd + ' 回合）');
+    return lines.join('\n');
+  }
+  AO.resIntegTitle = integTitle;
+
+  /* ---------------- 安抚金（B3） ----------------
+   * 玩家：省库优先 → 中央 → 同国富裕省调拨（走 payCost 那条链，和建造同一个付款口径）
+   * AI  ：只花**中央**金（silent）—— 理由和「赏赐」一样：不惊动提示条、不推纪要。
+   *       权相 / 宰相**不自动安抚**（v1 留给玩家：这是"人"该做的判断）。
+   *
+   * 两段效果（互斥）：
+   *   未整合省 → INTEG +15、UNREST −15（先安抚再消化）
+   *   高不安省 → UNREST −25（买平安）
+   * 冷却 3 回合同样按 pid 记（换主张子之后也得等 —— 否则两个邻国轮流安抚等于没有冷却）。 */
+  function pacify(pid, silent) {
+    var P = AO.INTEG.pacify;
+    var prov = state.world ? state.world.provinces[(pid | 0) - 1] : null;
+    if (!prov) return { ok: false, msg: '没有这个省' };
+    var owner = prov.owner | 0;
+    if (!silent && !canAct(owner)) return { ok: false, msg: lockTitle() };
+    var occ = !!OCCUPY[pid];
+    var u = unrestOf(pid);
+    if (!occ && u.v < P.at) {
+      return { ok: false, msg: '这一省既不是未整合省、不安也只有 ' + Math.round(u.v) +
+        '（低于 ' + P.at + '）—— 不用安抚' };
+    }
+    var last = PACIFY[pid | 0];
+    if (last && turnNo - last < P.cd) {
+      return { ok: false, msg: '刚安抚过：还要等 ' + (P.cd - (turnNo - last)) + ' 回合' };
+    }
+
+    /* 付款：玩家走整条 payCost；AI 只掏中央 */
+    if (silent) {
+      var cen = ensureCentral(owner);
+      if ((cen.gold || 0) < P.cost) return { ok: false, msg: '中央金不足' };
+      cen.gold -= P.cost;
+    } else {
+      var r = payCost(prov, { gold: P.cost });
+      if (!r.ok) return { ok: false, msg: '凑不齐 ' + P.cost + ' 金（省库 → 中央 → 同国各省）' };
+    }
+
+    PACIFY[pid | 0] = turnNo;
+    var parts = ['金 −' + P.cost];
+    if (occ) {
+      var it = integOf(pid) || (INTEG[pid] = { v: 0 });
+      it.v = AO.clamp(it.v + P.integ, 0, AO.INTEG.max);
+      u.v = AO.clamp(u.v - P.unrest, 0, AO.UNREST.max);
+      u.target = Math.max(0, Math.min(u.target, u.v));
+      parts.push('整合 +' + P.integ + '（' + Math.round(it.v) + '/100）', '不安 −' + P.unrest);
+    } else {
+      u.v = AO.clamp(u.v - P.unrestOnly, 0, AO.UNREST.max);
+      u.target = Math.max(0, Math.min(u.target, u.v));
+      parts.push('不安 −' + P.unrestOnly);
+    }
+    /* 安抚顺手把匪患标记清掉：钱能给到"招安"这个层级上（否则安抚完
+     * 匪患还挂着 +10 不安，玩家会觉得钱白花了） */
+    if (BANDIT[pid | 0]) { delete BANDIT[pid | 0]; parts.push('匪患平息'); }
+    var msg = prov.name + ' 安抚：' + parts.join(' · ') + '（冷却 ' + P.cd + ' 回合）';
+    if (!silent) {
+      WARLOG.unshift({ turn: turnNo, cls: 'ok', text: '🕊 ' + msg });
+      NOTES.push({ owner: owner, pid: pid | 0, cls: 'ok', text: msg });
+    }
+    return { ok: true, msg: msg, occ: occ };
+  }
+  AO.resPacify = pacify;
+
+  /* 安抚按钮的可用性（省卡直接用这个判据，免得面板和真调用两套规则） */
+  function pacifyInfo(pid) {
+    var P = AO.INTEG.pacify;
+    var prov = state.world ? state.world.provinces[(pid | 0) - 1] : null;
+    if (!prov) return { ok: false, why: '没有这个省', show: false };
+    var occ = !!OCCUPY[pid];
+    var u = unrestOf(pid);
+    if (!occ && u.v < P.at) return { ok: false, why: '不是未整合省，不安也低于 ' + P.at, show: false };
+    if (!canAct(prov.owner)) return { ok: false, why: lockTitle(), show: true };
+    var last = PACIFY[pid | 0];
+    if (last && turnNo - last < P.cd) {
+      return { ok: false, why: '冷却中：还要等 ' + (P.cd - (turnNo - last)) + ' 回合', show: true };
+    }
+    return { ok: true, why: '', show: true, occ: occ, cost: P.cost };
+  }
+  AO.resPacifyInfo = pacifyInfo;
+
+  /* =============================================================
+   * ⑤c 叛乱（A2）：全世界的省一视同仁 —— 玩家和 AI 走同一段代码
+   *
+   * 触发：UNREST ≥ 80 → 每回合 15% 掷一次。
+   * 结果按权重：60% 匪乱 / 30% 倒戈 / 10% 独立；**有驻军时**倒戈与独立各减半
+   * （15 / 5，省下的份额给匪乱）—— 驻军压的是背叛，不是治安。
+   *
+   * 三种结果各改一样东西，改完都清不安：
+   *   匪乱  产出归零一回合 + 挂匪患标记（+10 不安，3 回合散）+ 事件系统会接着出「招安」
+   *   倒戈  整省改归属（走 occupyProvince 那条既有流程 → 占领省、整合从 0 开始）
+   *   独立  这一省 + 接壤的同宗不满省抱团成**新国**（军队带走在驻军）
+   * ============================================================= */
+
+  /* 掷结果：返回 'bandit' | 'defect' | 'secede' */
+  function rollRevoltKind(garrisoned) {
+    var U = AO.UNREST;
+    var wB = U.wBandit, wD = U.wDefect, wS = U.wSecede;
+    if (garrisoned) { wD = wD / 2; wS = wS / 2; wB = 100 - wD - wS; }
+    var r = Math.random() * (wB + wD + wS);
+    if (r < wB) return 'bandit';
+    if (r < wB + wD) return 'defect';
+    return 'secede';
+  }
+  AO.resRollRevolt = rollRevoltKind;      // 测试要能直接掷 1000 次验概率
+
+  function revoltNote(txt, cls, owner, pid) {
+    WARLOG.unshift({ turn: turnNo, cls: cls || 'bad', text: txt });
+    if (PLAYER && (owner === PLAYER)) {
+      NOTES.push({ owner: PLAYER, pid: pid || 0, cls: cls || 'warn', text: txt });
+    } else if (PLAYER) {
+      /* AI 国的事走「遥远的」这一条路（每回合 ≤ AIWAR.newsPerTurn 条）——
+       * 36 国一起叛乱的话，玩家的提示条会被刷成滚动条 */
+      worldNews(txt.replace(/^\S+\s/, ''), cls || 'warn', { parties: [owner], kind: 'revolt' });
+    }
+  }
+
+  /* 匪乱：产出归零一回合（匪患标记）+ 不安 −30 */
+  function riotAt(pid, prov, owner) {
+    var U = AO.UNREST;
+    BANDIT[pid] = { turn: turnNo, left: U.banditTurns };
+    var u = unrestOf(pid);
+    u.v = AO.clamp(u.v - U.banditDrop, 0, U.max);
+    u.target = Math.min(u.target, u.v);
+    UNWARN[pid] = 0;                       // 炸过一次，预警档复位（下次攒上去再报）
+    var txt = '🔥 ' + prov.name + ' 匪乱：仓储被抢、工地停摆（本回合产出归零，' +
+      U.banditTurns + ' 回合内不安 +' + U.banditAdd + '）';
+    revoltNote(txt, 'bad', owner, pid);
+    return txt;
+  }
+
+  /* 倒戈：整省改投"接壤、REL 最高的邻国"。
+   * 走 occupyProvince 是为了复用那一整套易主（成员表、颜色、战争分、缓存失效、编年史）——
+   * 唯一的补充是把 INTEG 从 0 开始、不安清零（举城投过去，怨气跟着散了）。 */
+  function defectTo(pid, prov) {
+    var oldOwner = prov.owner | 0;
+    var nb = prov.neighbors || [], best = 0, bestRel = -Infinity;
+    for (var i = 0; i < nb.length; i++) {
+      var q = state.world.provinces[nb[i] - 1];
+      if (!q || !q.owner || q.owner === oldOwner) continue;
+      if (countryDead(q.owner)) continue;
+      var r = relOf(oldOwner, q.owner);
+      if (r > bestRel) { bestRel = r; best = q.owner; }
+    }
+    if (!best) return null;
+    var oldC = coOf(oldOwner), newC = coOf(best);
+    occupyProvince(pid, best, '倒戈');
+    INTEG[pid | 0] = { v: 0 };
+    var u = unrestOf(pid);
+    u.v = 0; u.target = 0;
+    delete UNWARN[pid | 0];
+    addRel(oldOwner, best, AO.UNREST.defectRel);
+    var txt = '🏳 ' + prov.name + ' 举城投' + (newC ? newC.name : '?') +
+      '（原属' + (oldC ? oldC.name : '?') + '，关系 ' + bestRel + '）';
+    revoltNote(txt, 'bad', oldOwner, pid);
+    return txt;
+  }
+
+  /* 独立：这一省 + 接壤的同宗不满省抱团成新国。
+   * "同宗" = 同信仰（faithIdx 相同）且不安 ≥ secedeUnrest —— 只有同宗才会一起走，
+   * 否则一个省内几个教派互相看不顺眼，抱团是编不出来的。 */
+  function secedeAt(pid, prov) {
+    var U = AO.UNREST, w = state.world;
+    var oldOwner = prov.owner | 0;
+    var group = [pid], nb = prov.neighbors || [], i;
+    for (i = 0; i < nb.length && group.length < U.secedeMax; i++) {
+      var q = w.provinces[nb[i] - 1];
+      if (!q || q.owner !== oldOwner) continue;
+      if (q.faithIdx !== prov.faithIdx) continue;
+      if (unrestOf(q.id).v < U.secedeUnrest) continue;
+      if (group.indexOf(q.id) < 0) group.push(q.id);
+    }
+    var nc = createRebelCountry(prov, group);
+    if (!nc) return null;
+    /* 复用一个空的军队位：新国自己的军队表是空的，先把本省驻军的旗号换掉 */
+    var gar = armiesIn(pid);
+    for (i = 0; i < gar.length; i++) {
+      var a = gar[i];
+      if (a.owner !== oldOwner) continue;
+      a.owner = nc.id;
+      a.rebelFrom = oldOwner;
+      a.order = { type: 'defend', cid: nc.id, pid: pid, tactic: 'assault' };
+    }
+    addRel(oldOwner, nc.id, U.secedeRel);
+    var oldC = coOf(oldOwner);
+    var txt = '⚑ ' + prov.name + ' 独立，立' + nc.name + '（带走 ' + group.length +
+      ' 省' + (gar.length ? '、驻军 ' + gar.length + ' 支' : '') + '），原属' + (oldC ? oldC.name : '?');
+    revoltNote(txt, 'bad', oldOwner, pid);
+    return txt;
+  }
+
+  /* 建一个"叛乱新国"：任务书要求复用国家生成里的分国逻辑**最小集** ——
+   * 名字从命名器取、PERSONA 掷一个、其余（人口/面积/信仰/邻国/首都/资源）
+   * 全部交给 AO.recomputeCountry 从成员省复算，和改归属后那条路一模一样。
+   *
+   * 为什么不做完整的 08b（政体/头像/王朝）：那套要一整套 rng 支流，
+   * 中途插入会打乱后续所有随机数；这里用 seed+pid+turn 的散列取名字与头像，
+   * 同一个种子 + 同一个回合永远得到同一个国名（可复现）。 */
+  function createRebelCountry(capProv, group) {
+    var w = state.world;
+    if (!w) return null;
+    var id = w.countries.length + 1;
+    var rng = new AO.RNG(AO.hashString('rebel|' + w.meta.seed + '|' + capProv.id + '|' + turnNo));
+
+    /* 名字：从命名器取，撞名就重掷（最多 40 次，兜底加序号） */
+    var ng = new AO.NameGen(rng), nm = null, used = Object.create(null), i;
+    for (i = 0; i < w.countries.length; i++) {
+      if (w.countries[i] && w.countries[i].name) used[w.countries[i].name] = 1;
+    }
+    for (i = 0; i < 40; i++) {
+      var cand = ng.country();
+      if (!used[cand.name]) { nm = cand; break; }
+    }
+    if (!nm) { nm = ng.country(); nm.name = nm.name + '（新）'; }
+
+    /* 颜色：从国家色盘里挑一个"邻国都没用过"的（和 07-politics 的图着色同一条纪律） */
+    var pal = AO.COUNTRY_PALETTE || ['#8a8f98'];
+    var nbCol = Object.create(null);
+    var nbSet = Object.create(null);
+    for (i = 0; i < group.length; i++) {
+      var pp = w.provinces[group[i] - 1];
+      if (!pp || !pp.neighbors) continue;
+      for (var k = 0; k < pp.neighbors.length; k++) {
+        var q = w.provinces[pp.neighbors[k] - 1];
+        if (q && q.owner && q.owner !== (capProv.owner | 0)) nbSet[q.owner] = 1;
+      }
+    }
+    for (var cid2 in nbSet) {
+      var oc = w.countries[cid2 - 1];
+      if (oc && oc.color) nbCol[oc.color] = 1;
+    }
+    var color = pal[0], colorIndex = 0;
+    for (i = 0; i < pal.length; i++) {
+      var ci2 = (rng.int(pal.length) + i) % pal.length;
+      if (!nbCol[pal[ci2]]) { color = pal[ci2]; colorIndex = ci2; break; }
+    }
+
+    var person = ng.person();
+    var leader = {
+      name: person.name, name_en: person.name_en, gender: person.gender,
+      title: person.gender === 'f' ? '女王' : '国王',
+      age: 26 + rng.int(22), reign: 1
+    };
+    var nc = {
+      id: id,
+      name: nm.name, name_en: nm.name_en,
+      gov: nm.gov, govKey: nm.gov, govCn: '王国',
+      color: color, colorIndex: colorIndex,
+      capital: capProv.id,
+      provinces: [],
+      area: 0, provinceCount: 0,
+      neighbors: [],
+      population: 0, density: 0, areaKm2: 0,
+      economy: '农耕', house: ng.house(),
+      leader: leader,
+      portraitHat: 'crown',
+      portrait: AO.makePortrait
+        ? AO.makePortrait((AO.hashString('rebelp|' + nm.name_en + '|' + turnNo)) >>> 0,
+            { color: color, hat: 'crown', gender: person.gender })
+        : '',
+      rebelFrom: capProv.owner | 0,
+      rebelTurn: turnNo
+    };
+    w.countries.push(nc);
+
+    /* 逐省易主：走 occupyProvince（成员表/颜色/缓存/编年史全由它管），
+     * 完事**立刻删掉 OCCUPY** —— 独立出来的国，这一省是它的**本土**，
+     * 不是"被它占领的省"（否则新国一开局全国都是占领省，×0.4 产出 +15 不安，
+     * 出生即叛乱，两回合就自己散架）。 */
+    var list = group.slice();
+    for (i = 0; i < list.length; i++) {
+      var p2 = w.provinces[list[i] - 1];
+      if (!p2 || p2.owner !== nc.rebelFrom) continue;
+      occupyProvince(p2.id, id, '独立');
+      delete OCCUPY[p2.id];
+      delete INTEG[p2.id];
+      var u2 = unrestOf(p2.id);
+      u2.v = 0; u2.target = 0;
+      delete UNWARN[p2.id];
+    }
+    if (AO.recomputeCountry) AO.recomputeCountry(w, nc);
+    /* 性格（PERSONA）不用在这里掷：18-ai 的 personaOf 是**惰性**的，
+     * 第一次被问到时按 seed+cid 的散列补上 —— 新国天然走同一条路，
+     * 老档里"多出来的那个 cid"也不需要迁移。 */
+    CAPS = null; CPROV.w = null;
+    invalidateGeo();
+    return nc;
+  }
+
+  /* 每回合结算尾跑一次：所有 UNREST ≥ 80 的省各自掷 */
+  function settleRevolt() {
+    var U = AO.UNREST, w = state.world;
+    if (!w) return 0;
+    var fired = 0;
+    /* 先收集再处理：处理过程中会新增/删除 UNREST 条目（倒戈清零、独立清表），
+     * 边遍历边改 for-in 会漏省 */
+    var list = [];
+    for (var k in UNREST) {
+      var pid = +k;
+      if (unrestOf(pid).v >= U.revoltAt) list.push(pid);
+    }
+    for (var i = 0; i < list.length; i++) {
+      var pid2 = list[i], p = w.provinces[pid2 - 1];
+      if (!p || !p.owner || countryDead(p.owner)) continue;
+      var owner = p.owner | 0, gar = hasGarrison(pid2);
+
+      /* PLAYER 的省：先给一次「危急」警告（比爆发早一档 —— 这是唯一的反应窗口） */
+      if (PLAYER && owner === PLAYER) warnPlayerProv(pid2, p);
+
+      if (Math.random() >= U.revoltChance) continue;
+      var kind = rollRevoltKind(gar);
+      if (kind === 'bandit') riotAt(pid2, p, owner);
+      else if (kind === 'defect') { if (!defectTo(pid2, p)) riotAt(pid2, p, owner); }
+      else if (!secedeAt(pid2, p)) riotAt(pid2, p, owner);
+      fired++;
+    }
+    return fired;
+  }
+  AO.resSettleRevolt = settleRevolt;
+
+  /* 危急预警：只在档位**抬升**时报一次（70 警戒 / 80 危急），
+   * 已经报过的不重复刷屏；不安回落到 70 以下则复位（下次攒上去还会再报）。
+   *
+   * 两档的用意（"提前一回合"就靠这个）：
+   *   70 警戒 —— 还在爆发线以下，这一回合安抚 / 派官 / 调兵都来得及；
+   *   80 危急 —— 已经到了爆发线，每回合 15% 掷骰，说的是"这一回合就可能炸"。 */
+  function warnPlayerProv(pid, p) {
+    var U = AO.UNREST, u = unrestOf(pid);
+    var lv = u.v >= U.warnAt2 ? 2 : (u.v >= U.warnAt ? 1 : 0);
+    if (!lv) { delete UNWARN[pid]; return false; }
+    var had = UNWARN[pid] | 0;
+    if (had >= lv) return false;
+    UNWARN[pid] = lv;
+    var txt = lv === 2
+      ? '🚨 危急：' + p.name + ' 不安 ' + Math.round(u.v) + '，随时可能倒戈或独立 —— 立刻派兵弹压或花金安抚'
+      : '⚠ 警戒：' + p.name + ' 不安 ' + Math.round(u.v) + '（' + U.revoltAt +
+        ' 即爆发）—— 下一回合还有机会安抚、派官或驻军';
+    NOTES.push({ owner: PLAYER, pid: pid | 0, cls: 'warn', text: txt });
+    return true;
+  }
+  AO.resWarnPlayerProv = warnPlayerProv;
+
   /* 一条科技研完：记账、提示、然后**自动拉队列里的下一条**。
    * 冲刺钮（把倒计时砍到 0）和 settleResearch 共用这一个收尾。 */
   function finishResearch(owner) {
@@ -1820,9 +2978,24 @@
     R.cur = null;
     if (t) {
       var d = t.for ? AO.RESOURCE_BY_KEY[t.for] : null;
-      NOTES.push({ owner: +owner, cls: 'ok',
-        text: '「' + t.cn + '」研究完成：' + (t.fx ? fxDesc(t) : t.mil ? milEffectText(t.mil) :
-          (d ? d.build : t.for) + ' 可以盖/升 Lv2 了') });
+      /* 军工科技（制式装备 / 淬火 / 量产）没有 fx 也没有 mil，效果写在 desc 上 */
+      var what = t.desc ? t.desc
+        : t.fx ? fxDesc(t) : t.mil ? milEffectText(t.mil)
+          : (d ? d.build : t.for) + ' 可以盖/升 Lv2 了';
+      NOTES.push({ owner: +owner, cls: 'ok', text: '「' + t.cn + '」研究完成：' + what });
+      /* 装备材质换代（拍板⑥）：这条科技把材质推上新高 → 旧库存折半回炉。
+       * 判定用"研完之后 matIdxOf 的顶格正好是它"，所以重复研 / 研低档都不会误触发。 */
+      if (t.mat) {
+        var mi = matIdxOf(owner);
+        if (AO.EQUIP.mat[mi].key === t.mat) {
+          equipRecycle(owner, '新材质「' + AO.EQUIP.mat[mi].cn + '」');
+        }
+      }
+      /* 兵刃换代回收（v19，任务书第七节）：工艺链往前一档 → 全国所有**更低代**
+       * 的兵刃队份折半回炉，每份返 0.5 铁，战报一条「换代回收」。
+       * 武器库存永远只有一代 —— 不留旧货，是因为"征兵吃库存最高代"这条规则
+       * 会让旧货变成永远用不掉的死库存。炮与舰不回收（拍板项）。 */
+      if (t.craft && !t.free) gearRecycle(owner, '「' + t.cn + '」');
     }
     pullQueue(owner);
     return t;
@@ -1839,7 +3012,7 @@
     if (!t) { R.queue.shift(); return pullQueue(owner); }
     if (R.done[key]) { R.queue.shift(); return pullQueue(owner); }
     if (!R.unlocked) return 'wait';
-    if (t.req && !R.done[t.req]) return 'wait';
+    if (!reqOk(t, R)) return 'wait';
     var cen = ensureCentral(owner), k;
     if (R.pts < t.pts) {
       NOTES.push({ owner: +owner, cls: 'warn',
@@ -2061,6 +3234,52 @@
   AO.resOfficialsOf = officialsOf;
   AO.resRollTrait = rollTrait;
 
+  /* ---------------- 人口承载力（v18.2）：这省现在能养多少人 ----------------
+   * 公式全在 15-resources 的 POPCAP（纯函数，可单测），这里只负责**读表**：
+   * 地形 / 是不是首都 / 三种建筑几座（农场分 Lv1、Lv2）/ 铁犁深耕研没研。
+   * 每回合现算、**不写进 POP** —— 建筑一拆、科技一研，上限立刻跟着变，
+   * 存档里也就不会出现"上限和面板上的建筑对不上"这种鬼。 */
+  function popCapCtx(pid) {
+    pid = pid | 0;
+    var bag = SIM[pid] || {};
+    var farm = bag.grain, fish = bag.fish, horse = bag.horse;
+    var g = GRANARY[pid];
+    var prov = state.world ? state.world.provinces[pid - 1] : null;
+    var owner = prov ? prov.owner : 0;
+    var c = owner ? coOf(owner) : null;
+    return {
+      /* 首都：`c.capital` 是那个国现在的首都 id，而这块地的 owner 就是这个国 ——
+       * 首都被人打下来之后 owner 变了，这里自然就不再算 1.5（不用另写判断）。 */
+      capital: !!(c && c.capital === pid),
+      farm1: (farm && farm.tiers && farm.tiers[1]) || 0,
+      farm2: (farm && farm.tiers && farm.tiers[2]) || 0,
+      /* 渔港 / 牧场不分档：加成表里只有一档（+8 / +4），所以按**总座数**算。
+       * 停产（halted）照样算 —— 房子还在，塌不了；停的只是产出。 */
+      fish: (fish && fish.built) || 0,
+      horse: (horse && horse.built) || 0,
+      granary: (g && g.n) || 0,
+      plow: techDone(owner, AO.POPCAP.plowTech),
+      /* 面积：只在 POPCAP.areaRef 打开时才进公式（默认关，见常量区） */
+      area: prov ? prov.area : 0
+    };
+  }
+  /* 科技研没研 —— 按**科技键**查（'plow2'）。
+   * 注意别拿 researched() 顶：它收的是**资源键**（'grain'），内部要经 AO.techFor
+   * 转一次；把科技键喂进去会 techFor('plow2') → null → 永远 false
+   * （这个坑 test/pop.js 的"铁犁深耕 ×1.25"当场就抓到了）。 */
+  function techDone(owner, techKey) {
+    var R = RESEARCH[owner | 0];
+    return !!(R && R.done && R.done[techKey]);
+  }
+  function popCapOf(pid) {
+    var prov = state.world ? state.world.provinces[(pid | 0) - 1] : null;
+    if (!prov || !AO.POPCAP) return 0;
+    return AO.POPCAP.capOf(prov.terrain, popCapCtx(pid));
+  }
+  /* AI（18-ai 的 provScore）和测试都从这两个口进 */
+  AO.resPopCap = popCapOf;
+  AO.resPopCapCtx = popCapCtx;
+
   /* ---------------- 人口：吃粮、涨落 ----------------
    * 口粮：**每 200 万人每回合吃 1 单位**（先粮食、再渔获）。
    * 涨落看的是"本回合产出 vs 口粮"，不是库存 —— 这样人口不会一路涨到把存粮吃光：
@@ -2068,7 +3287,14 @@
    *   产出 − 口粮 ≥ 1 → +0.4%/回合
    *   产出刚够吃（差 0~1）→ 不涨不跌，人口停在这儿
    *   产出不够吃 → 先吃存粮；存粮也见底才 −1.5%（真饥荒）
-   * 于是"每回合净余 1 单位"就是人口的天然上限：想让人口再涨，就多盖农场/渔港。 */
+   * 于是"每回合净余 1 单位"就是人口的天然上限：想让人口再涨，就多盖农场/渔港。
+   *
+   * v18.2 加了一道**硬天花板**（承载力，见 15-resources 的 POPCAP）：
+   *   pop < cap → 上面那套分档照旧
+   *   pop ≥ cap → 增长归零（不回落；面板写「人丁兴旺」）
+   *   pop > cap → −1%/回合往 cap 回落（吞地 / 事件涌入的人慢慢流走）
+   * 两把刀各管各的：口粮管"今年够不够吃"（饥荒 −1.5%），
+   * 承载力管"这块地最多住多少"。饥荒比拥挤更狠，所以两个都在时取 −1.5%。 */
   function settlePop(pid, foodProd) {
     var s = POP[pid], bag = SIM[pid];
     if (!s || !bag) return;
@@ -2089,8 +3315,13 @@
       }
     }
     var surplus = (foodProd || 0) - need;     // 本回合产出减去口粮
+    /* 承载力（v18.2）：现算一次，三个分支都看它 */
+    var cap = popCapOf(pid);
+    var over = cap > 0 && s.v > cap;          // 人满为患（吞地 / 事件涌入）
     var rate;
-    if (eat < need) rate = -0.015;            // 连存粮都吃不上
+    if (eat < need) rate = -0.015;            // 连存粮都吃不上（饥荒比拥挤更狠）
+    else if (over) rate = -AO.POPCAP.overRate; // 超限：每回合 −1% 往 cap 回落
+    else if (cap > 0 && s.v >= cap) rate = 0;  // 摸顶：增长归零，**不回落**
     else if (surplus >= 3) rate = 0.012;
     else if (surplus >= 1) rate = 0.004;
     else rate = 0;                            // 刚够吃：人口稳定，不再动存粮
@@ -2106,6 +3337,9 @@
     }
     s.happyMul = hm;
     s.v = Math.max(1000, Math.round(s.v * (1 + rate)));
+    /* 回落**不许穿过 cap**：-1% 一步踩到 cap 以下的话，下一回合又变成"没到顶，
+     * 可以继续涨"，人口就会在 cap 上下反复抖 —— 落到底就停住。 */
+    if (over && rate < 0 && s.v < cap) s.v = Math.round(cap);
     s.rate = rate;
     s.need = need;
     s.eat = eat;
@@ -2278,14 +3512,19 @@
 
   /* 19-repair.js 里"这一处现在是什么状态"的统一视图。
    * 资源建筑和通用设施形状不一样（built/tiers vs n），在这里抹平，
-   * 维修层只认 { halted, built, n, site, due, repair() }。 */
+   * 维修层只认 { halted, built, n, active, off, site, due, repair() }。
+   *   built  已建座数（面板"已建"列）
+   *   active 在跑座数（保留座数裁过之后）—— 维护费与产量都按它算
+       *   off    玩家主动停的（保留 0 座）：不是失修，不算欠费 */
   function repLive(pid, kind) {
     if (kind === 'wall') {
       var w = WALL[pid];
       if (!w || !(w.lv > 0)) return null;
+      var woff = keepOff(pid, 'wall');
       return {
-        halted: !!w.halted, built: w.lv, n: w.lv, site: w.site | 0,
-        due: wallMaintDue(w, pOf(pid) ? pOf(pid).owner : 0),
+        halted: !!w.halted, built: w.lv, n: w.lv, active: woff ? 0 : w.lv,
+        off: woff, site: w.site | 0, mAcc: w.mAcc,
+        due: woff ? { iron: 0, gold: 0 } : wallMaintDue(w, pOf(pid) ? pOf(pid).owner : 0),
         repair: function () { w.hp = AO.WALL.maxHp(w.lv); w.halted = false; }
       };
     }
@@ -2294,10 +3533,21 @@
     if (def) {
       var s = SIM[pid] && SIM[pid][kind];
       if (!s) return null;
+      var built = s.built | 0;
       return {
-        halted: !!s.halted, built: s.built | 0, n: s.built | 0, site: s.site | 0,
+        halted: !!s.halted, built: built, n: built,
+        active: AO.rep && AO.rep.effKeep ? AO.rep.effKeep(pid, kind, built) : built,
+        off: keepOff(pid, kind),
+        site: s.site | 0,
         gone: !!s.gone,
-        due: maintDue(s, def, owner),
+        /* 干跑预测（20-balance）要的三组数，和结算同源：
+         * tiers = 按当前保留座数裁出来的档位（先保 Lv2）；
+         * gross = 这一类这回合的毛产（simPerTurn 已按保留座数算）；
+         * mAcc  = 维护费的攒整零头（预测要逐回合 floor，不能用平均值糊）。 */
+        tiers: activeTiers(pid, kind, s),
+        gross: simPerTurn(s, def, pid, kind),
+        mAcc: s.mAcc,
+        due: maintDue(s, def, owner, pid, kind),
         /* 修好 = 清失修标记 + 清欠账零头（不清零头的话，修好下一回合
          * 那笔 39 的欠账会立刻把人再拖回停产） */
         repair: function () {
@@ -2309,9 +3559,12 @@
     var st = UNIV[kind] && UNIV[kind][pid];
     if (!st) return null;
     var ud = univDef(kind);
+    var uoff = keepOff(pid, kind);
     return {
-      halted: !!st.halted, built: st.n | 0, n: st.n | 0, site: st.site | 0,
-      due: { iron: (ud.maint.iron || 0) * st.n, gold: (ud.maint.gold || 0) * st.n },
+      halted: !!st.halted, built: st.n | 0, n: st.n | 0,
+      active: uoff ? 0 : (st.n | 0), off: uoff, site: st.site | 0, mAcc: st.mAcc,
+      due: uoff ? { iron: 0, gold: 0 }
+        : { iron: (ud.maint.iron || 0) * st.n, gold: (ud.maint.gold || 0) * st.n },
       repair: function () {
         st.halted = false;
         if (st.mAcc) { st.mAcc.iron = 0; st.mAcc.gold = 0; }
@@ -2381,6 +3634,10 @@
     if (!def || !s) return;
     if (!silent && !canAct(p.owner)) return say(lockTitle(), 'warn');
     if (s.gone) return say(def.build + ' 的矿脉已枯竭，不能再建', 'warn');
+    /* 铁矿深层休眠：48 回合里一座都挖不出东西，加盖只是白花钱 */
+    if (key === 'iron' && s.cool > 0) {
+      return say(def.build + ' 的矿脉休眠中（还剩 ' + s.cool + ' 回合），先改建熔旧坊', 'warn');
+    }
     if (s.site > 0) return say(def.build + ' 还在建（剩 ' + s.site + ' 回合）', 'warn');
     var lv2 = researched(p.owner, key);
     var cost = costOf(def, lv2);
@@ -2408,6 +3665,9 @@
       return bldMsg('还没研究「' + (tech ? tech.cn : '对应科技') + '」，' + def.build + ' 升不了 Lv2', 'warn');
     }
     if (s.gone) return bldMsg(def.build + ' 的矿脉已枯竭，升了也没用', 'warn');
+    if (key === 'iron' && s.cool > 0) {
+      return bldMsg(def.build + ' 的矿脉休眠中（还剩 ' + s.cool + ' 回合），醒了再升', 'warn');
+    }
     if (s.site > 0) return bldMsg(def.build + ' 还有工地在建（剩 ' + s.site + ' 回合）', 'warn');
     if (!(s.tiers[1] > 0)) return bldMsg('没有可升的旧 ' + def.build + '（Lv1 已经升完了）', 'warn');
     var cost = def.cost2 || def.cost;
@@ -2446,13 +3706,18 @@
     if (kind === 'granary' && st.n >= AO.GRANARY.maxPer) {
       return say('这个省已经有 ' + st.n + ' 座粮仓（上限 ' + AO.GRANARY.maxPer + ' 座）', 'warn');
     }
+    /* 市场每省一座（v18 追加三）：它是"换金的口"，不是产能建筑 ——
+     * 多盖一座只是把同一个口开两次。要吞吐量该去修货运。 */
+    if (kind === 'market' && st.n >= AO.MARKET.maxPer) {
+      return say('每省一座市场——要吞吐量就去修货运（本省已有 ' + st.n + ' 座）', 'warn');
+    }
     var r = payCost(p, D.cost);
     if (!r.ok) {
       return say('资源不够：' + cnOf(r.lack) + ' 还差 ' + r.need + '（本省 → 中央 → 同国各省都没凑齐）', 'warn');
     }
     st.site = effectiveTurns(p.id, p.owner, D.turnsAt());
     var tail = kind === 'school' ? '（每座每回合 +' + AO.SCHOOL.per + ' 科研点）'
-      : kind === 'market' ? '（每座可把 ' + AO.MARKET.rate + ' 单位资源换成 1 金）'
+      : kind === 'market' ? '（每座可把 ' + AO.MARKET.rate + ' 单位资源换成金，价随物价浮动）'
         : kind === 'granary' ? '（每座 +' + AO.GRANARY.capBonus + ' 粮/渔上限）'
           : kind === 'university' ? '（每座每回合 +' + AO.UNIVERSITY.perSci + ' 科研点 · +' +
             AO.UNIVERSITY.perTalent + ' 人才点）'
@@ -2462,50 +3727,353 @@
   function buildMarket(p) { return buildUniv(p, 'market'); }
   function buildBuilder(p) { return buildUniv(p, 'builder'); }
 
-  /* 卖资源换金：本省库存直接扣 rate 份、加 1 金。库存不够 → 调用方把按钮置灰。
-   * **只做手动**：v1 不做自动交易（那会把沙盒变成挂机游戏）。 */
-  function sellResource(p, key) {
-    if (!canAct(p.owner)) return bldMsg(lockTitle(), 'warn');
-    var M = AO.MARKET, mk = MARKET[p.id];    if (!mk || !(mk.n > 0)) return bldMsg('本省还没有市场', 'warn');
-    if (mk.halted) return bldMsg('市场维护欠费，停产中（卖不了货）', 'warn');
-    var s = SIM[p.id] && SIM[p.id][key];
-    if (!s) return;
-    if (s.stock < M.rate) return bldMsg(cnOf(key) + ' 不够：要 ' + M.rate + '，只有 ' + s.stock, 'warn');
-    s.stock -= M.rate;
-    var g = SIM[p.id].gold;
-    /* 卖货的金也吃上限（满仓 → 钱白赚了，记 d.cap 让玩家看得见） */
-    if (g) gainStock(p.id, 'gold', 1, FLOW[p.id]);
-    bldMsg('卖 ' + M.rate + ' ' + cnOf(key) + ' → +1 金（本省库存 ' + s.stock + ' ' + cnOf(key) +
-      (g ? ' · 金 ' + g.stock + ' / 上限 ' + capOf(p.id, 'gold') : '') + '）', 'ok');
+  /* =============================================================
+   * 动态市场（① 物价指数）
+   * =============================================================
+   * 状态：PRICES[cid][key] = { v, target, trend }
+   *   v       现价（1 = 卖 5 单位得 1 金），钳在 [cfg.lo, cfg.hi]
+   *   target  由"库存 / 需求"的比值分档算出来（见 PRICES_CFG.ratio / tier）
+   *   trend   和上回合的差：1 涨 / −1 跌 / 0 平（价格板画箭头用）
+   *
+   * 还有两张辅助表：
+   *   PRICESHOCK[cid][key] = { target, turns, jump }  事件冲击（旱情 / 商队）
+   *   PNEED[cid]           = { key: need }            上回合算出来的需求（面板只读）
+   *
+   * **为什么价格要按"国"算而不是按"省"算**：省是一天一地的集市，
+   * 玩家不可能盯 1100 个价；国是决策单位（税率、建筑、出口都在国这一层）。
+   * 省里的库存仍然真实（出口要落到具体某个省），只是价格是全国一个数。
+   * ============================================================= */
+
+  var PNEED = Object.create(null);
+
+  /* 惰性创建一条价格记录。初始 target = v = base（1.0）—— 开局不该有任何
+   * 资源"一上来就贵"，那是给人添堵；第一次 settlePrices 之后才分档。 */
+  function priceRow(cid, key) {
+    var C = AO.PRICES_CFG, row = PRICES[cid | 0];
+    if (!row) row = PRICES[cid | 0] = Object.create(null);
+    var it = row[key];
+    if (!it) it = row[key] = { v: C.base, target: C.base, trend: 0 };
+    return it;
+  }
+  function priceV(cid, key) { return priceRow(cid, key).v; }
+  function priceTrend(cid, key) { return priceRow(cid, key).trend | 0; }
+  AO.resPriceOf = priceV;
+
+  /* 箭头 + 数字，三处（价格板 / 货源行 / 国库总览）共用一套写法，
+   * 免得一处写「↑」一处写「涨」。 */
+  function priceArrow(t) { return t > 0 ? '↑' : t < 0 ? '↓' : '—'; }
+  function priceNum(v) { return (Math.round((v || 0) * 100) / 100).toFixed(2); }
+  AO.resPriceNum = priceNum;
+
+  /* 全国库存（含中央国库）：中央的粮也是这个国的粮，
+   * 不算进来的话"国库囤了一仓粮、各省却报高价"，玩家会觉得价格板在骗人。 */
+  function countryStock(cid, key) {
+    var list = countryProvinces(cid), out = 0, i;
+    for (i = 0; i < list.length; i++) out += stockOf(list[i].id, key);
+    var cen = CENTRAL[cid | 0];
+    if (cen) out += (cen[key] || 0);
+    return out;
+  }
+  AO.resCountryStock = countryStock;
+
+  /* 一个省这回合的维护需求（铁 / 金）。价格只拿它当"军需需求的尺子"，
+   * 所以不必精确到分 —— 但也不能凭空拍一个数，否则"盖了军械坊铁就贵"
+   * 这条因果玩家感受不到。这里复用的就是真正扣维护的那张表（maintDue），
+   * 所以"价格板上的铁价涨了"和"维护真的多扣了铁"永远同源。 */
+  function provMaintNeed(pid, owner) {
+    var out = { iron: 0, gold: 0 }, k, s, d, m, i;
+    var bag = SIM[pid | 0];
+    if (bag) {
+      for (k in bag) {
+        s = bag[k]; d = AO.RESOURCE_BY_KEY[k];
+        if (!d || !s) continue;
+        /* 按"在跑的座数"算：停掉的那几座不缴维护，价格板上的"军需需求"
+         * 也该跟着降 —— 否则玩家停了半个国家的矿，铁价还挂在天上 */
+        m = maintDue(s, d, owner, pid | 0, k);
+        out.iron += m.iron; out.gold += m.gold;
+      }
+    }
+    for (i = 0; i < UNIV_KINDS.length; i++) {
+      var ud = univDef(UNIV_KINDS[i]), us = UNIV[UNIV_KINDS[i]][pid | 0];
+      if (!ud || !us) continue;
+      m = maintDue(us, ud, owner);
+      out.iron += m.iron; out.gold += m.gold;
+    }
+    var w = WALL[pid | 0];
+    if (w && w.lv > 0) {
+      var wm = wallMaintDue(w, owner);
+      out.iron += wm.iron || 0; out.gold += wm.gold || 0;
+    }
+    return out;
   }
 
-  /* 买货：省库金 → 中央进货 → 进本省库存。这是省库的**第二种花法**
-   * （第一种是发俸禄、建东西）。价格比卖价贵得多是故意的：
-   * 中央进货是应急口（缺粮救荒、缺铁复工），不是稳定的套利路径。
-   * 中央没货 → 调用方把按钮置灰（这里再挡一次，防止连点）。 */
-  function buyResource(p, key) {
-    if (!canAct(p.owner)) return bldMsg(lockTitle(), 'warn');
-    if (BLOCKADE[p.id]) return bldMsg('本省被舰队封锁，买不了货', 'warn');
-    var lot = AO.GOV.buyLot();
-    var cen = ensureCentral(p.owner);
+  /* 一国的七种需求（七种一次算完 —— 逐种算会把省表扫七遍）。 */
+  function needOf(cid) {
+    var C = AO.PRICES_CFG, out = Object.create(null);
+    var list = countryProvinces(cid), rs = AO.RESOURCES || [], i, ki;
+    var food = 0, iron = 0, gold = 0, n = 0;
+    /* 打仗的时候军械消耗上去了 → 铁/金需求 ×warNeedMul（"战时铁贵"的来历） */
+    var warMul = 1;
+    for (var wk in WARSET) {
+      if (!WARSET[wk]) continue;
+      var ab = wk.split('|');
+      if ((ab[0] | 0) === (cid | 0) || (ab[1] | 0) === (cid | 0)) { warMul = C.need.warNeedMul; break; }
+    }
+    for (i = 0; i < list.length; i++) {
+      var p = list[i], pop = POP[p.id];
+      /* 口粮：优先用 settlePop 算好的 need（和吃饭用的是同一个数）；
+       * 它还没算过（读档后第一回合）就按人口现推一遍。 */
+      food += (pop && pop.need) ? pop.need
+        : Math.max(1, Math.round((p.population || 0) / 2000000));
+      var md = provMaintNeed(p.id, cid | 0);
+      iron += md.iron; gold += md.gold;
+      n++;
+    }
+    for (ki = 0; ki < rs.length; ki++) {
+      var key = rs[ki].key;
+      var v;
+      if (C.need.foodShare[key] !== undefined) v = food * C.need.foodShare[key];
+      else if (key === 'iron') v = iron * warMul;
+      else if (key === 'gold') v = gold * warMul;
+      else v = n * C.need.otherPer;
+      /* cover：把"每回合用量"换算成"想囤多少回合"（见 PRICES_CFG.need 的注释） */
+      out[key] = Math.max(C.need.floor, v * (C.need.cover || 1));
+    }
+    return out;
+  }
+  AO.resNeedOf = needOf;
+
+  /* 目标价：库存 / 需求 的比值分四档。 */
+  function priceTarget(stock, need) {
+    var C = AO.PRICES_CFG;
+    var r = stock / Math.max(need || 1, C.need.floor);
+    if (r < C.ratio.scarce) return C.tier.scarce;   // 半够吃都不到 → 1.8
+    if (r < C.ratio.tight) return C.tier.tight;     // 刚够 → 1.3
+    if (r < C.ratio.glut) return C.tier.ok;         // 三倍以内 → 1.0
+    return C.tier.glut;                             // 三倍以上 → 0.7（积压）
+  }
+
+  /* 事件冲击：把某国某种资源的目标价**接管** turns 回合。
+   * jump=1 表示"这一回合就大幅反应"（走 shockLerp），用于旱情 / 商队这种
+   * "消息一出市场立刻动"的事；普通冲击不传 jump，按 25% 慢慢挪。
+   * 接管而不是叠加是刻意的：叠乘会变成"旱情 × 缺粮"两个数相乘，
+   * 玩家在面板上只能看到一个结果，猜不出它是怎么来的。 */
+  function priceNudge(cid, key, target, turns, jump) {
+    var C = AO.PRICES_CFG;
+    if (!cid || !key) return null;
+    var row = PRICESHOCK[cid | 0] || (PRICESHOCK[cid | 0] = Object.create(null));
+    row[key] = { target: AO.clamp(target, C.lo, C.hi), turns: Math.max(1, turns | 0), jump: jump ? 1 : 0 };
+    return row[key];
+  }
+  AO.resPriceNudge = priceNudge;
+
+  /* 结算：每国每种资源各走一步。放在**结算尾**（事件之后）——
+   * 这样旱情/丰收这些事当回合就能进价格，而不是隔一回合才反应；
+   * AI 与面板读的是**上一回合结算出来的价**（和"人看着昨天的行情做决定"一致）。 */
+  function settlePrices() {
+    var C = AO.PRICES_CFG, w = state.world;
+    if (!w) return 0;
+    var rs = AO.RESOURCES || [], i, ki, n = 0;
+    for (i = 0; i < w.countries.length; i++) {
+      var c = w.countries[i];
+      if (!c || !c.provinces || !c.provinces.length) continue;
+      if (countryDead(c.id)) continue;
+      var need = needOf(c.id);
+      PNEED[c.id] = need;
+      for (ki = 0; ki < rs.length; ki++) {
+        var key = rs[ki].key;
+        var it = priceRow(c.id, key);
+        var tgt = priceTarget(countryStock(c.id, key), need[key]);
+        /* 冲击接管目标价 */
+        var lp = C.lerp, sh = PRICESHOCK[c.id] && PRICESHOCK[c.id][key];
+        if (sh) {
+          tgt = sh.target;
+          if (sh.jump) lp = C.shockLerp;
+          sh.jump = 0;
+          if (--sh.turns <= 0) delete PRICESHOCK[c.id][key];
+        }
+        it.target = tgt;
+        var nv = AO.clamp(it.v + (tgt - it.v) * lp, C.lo, C.hi);
+        it.trend = Math.abs(nv - it.v) < 0.005 ? 0 : (nv > it.v ? 1 : -1);
+        it.v = nv;
+        n++;
+      }
+    }
+    return n;
+  }
+  AO.resSettlePrices = settlePrices;
+
+  /* 卖价 / 买价 —— 三处（卖、世界市场买、外国买）都从这里取，不许各写一份。
+   *   sellGold  卖一手（MARKET.rate 单位）到手多少金（可能带小数 → 攒整）
+   *   buyGold   世界市场进货一手要多少金（贵，是应急口；v18 追加三前叫"中央价"）
+   *   fBuyGold  跟外国买一手要多少金（对方 PI × premium） */
+  function sellGold(cid, key) { return priceV(cid, key); }
+  function buyGold(cid, key) { return Math.ceil(AO.GOV.buyLot().gold * priceV(cid, key)); }
+  function fBuyGold(cid, key) {
+    var P = AO.DIPLO.trade;
+    return Math.ceil(AO.GOV.buyLot().gold * P.premium * priceV(cid, key));
+  }
+  function expGold(cid, key) {
+    var C = AO.PRICES_CFG;
+    return priceV(cid, key) * C.exportCut * (C.exportLot / (AO.MARKET.rate || 5));
+  }
+  AO.resSellGold = sellGold;
+  AO.resBuyGold = buyGold;
+  AO.resFBuyGold = fBuyGold;
+  AO.resExpGold = expGold;
+
+  /* 卖资源换金：本省库存直接扣 rate 份、加 1 金。库存不够 → 调用方把按钮置灰。
+   * **只做手动**：v1 不做自动交易（那会把沙盒变成挂机游戏）。
+   *
+   * v18（B）：加 silent 参数 —— AI 卖货走**同一个函数**（家法同 buildOne）：
+   * silent=true 时不写 bldMsg、不查 canAct，成功/失败用 { ok, got, why } 回话。 */
+  function sellResource(p, key, silent) {
+    var say = silent ? noop : bldMsg;
+    if (!p) return silent ? { ok: false, why: '没有这个省' } : undefined;
+    if (!silent && !canAct(p.owner)) return say(lockTitle(), 'warn');
+    var M = AO.MARKET, mk = MARKET[p.id];
+    if (!mk || !(mk.n > 0)) return say('本省还没有市场', 'warn');
+    if (mk.halted) return say('市场维护欠费，停产中（卖不了货）', 'warn');
+    var s = SIM[p.id] && SIM[p.id][key];
+    if (!s) return silent ? { ok: false, why: '本省没有这种资源' } : undefined;
+    if (s.stock < M.rate) {
+      return say(cnOf(key) + ' 不够：要 ' + M.rate + '，只有 ' + s.stock, 'warn');
+    }
+
+    s.stock -= M.rate;
+    var g = SIM[p.id].gold;
+    /* 卖价 = 本国这一种资源的物价指数（一手 = rate 单位 = PI 金）。
+     * PI 带小数（1.3 金），所以走**攒整**：账上 +1.3，落袋 1，零头 0.3 留在
+     * SELLACC 里等下一笔。不攒整的话 round(1.3)=1、round(0.7)=1 —— 物价指数
+     * 就被四舍五入吃没了，价格板写得再准也没用。 */
+    var raw = sellGold(p.owner, key);
+    SELLACC[p.id] = (SELLACC[p.id] || 0) + raw;
+    var whole = Math.floor(SELLACC[p.id] + 1e-9);
+    SELLACC[p.id] = SELLACC[p.id] - whole;
+    /* 卖货的金也吃上限（满仓 → 钱白赚了，记 d.cap 让玩家看得见） */
+    if (g && whole > 0) gainStock(p.id, 'gold', whole, flowOf(p.id));
+    var tr = priceTrend(p.owner, key);
+    say('卖 ' + M.rate + ' ' + cnOf(key) + ' → +' + priceNum(raw) + ' 金（' + cnOf(key) +
+      '价 ' + priceNum(raw) + ' ' + priceArrow(tr) + '）' +
+      (whole < raw - 1e-9 ? '　零头 ' + priceNum(SELLACC[p.id]) + ' 攒到下一笔' : '') +
+      (g ? '　金 ' + g.stock + ' / 上限 ' + capOf(p.id, 'gold') : ''), 'ok');
+    return silent ? { ok: true, got: whole, raw: raw } : undefined;
+  }
+
+  /* 买货：省库金 → **世界市场** → 进本省库存（v18 追加三：国库不是商店）。
+   * 这是省库的**第二种花法**（第一种是发俸禄、建东西）。
+   *
+   * 旧版是"从中央国库调货"（buyCentral），等于把国库当商店：中央的粮铁既要
+   * 维护拨款、又要建造调拨、还要应付全国进货，最后必然是"中央没货 → 全国
+   * 买不了"，而玩家还以为是自己缺粮。现在改成**虚空来货**：
+   *   · 货从世界市场来 —— 供给无限，不扣任何一方的库存；
+   *   · 钱从省库出、进世界市场 —— **金沉没**，不落到任何账上。
+   * 所以买货不再是"搬仓库"，而是一台通胀阀门：想补货就得真金白银往外掏，
+   * 掏不起才是真稀缺。中央国库从此只剩三个去处：维护拨款、建造调拨、
+   * 科技国家工程 —— **国库不是商店**。
+   *
+   * 价格 = `ceil(lot.gold × 本国 PI)`（贵是故意的）：本国缺什么，买什么就贵
+   * （缺粮时进粮要 8 × 1.8 = 15 金）。缺货 → PI 涨 → 价涨 → 买到买不起为止，
+   * 这条负反馈就是"无限供给"的刹车。所以按钮**永不为"中央没货"变灰**，
+   * 唯一的闸是省库金够不够。
+   *
+   * 拆成 buyWorld(p, key, asAi) 是为了让 AI 走**同一条账**（④ 比价要用）：
+   * asAi=true 时不写 bldMsg、不查 canAct，失败统一返回 { ok:false, msg }。 */
+  function buyWorld(p, key, asAi) {
+    var fail = asAi ? function (t) { return { ok: false, msg: t }; }
+      : function (t) { return bldMsg(t, 'warn'); };
+    if (!asAi && !canAct(p.owner)) return fail(lockTitle());
+    if (BLOCKADE[p.id]) return fail('本省被舰队封锁，买不了货');
+    var lot = AO.GOV.buyLot(), price = buyGold(p.owner, key);
     var bag = SIM[p.id], g = bag && bag.gold, s = bag && bag[key];
-    if (!g || !s) return;
-    var have = cen[key] || 0;
-    if (have < lot.n) {
-      return bldMsg('中央' + cnOf(key) + '只剩 ' + Math.floor(have) + '，不够进一次货（要 ' + lot.n + '）', 'warn');
+    if (!g || !s) return fail('本省没有金库');
+    /* 唯一的闸：省库有没有钱。世界市场永远有货 —— 这里不再读中央库存 */
+    if (g.stock < price) {
+      return fail('省库金不够：进货要 ' + price + '，省库只有 ' + g.stock);
     }
-    if (g.stock < lot.gold) {
-      return bldMsg('省库金不够：进货要 ' + lot.gold + '，省库只有 ' + g.stock, 'warn');
-    }
-    cen[key] = have - lot.n;
-    g.stock -= lot.gold;
+    g.stock -= price;               // 金沉没：付给世界市场，谁都不记这笔进项
     /* 进货进省库：同样受上限约束（满仓再买 = 白花钱，提示里说清楚） */
     var got = gainStock(p.id, key, lot.n, FLOW[p.id]);
-    bldMsg('买 ' + lot.n + ' ' + cnOf(key) + ' ← ' + lot.gold + ' 金（省库 ' + g.stock +
-      ' 金 · 中央剩 ' + Math.floor(cen[key]) + ' ' + cnOf(key) + '）' +
-      (got < lot.n ? '　⚠ 省库满仓，只收下 ' + got + '（上限 ' + capOf(p.id, key) + '）' : ''), 'ok');
+    if (!asAi) {
+      bldMsg('买 ' + lot.n + ' ' + cnOf(key) + ' ← ' + price + ' 金（世界市场 · ' + cnOf(key) + '价 ' +
+        priceNum(priceV(p.owner, key)) + ' ' + priceArrow(priceTrend(p.owner, key)) +
+        ' · 省库 ' + g.stock + ' 金）' +
+        (got < lot.n ? '　⚠ 省库满仓，只收下 ' + got + '（上限 ' + capOf(p.id, key) + '）' : ''), 'ok');
+    }
+    fogInvalidate();
+    return { ok: true, got: got, paid: price, from: 'world' };
   }
+  function buyResource(p, key) { return buyWorld(p, key, false); }
   AO.resBuy = buyResource;
+  AO.resBuyWorld = function (p, key) { return buyWorld(p, key, true); };
+
+  /* ---------------- 兑换（以物易物，v18 / B2） ----------------
+   * 市场的第三条腿：卖货是"资源 → 金"，买货是"金 → 资源"，
+   * 兑换是**资源 → 资源**（粮换铁、金换铁、鱼换盐…七种两两可换）。
+   *
+   * 汇率：换回 = floor(付出 × PI(付出) / PI(换回) × (1 − MARKET.xchg.spread))
+   *   · 用**卖价（PI）**折算，两边同一把尺子 —— 所以"缺什么就贵什么"自动生效：
+   *     铁荒（PI 1.8）时 5 粮（PI 1.0）只换得到 2 铁；粮荒时反过来。
+   *   · 抽一成（spread 0.10）：不抽的话"粮换铁再换回粮"零损耗，市场就成了
+   *     一台免费搬运机；抽一成之后倒手是亏的，兑换只用于"真的缺这一种"。
+   *   · 一手 = MARKET.rate（5 单位），和卖货同一把尺子。
+   *
+   * 三条闸：市场要在营（n>0 且未停产）、同种不换、**目标仓装不下就不换**
+   * （不白扣付出 —— 换一半比不换更难看懂）。 */
+  function xchgOut(owner, give, get, n) {
+    var pv = priceV(owner, give), pw = priceV(owner, get);
+    if (!(pv > 0) || !(pw > 0)) return 0;
+    var cut = 1 - ((AO.MARKET.xchg && AO.MARKET.xchg.spread) || 0);
+    return Math.floor(n * pv / pw * cut + 1e-9);
+  }
+  function exchangeResource(p, give, get, silent) {
+    var say = silent ? noop : bldMsg;
+    /* 失败统一走 fail()：silent 时回 { ok:false, why }，面板上照旧是一条提示 */
+    var fail = function (t) {
+      say(t, 'warn');
+      return silent ? { ok: false, why: t } : undefined;
+    };
+    if (!p) return fail('没有这个省');
+    if (!silent && !canAct(p.owner)) return fail(lockTitle());
+    var mk = MARKET[p.id];
+    if (!mk || !(mk.n > 0)) return fail('本省还没有市场');
+    if (mk.halted) return fail('市场维护欠费，停产中（换不了货）');
+    if (!give || !get || give === get) return fail('同一种东西不用换');
+    var bag = SIM[p.id], gs = bag && bag[give], ss = bag && bag[get];
+    if (!gs || !ss) return fail('本省没有这种资源');
+    var lot = AO.MARKET.rate;
+    if (gs.stock < lot) {
+      return fail(cnOf(give) + ' 不够：要 ' + lot + '，只有 ' + gs.stock);
+    }
+    var out = xchgOut(p.owner, give, get, lot);
+    if (out <= 0) {
+      return fail('按现在的物价，' + lot + ' ' + cnOf(give) + ' 换不到 1 ' + cnOf(get) +
+        '（' + cnOf(give) + '价 ' + priceNum(priceV(p.owner, give)) + ' · ' +
+        cnOf(get) + '价 ' + priceNum(priceV(p.owner, get)) + '）');
+    }
+    var cap = capOf(p.id, get);
+    if (ss.stock + out > cap) {
+      return fail(cnOf(get) + ' 装不下 ' + out + '（现有 ' + ss.stock + ' / 上限 ' + cap +
+        '）—— 先腾地方');
+    }
+    gs.stock -= lot;
+    var got = gainStock(p.id, get, out, FLOW[p.id]);
+    var F = FLOW[p.id];
+    if (F) {
+      F.loss[give] = (F.loss[give] || 0) + lot;
+      F.gain[get] = (F.gain[get] || 0) + got;
+      if (!F.d.xchg) F.d.xchg = Object.create(null);
+      F.d.xchg[give] = (F.d.xchg[give] || 0) + lot;
+      F.d.xchg[get] = (F.d.xchg[get] || 0) - got;
+    }
+    say('兑换：' + lot + ' ' + cnOf(give) + ' → ' + got + ' ' + cnOf(get) +
+      '（' + cnOf(give) + '价 ' + priceNum(priceV(p.owner, give)) + ' · ' +
+      cnOf(get) + '价 ' + priceNum(priceV(p.owner, get)) +
+      ' · 市场抽 ' + Math.round((AO.MARKET.xchg.spread || 0) * 100) + '%）', 'ok');
+    return silent ? { ok: true, got: got, paid: lot } : undefined;
+  }
+  AO.resXchgOut = xchgOut;
+  AO.resExchange = exchangeResource;
 
   /* 冲刺：把本省某个工地砍 1 回合。**没有建造坊（或它停产）就不给这个能力** ——
    * 这正是建造坊的价值。砍到 0 立刻 finishSite 完工，不用等下一回合。 */
@@ -2581,7 +4149,7 @@
       R.queue.splice(qi, 1);
       return bldMsg('已从队列移除「' + t.cn + '」（还没扣费，不损失任何东西）', 'ok');
     }
-    if (t.req && !R.done[t.req]) {
+    if (!reqOk(t, R)) {
       var pa = AO.TECH_BY_KEY[t.req];
       return bldMsg('「' + t.cn + '」在树上还锁着：要先研究「' + (pa ? pa.cn : t.req) + '」', 'warn');
     }
@@ -2821,6 +4389,113 @@
     var pop = (POP[p.id] && POP[p.id].v) || 0;
     say('熔旧坊改建开工：' + costText(D.cost) + '，' + st.site + ' 回合后完工' +
       '（第 ' + (st.n + 1) + ' 座 · 每座每回合约 +' + D.perAt(pop).toFixed(2) + ' 铁）', 'ok');
+  }
+
+  /* ---------------- 淘金场（枯竭金矿场的改建，v18 / A） ----------------
+   * **逐条镜像熔旧坊**：不新增建筑行（住在金矿场那一行里，n>0 时行内变身）、
+   * 唯一入口是矿脉枯竭后的「改建」、封顶 2 座、无门槛、不吃维护、吃满仓上限。
+   *
+   * 三条账（和 SMELT 一一对应，只有付的东西不同）：
+   *   ① 改建价（木材 10 · 金 12）走 payCost —— 和别的建筑同一条付款路
+   *   ② 每回合产金 → bag.gold.stock（省库），吃 CAP 上限，记 FLOW gain(.wash)
+   *   ③ 木耗 = 产量 × 2 —— **省库木材现付**；没木就这一回合不出金，
+   *      不扣木、不倒扣、也不把产量攒到下回合（账当场结清）
+   * 枯竭矿本身照旧不收维护（产出循环里 `if (!s.built || s.gone) continue` 已跳过）。 */
+  function washOf(pid) { return WASH[pid | 0] || null; }
+  function washNew(pid) {
+    var k = pid | 0;
+    return WASH[k] || (WASH[k] = {
+      n: 0, site: 0, halted: false,
+      mAcc: { iron: 0, gold: 0 }, iAcc: 0, tAcc: 0
+    });
+  }
+  /* 存档用的瘦身版（照 sparseSmelt）：没场、没工地的省不存 */
+  function sparseWash() {
+    var out = {}, k, st;
+    for (k in WASH) {
+      st = WASH[k];
+      if (st && ((st.n | 0) > 0 || (st.site | 0) > 0)) out[k] = st;
+    }
+    return out;
+  }
+  function finishWash(pid) {
+    var st = WASH[pid | 0];
+    if (!st) return false;
+    st.site = 0;
+    st.n = Math.min(AO.WASH.maxPer, (st.n | 0) + 1);
+    return true;
+  }
+  /* 一回合的淘金场结算（settleTurn ③a 紧跟 settleSmelt）
+   *   产量 = perAt(人口) × 座数        （小数进 iAcc，攒整入库）
+   *   木耗 = 产量 × timberPerGold(2)   （省库木材现付）
+   * 没木 → 这一回合不出金：不扣木、不倒扣，也不攒产量（下一回合从零再算）。 */
+  function settleWash(pid, owner) {
+    var st = WASH[pid | 0], D = AO.WASH;
+    if (!st || !(st.n > 0)) return 0;
+    var bag = SIM[pid];
+    if (!bag || !bag.gold) return 0;
+    var pop = (POP[pid] && POP[pid].v) || 0;
+    var per = D.perAt(pop);
+    st.iAcc = (st.iAcc || 0) + per * st.n;
+    var out = Math.floor(st.iAcc);
+    if (out <= 0) { st.halted = false; return 0; }   // 还没攒够一块金
+    st.iAcc -= out;
+    /* 满仓：淘出来也放不下 —— 这一趟不淘，**也不扣木**（照抄 settleSmelt 的口径） */
+    var room = capOf(pid, 'gold') - bag.gold.stock;
+    if (room <= 0) {
+      var F0 = FLOW[pid];
+      if (F0) F0.d.cap.gold = (F0.d.cap.gold || 0) + out;
+      return 0;
+    }
+    if (out > room) out = room;
+
+    var wood = (bag.timber && bag.timber.stock) || 0;
+    var need = Math.ceil(out * D.timberPerGold - 1e-9);   // 1 金 = 2 木
+    if (need > wood) {
+      /* 停淘只在**刚停的那一回合**报一条（和熔旧坊同一条纪律） */
+      if (!st.halted) {
+        NOTES.push({ owner: owner | 0, pid: pid | 0, cls: 'warn',
+          text: '淘金场缺木停淘（1 金 = 2 木，没木就不出金）—— 省库木材见底' });
+      }
+      st.halted = true;
+      return 0;
+    }
+    st.halted = false;
+    bag.timber.stock -= need;
+    var F = FLOW[pid];
+    if (F) {
+      F.loss.timber = (F.loss.timber || 0) + need;
+      F.d.washWood = (F.d.washWood || 0) + need;
+    }
+    var kept = gainStock(pid, 'gold', out, F);
+    if (F) {
+      F.gain.gold = (F.gain.gold || 0) + kept;
+      F.d.wash = (F.d.wash || 0) + kept;
+    }
+    return kept;
+  }
+  AO.resSettleWash = settleWash;
+
+  /* 改建：唯一入口是「金矿场」那一行在**矿脉枯竭后**变出来的「改建」钮。
+   * 和 buildSmelt 逐条对齐（连 canAct / payCost / effectiveTurns 都一样）。 */
+  function buildWash(p, silent) {
+    var say = silent ? noop : bldMsg;
+    var D = AO.WASH;
+    var bag = SIM[p.id], s = bag && bag.gold;
+    if (!s) return say('本省没有金矿脉，淘不了金', 'warn');
+    if (!silent && !canAct(p.owner)) return say(lockTitle(), 'warn');
+    var st = washNew(p.id);
+    var ck = D.check(p, { bag: bag, washN: st.n, site: st.site });
+    if (!ck.ok) return say(ck.why, 'warn');
+    var r = payCost(p, D.cost);
+    if (!r.ok) {
+      return say('改建资源不够：' + cnOf(r.lack) + ' 还差 ' + r.need +
+        '（本省 → 中央 → 同国各省都没凑齐）', 'warn');
+    }
+    st.site = effectiveTurns(p.id, p.owner, D.turns);
+    var pop = (POP[p.id] && POP[p.id].v) || 0;
+    say('淘金场改建开工：' + costText(D.cost) + '，' + st.site + ' 回合后完工' +
+      '（第 ' + (st.n + 1) + ' 座 · 每座每回合约 +' + D.perAt(pop).toFixed(2) + ' 金）', 'ok');
   }
 
   /* 建筑插图（内联 SVG，每一级一个造型） ----------------
@@ -3123,13 +4798,50 @@
     if (img.parentNode) img.parentNode.replaceChild(node, img);
   };
 
-  /* 熔旧坊的行图标：assets/res/item-smelt-bld.png。
-   * 缺图就退回铁矿场的图（imgFallback 的第一级是 -bld.png，第二级是内联 SVG）——
-   * 这一行本来就是铁矿场变来的，借它的图不算错。 */
-  function smeltIconTag(size) {
-    return '<img class="bart-img" src="assets/res/item-smelt-bld.png" data-smelt="1"' +
+  /* ---------------- 枯竭矿的再就业（熔旧坊 / 淘金场） ----------------
+   * v18：这两座建筑的规则**逐条镜像**（同一套 check / build / settle / 存档 /
+   * 面板写法），面板上只有"产什么、付什么"两处不同。所以行渲染、? 面板、
+   * ＋钮统统读这一份描述子 —— 写两遍的话，下次改一处必然漏另一处。 */
+  function refitOf(key) {
+    if (key === 'iron') {
+      return {
+        key: 'smelt', def: AO.SMELT, of: smeltOf, mk: smeltNew, build: buildSmelt,
+        nKey: 'smeltN', icon: 'item-smelt-bld.png',
+        outCn: '铁', payCn: '金', payPer: AO.SMELT.goldPerIron,
+        tag: '熔炉', btnAttr: 'data-smelt'
+      };
+    }
+    if (key === 'gold') {
+      return {
+        key: 'wash', def: AO.WASH, of: washOf, mk: washNew, build: buildWash,
+        nKey: 'washN', icon: 'item-wash-bld.png',
+        outCn: '金', payCn: '木', payPer: AO.WASH.timberPerGold,
+        tag: '淘金', btnAttr: 'data-wash'
+      };
+    }
+    return null;
+  }
+  /* check 的上下文：两种建筑除了座数字段名不同，其余一样 */
+  function refitCtx(rf, bag, n, site) {
+    var o = { bag: bag, site: site };
+    o[rf.nKey] = n;
+    return o;
+  }
+  /* 这一行现在能不能改建（熔旧坊 / 淘金场）——
+   *   铁 → 矿"睡了"（永久枯竭 gone，或深层休眠 cool>0），规则在 AO.SMELT.dormant
+   *   金 → 只认 gone（金矿 cool 仍是 0，不会休眠，淘金场入口不变）
+   * ＋钮、? 面板、AI 的 trySmelt 都读这一份，别再各写一遍 `s.gone`。 */
+  function refitReady(rf, s) {
+    if (!rf || !s) return false;
+    return rf.key === 'smelt' ? AO.SMELT.dormant(s) : !!s.gone;
+  }
+  /* 行图标：assets/res/item-<key>-bld.png。
+   * 缺图就退回原矿场那一行的图（imgFallback 的第一级是 -bld.png，第二级是内联 SVG）——
+   * 这一行本来就是矿场变来的，借它的图不算错。 */
+  function refitIconTag(rf, size) {
+    return '<img class="bart-img" src="assets/res/' + rf.icon + '" data-refit="' + rf.key + '"' +
       ' style="width:' + size + 'px;height:' + size + 'px"' +
-      ' onerror="AO.imgFallback(this,\'iron\',1,' + size + ')">';
+      ' onerror="AO.imgFallback(this,\'' + (rf.key === 'wash' ? 'gold' : 'iron') + '\',1,' + size + ')">';
   }
 
   /* 档位格子：一个 Lv 一张图 + 产量 + 维护 + 当前座数。
@@ -3153,23 +4865,29 @@
     var tech = AO.techFor(r.key);
     /* 行内变身后，? 面板的标题也得跟着变 —— 否则玩家点开「熔旧坊」那一行，
      * 第一行却写着「铁矿场」，会以为点错了行 */
-    var smHead = (r.key === 'iron' && smeltOf(p.id) && smeltOf(p.id).n > 0);
-    var h = '<div class="h">' + (smHead ? AO.SMELT.cn + ' · 原' + def.build : def.build) +
+    var rfH = refitOf(r.key);
+    var rfHst = rfH ? rfH.of(p.id) : null;
+    var smHead = !!(rfH && rfHst && (rfHst.n | 0) > 0);
+    var h = '<div class="h">' + (smHead ? rfH.def.cn + ' · 原' + def.build : def.build) +
       '<span>已建 ' + s.built + ' 座' +
       (s.site > 0 ? ' · ' + (s.siteKind === 'up' ? '升档中' : '在建') + '（' + s.site + ' 回合）' : '') + '</span></div>';
     /* 居民消耗是建筑属性，任何状态下都写出来 */
     var eatLine = def.eat > 0
       ? '<div class="l"><i>居民</i> 本地吃掉 ' + Math.round(def.eat * 100) + '%' +
-        (s.built ? '（每回合约 ' + (simPerTurn(s, def) * def.eat).toFixed(1) + ' 个）' : '') +
+        (s.built ? '（每回合约 ' + (simPerTurn(s, def, p.id, r.key) * def.eat).toFixed(1) + ' 个）' : '') +
         '，剩下才入库</div>'
       : '';
 
     /* 档位区：两档并排 + 座数 + 升级价 + 自愿原则。
-     * 矿枯了就不画档位卡 —— 那两张卡写的是"活着的时候产多少、吃多少维护"，
-     * 挂在一条死矿上只会和下面那句"枯竭矿不收维护"打架。 */
-    if (s.gone) {
-      h += '<div class="l gone"><i>矿场</i> 矿脉已采空：' + s.built +
-        ' 座铁矿场全部停摆（不产、不收维护）</div>';
+     * 矿枯了 / 睡了就不画档位卡 —— 那两张卡写的是"活着的时候产多少、吃多少维护"，
+     * 挂在一条死矿（或一条睡了 48 回合的矿）上只会和下面那句"不产不收维护"打架。 */
+    var ironSleep = r.key === 'iron' && s.cool > 0 && !s.gone;
+    if (s.gone || ironSleep) {
+      h += '<div class="l ' + (ironSleep ? 'cool' : 'gone') + '"><i>矿场</i> ' +
+        (ironSleep
+          ? '矿脉深层休眠：' + s.built + ' 座' + def.build + '全部停摆（不产、不收维护），还剩 ' +
+            s.cool + ' 回合回满'
+          : '矿脉已采空：' + s.built + ' 座' + def.build + '全部停摆（不产、不收维护）') + '</div>';
     } else {
       h += '<div class="tiers">' + tierCell(r, def, 1, t1, prod, true, p.owner) +
         tierCell(r, def, 2, t2, prod, lv2, p.owner) + '</div>';
@@ -3187,69 +4905,83 @@
       if (s.halted) h += '<div class="l gone"><i>停产</i> 维护欠费（铁/金没凑齐），本回合不产出</div>';
     }
 
-    /* 熔旧坊：只在铁矿场这一行出现。
-     *   矿枯了  → 写"还有一条活路"（改建价 / 门槛 / 每座产多少 / 金耗怎么算）
-     *   已改过  → 写产量与金耗对账，复活之后还要写"两份收入叠加" */
-    if (r.key === 'iron') {
-      var smt2 = smeltOf(p.id), smN2 = smt2 ? (smt2.n | 0) : 0, smS2 = smt2 ? (smt2.site | 0) : 0;
-      var pop2 = (POP[p.id] && POP[p.id].v) || 0, per2 = AO.SMELT.perAt(pop2);
-      if (smN2 > 0 || smS2 > 0) {
-        h += '<div class="l"><i>熔炉</i> ×' + smN2 +
-          (smS2 > 0 ? '　<span class="muted">改建中（' + smS2 + ' 回合）</span>' : '') +
-          '　每座 +' + per2.toFixed(2) + ' 铁/回合' +
-          (smN2 > 0 ? '（合计 +' + (per2 * smN2).toFixed(2) + '）' : '') + '</div>';
-        h += '<div class="l"><i>金耗</i> 产量 × ' + AO.SMELT.goldPerIron +
-          '（' + (smN2 > 0 ? '约 ' + (per2 * smN2 * AO.SMELT.goldPerIron).toFixed(2) + ' 金/回合，' : '') +
-          '省库 → 中央；付不起当回合产量减半，不欠账）</div>';
-        if (!s.gone && s.built > 0) {
-          h += '<div class="l"><i>叠加</i> <em class="ok">矿脉已复活</em>：铁矿场 ' + s.built +
-            ' 座照常出产 + 熔旧坊 ' + smN2 + ' 座 —— 两份收入叠加</div>';
+    /* 枯竭 / 休眠矿的再就业（熔旧坊 / 淘金场）：只在对应资源那一行出现。
+     *   矿睡了  → 写"还有一条活路"（改建价 / 每座产多少 / 料耗怎么算）
+     *   已改过  → 写产量与料耗对账，矿醒过来之后还要写"两份收入叠加" */
+    if (rfH) {
+      var rfD = rfH.def;
+      var rfN2 = rfHst ? (rfHst.n | 0) : 0, rfS2 = rfHst ? (rfHst.site | 0) : 0;
+      var rfPop = (POP[p.id] && POP[p.id].v) || 0, rfPer = rfD.perAt(rfPop);
+      if (rfN2 > 0 || rfS2 > 0) {
+        h += '<div class="l"><i>' + rfH.tag + '</i> ×' + rfN2 +
+          (rfS2 > 0 ? '　<span class="muted">改建中（' + rfS2 + ' 回合）</span>' : '') +
+          '　每座 +' + rfPer.toFixed(2) + ' ' + rfH.outCn + '/回合' +
+          (rfN2 > 0 ? '（合计 +' + (rfPer * rfN2).toFixed(2) + '）' : '') + '</div>';
+        h += '<div class="l"><i>料耗</i> 产量 × ' + rfH.payPer + ' ' + rfH.payCn +
+          '（' + (rfN2 > 0 ? '约 ' + (rfPer * rfN2 * rfH.payPer).toFixed(2) + ' ' + rfH.payCn + '/回合，' : '') +
+          (rfH.key === 'wash' ? '省库木材；没木当回合不出金，不倒扣）' : '省库 → 中央；付不起当回合产量减半，不欠账）') +
+          '</div>';
+        if (!s.gone && !(s.cool > 0) && s.built > 0) {
+          h += '<div class="l"><i>叠加</i> <em class="ok">矿脉已复活</em>：' + def.build + ' ' + s.built +
+            ' 座照常出产 + ' + rfD.cn + ' ' + rfN2 + ' 座 —— 两份收入叠加</div>';
         }
       }
-      if (s.gone) {
-        var ck2 = AO.SMELT.check(p, {
-          bag: SIM[p.id], smeltN: smN2, site: smS2, edu: talentOf(p.owner).total || 0
-        });
+      if (refitReady(rfH, s)) {
+        var ck2 = rfD.check(p, refitCtx(rfH, SIM[p.id], rfN2, rfS2));
         h += '<div class="l' + (ck2.ok ? '' : ' gone') + '"><i>改建</i> ' +
           (ck2.ok
-            ? '熔旧坊 ' + costText(AO.SMELT.cost) + ' · ' +
-              effectiveTurns(p.id, p.owner, AO.SMELT.turns) + ' 回合 · 封顶 ' +
-              AO.SMELT.maxPer + ' 座（累计教育 ≥ ' + AO.SMELT.needEdu + '）'
+            ? rfD.cn + ' ' + costText(rfD.cost) + ' · ' +
+              effectiveTurns(p.id, p.owner, rfD.turns) + ' 回合 · 封顶 ' +
+              rfD.maxPer + ' 座'
             : ck2.why) + '</div>';
-        h += '<div class="l"><i>汇率</i> ' + AO.SMELT.note + '</div>';
+        h += '<div class="l"><i>汇率</i> ' + rfD.note + '</div>';
       }
     }
 
     if (s.gone) {
-      h += '<div class="l gone"><i>枯竭</i> 想再出铁，只能改建熔旧坊；' +
-        '若勘探「矿脉新发现」命中，矿脉会复活（与熔旧坊并存）</div>';
+      h += '<div class="l gone"><i>枯竭</i> 想再出' + (r.key === 'gold' ? '金' : '铁') + '，只能改建' +
+        (r.key === 'gold' ? '淘金场' : '熔旧坊') + '；' +
+        '若勘探「矿脉新发现」命中，矿脉会复活（与' + (r.key === 'gold' ? '淘金场' : '熔旧坊') + '并存）</div>';
       h += '<div class="l"><i>已产</i> ' + s.stock + ' ' + prod + '</div>';
       h += eatLine;
       return h;
     }
     if (s.cool > 0) {
       var pct = Math.max(0, Math.min(100, (1 - s.cool / (def.cool || 1)) * 100));
-      h += '<div class="l cool"><i>冷静</i> 还剩 ' + s.cool + ' 回合' +
-           (r.key === 'timber' ? '（林地慢慢长回来）' : '（资源慢慢恢复）') + '</div>';
+      /* 铁矿的 48 回合是"深层休眠"（v18 追加一补课），其余资源是短休耕。
+       * 同一套倒计时，只是说法不同 —— 玩家得知道"48 回合后这条矿会自己醒"。 */
+      h += '<div class="l cool"><i>' + (r.key === 'iron' ? '休眠' : '冷静') + '</i> 还剩 ' + s.cool + ' 回合' +
+           (r.key === 'timber' ? '（林地慢慢长回来）'
+             : r.key === 'iron' ? '（深层休眠：到点储量回满，矿场自己复产）'
+               : '（资源慢慢恢复）') + '</div>';
       h += '<div class="bar cool"><i style="width:' + pct.toFixed(1) + '%"></i></div>';
-      h += '<div class="l"><i>已产</i> ' + s.stock + ' ' + prod + '　冷静完剩余回满 ' + s.n + '</div>';
+      h += '<div class="l"><i>已产</i> ' + s.stock + ' ' + prod + '　' +
+           (r.key === 'iron' ? '休眠完' : '冷静完') + '剩余回满 ' + s.n + '</div>';
       h += eatLine;
       return h;
     }
     if (!s.built) {
       h += '<div class="l"><i>产出</i> 还没建 —— 点上面的 ＋ 建一座</div>';
       h += '<div class="l"><i>单座</i> 每回合 +' + def.per + ' ' + prod +
-           '，储量 ' + s.n + (def.cool > 0 ? '，采空后冷静 ' + def.cool + ' 回合' : '，采空即枯竭') + '</div>';
+           '，储量 ' + s.n + (def.cool > 0
+             ? '，采空后' + (r.key === 'iron' ? '休眠 ' : '冷静 ') + def.cool + ' 回合'
+             : '，采空即枯竭') + '</div>';
       h += '<div class="l"><i>造价</i> ' + costText(costOf(def, lv2)) +
            (lv2 ? '（科技已研，新盖直接 Lv2）' : '') + '（本省 → 中央 → 同国各省）</div>';
       return h;
     }
 
-    var per = simPerTurn(s, def);
+    var per = simPerTurn(s, def, p.id, r.key);
     var popCls = (Date.now() - s.pop < 420) ? ' num pop' : ' num';
     var turns = per > 0 ? Math.ceil(s.left / per) : 0;
-    h += '<div class="l"><i>产出</i> 每回合 +' + per + ' ' + prod +
-         (s.built > 1 ? '（' + s.built + ' 座）' : '') + (s.halted ? '　<em class="halted">已停产</em>' : '') + '</div>';
+    /* 座数写法：全开就只写座数；有停着的座就写"在跑 6 / 14 座" ——
+     * 否则玩家看到产量变少了却找不到原因（那是他自己在维修面板里停的） */
+    var at = activeTiers(p.id, r.key, s);
+    var actN = (at[1] || 0) + (at[2] || 0);
+    var seatTxt = !s.built ? '' : (actN < s.built
+      ? '（在跑 ' + actN + ' / ' + s.built + ' 座）' : (s.built > 1 ? '（' + s.built + ' 座）' : ''));
+    h += '<div class="l"><i>产出</i> 每回合 +' + per + ' ' + prod + seatTxt +
+         (s.halted ? '　<em class="halted">已停产</em>' : '') + '</div>';
     h += eatLine;
     h += '<div class="l"><i>库存</i> <b class="' + popCls + '">' + s.stock + '</b> ' + prod +
          ' <span class="muted">/ 上限 ' + capOf(p.id, r.key) + '</span>' +
@@ -3332,10 +5064,12 @@
   function repHint(p, kind) {
     if (!AO.rep) return '';
     var t = '\n欠账 ' + panelNeed(p.id, kind) + '（铁/金各按整数计）';
-    t += '\n修复：右上「维修」里点「修」，或把这一类调到「高」/「中」';
-    var pr = AO.rep.prio(p.owner, kind);
-    var d = AO.REP.prio.filter(function (x) { return x.key === pr; })[0];
-    if (d) t += '\n现在的优先档：' + d.cn + ' —— ' + d.desc;
+    t += '\n修复：右上「维修」里点「修」，或把这一类的保留座数减下来（停掉的座不缴维护）';
+    var lv = repLive(p.id, kind);
+    if (lv && lv.built > 0) {
+      t += '\n本省在跑 ' + lv.active + ' / ' + lv.built + ' 座' +
+        (lv.off ? '（整类已停）' : '');
+    }
     return t;
   }
   /* 欠账在人话里的样子：封顶显示 40+（账本身不封顶，封顶只是别让 title 长得离谱） */
@@ -3364,20 +5098,23 @@
       var lv2 = researched(p.owner, r.key);
       var n1 = (s.tiers && s.tiers[1]) || 0, n2 = (s.tiers && s.tiers[2]) || 0;
       var tech = AO.techFor(r.key);
-      /* 熔旧坊：只挂在铁矿场这一行上（不新增行）。
-       *   smN > 0      → 行内变身：名字/图标/×n 都换成熔旧坊
-       *   s.gone       → ＋ 钮变成「改建」（唯一入口）
-       * 复活（lode 命中枯竭矿）之后两样并存：这一行仍是熔旧坊，
+      /* 枯竭矿的再就业（熔旧坊 / 淘金场）：只挂在对应资源那一行上（不新增行）。
+       *   n > 0    → 行内变身：名字/图标/×n 都换成它
+       *   s.gone   → ＋ 钮变成「改建」（唯一入口）
+       * 复活（lode 命中枯竭矿）之后两样并存：这一行仍是它，
        * 但名字旁边挂一个「矿×N」的小字，两份收入叠加。 */
-      var smt = (r.key === 'iron') ? smeltOf(p.id) : null;
+      var rf = refitOf(r.key);
+      var smt = rf ? rf.of(p.id) : null;
       var smN = smt ? (smt.n | 0) : 0;
       var smSite = smt ? (smt.site | 0) : 0;
       var asSmelt = smN > 0;
       var popNow = (POP[p.id] && POP[p.id].v) || 0;
-      var smPer = AO.SMELT.perAt(popNow);
-      var smCk = (r.key === 'iron' && s.gone) ? AO.SMELT.check(p, {
-        bag: bag, smeltN: smN, site: smSite, edu: talentOf(p.owner).total || 0
-      }) : null;
+      var smPer = rf ? rf.def.perAt(popNow) : 0;
+      /* 矿睡了就能改建：铁认 dormant（gone 或 cool>0），金只认 gone */
+      var refitOn = refitReady(rf, s);
+      var smCk = refitOn ? rf.def.check(p, refitCtx(rf, bag, smN, smSite)) : null;
+      /* 铁矿的 48 回合深层休眠：行上挂一个蓝标，把倒计时摆在明面上 */
+      var ironSleep = r.key === 'iron' && s.cool > 0 && !s.gone;
 
       var row = doc.createElement('div');
       row.className = 'rr bld';
@@ -3387,55 +5124,71 @@
       row.title = def.build + '：已建 ' + s.built + ' 座' +
         (n2 ? '（Lv2 ×' + n2 + '）' : '') + (n1 ? '（Lv1 ×' + n1 + '）' : '') +
         (s.site > 0 ? '，' + (s.siteKind === 'up' ? '升档中' : '在建') + '（剩 ' + s.site + ' 回合）' : '') +
-        '，每回合 +' + simPerTurn(s, def) + ' ' + prod +
+        '，' + (ironSleep
+          ? '休眠中（还剩 ' + s.cool + ' 回合，不产不收维护）'
+          : '每回合 +' + simPerTurn(s, def, p.id, r.key) + ' ' + prod) +
         '\n造价 ' + costText(costOf(def, lv2)) + '（本省 → 中央 → 同国各省）' +
         (lv2 ? '\n升档 ' + costText(def.cost2) + ' / 座' : '\n升 Lv2 要先研究「' + ((tech && tech.cn) || '对应科技') + '」') +
         '\n维护 ' + maintText(def.maint, p.owner) + ' / 座·回合' +
         '\n工期 ' + effectiveTurns(p.id, p.owner) + ' 回合' +
-        '\n剩余储量 ' + s.left + (s.gone ? '，已枯竭' : s.cool > 0 ? '，冷静 ' + s.cool + ' 回合' : '');
+        '\n剩余储量 ' + s.left + (s.gone ? '，已枯竭'
+          : s.cool > 0 ? (r.key === 'iron' ? '，休眠 ' : '，冷静 ') + s.cool + ' 回合' : '');
       if (s.halted) row.title += '\n维护欠费，停产中' + repHint(p, r.key);
-      /* 熔旧坊的账：行 title 里必须写清"产多少铁、付多少金、为什么值得" ——
-       * 这一行在矿枯之后是唯一的铁来源，玩家得能一眼算出来。 */
-      if (r.key === 'iron' && (asSmelt || smSite > 0)) {
-        row.title += '\n—— 熔旧坊 ×' + smN +
+      /* 它的账：行 title 里必须写清"产多少、付多少料、为什么值得" ——
+       * 这一行在矿枯之后是唯一的来源，玩家得能一眼算出来。 */
+      if (rf && (asSmelt || smSite > 0)) {
+        row.title += '\n—— ' + rf.def.cn + ' ×' + smN +
           (smSite > 0 ? '（改建中，剩 ' + smSite + ' 回合）' : '') + ' ——' +
-          '\n每座每回合 +' + smPer.toFixed(2) + ' 铁（人口 ' + AO.formatPop(popNow) + '）' +
-          '\n金耗 = 产量 × ' + AO.SMELT.goldPerIron + '（省库 → 中央，付不起当回合减半，不欠账）' +
-          '\n' + AO.SMELT.note;
+          '\n每座每回合 +' + smPer.toFixed(2) + ' ' + rf.outCn + '（人口 ' + AO.formatPop(popNow) + '）' +
+          '\n' + rf.def.payNote +
+          '\n' + rf.def.note;
       }
 
-      /* 行图标：熔旧坊（行内变身）→ 手绘图（Lv2 有专属图就用专属图，没有就先借 Lv1 的） */
-      if (asSmelt) row.insertAdjacentHTML('beforeend', smeltIconTag(22));
+      /* 行图标：行内变身 → 手绘图（Lv2 有专属图就用专属图，没有就先借 Lv1 的） */
+      if (asSmelt) row.insertAdjacentHTML('beforeend', refitIconTag(rf, 22));
       else row.insertAdjacentHTML('beforeend', bldVisual(r.key, n2 > 0 ? 2 : 1, 22));
 
       var nmb = doc.createElement('span');
       nmb.className = 'nm';
-      nmb.textContent = asSmelt ? '熔旧坊' : def.build;
+      nmb.textContent = asSmelt ? rf.def.cn : def.build;
       row.appendChild(nmb);
 
       var q = doc.createElement('span');
-      q.className = 'qty' + (s.gone && !asSmelt ? ' gone' : '');
+      /* 枯竭 = 红字（金）；休眠 = 蓝字（铁，48 回合后会醒）—— 两种"没铁可挖"不是一回事 */
+      q.className = 'qty' + (asSmelt ? '' : s.gone ? ' gone' : ironSleep ? ' cool' : '');
       q.textContent = '×' + (asSmelt ? smN : s.built);
       q.title = asSmelt
-        ? '熔旧坊 ' + smN + ' 座（每座每回合 +' + smPer.toFixed(2) + ' 铁 · 金耗 ×' + AO.SMELT.goldPerIron + '）'
+        ? rf.def.cn + ' ' + smN + ' 座（每座每回合 +' + smPer.toFixed(2) + ' ' + rf.outCn +
+          ' · 料耗 ×' + rf.payPer + ' ' + rf.payCn + '）'
         : '已建 ' + s.built + ' 座（Lv2 ×' + n2 + ' · Lv1 ×' + n1 + '）';
       row.appendChild(q);
 
-      /* 矿被 lode 复活之后：这一行还是熔旧坊，但矿场的收入也在，
+      /* 铁矿深层休眠：把倒计时摆在行上（蓝标），不点开 ? 也看得见。
+       * 48 回合是一段很长的等待 —— 玩家必须一眼知道"这条矿会自己醒"。 */
+      if (ironSleep) {
+        var slp = doc.createElement('span');
+        slp.className = 'sleep';
+        slp.textContent = '休眠 ' + s.cool;
+        slp.title = '矿脉深层休眠：还剩 ' + s.cool + ' 回合回满储量（' + s.built +
+          ' 座铁矿场停摆，不产不收维护）\n这段时间想有铁：改建熔旧坊，或者靠人口铁税';
+        row.appendChild(slp);
+      }
+
+      /* 矿被 lode 复活之后：这一行还是它，但矿场的收入也在，
        * 所以挂一个小字「矿×N」——两份收入叠加，玩家得看得见两份。 */
-      if (asSmelt && !s.gone && s.built > 0) {
+      if (asSmelt && !s.gone && !(s.cool > 0) && s.built > 0) {
         var mn = doc.createElement('span');
         mn.className = 'old';
         mn.textContent = '矿×' + s.built;
-        mn.title = '矿脉已复活：铁矿场 ' + s.built + ' 座照常出产，和熔旧坊两份收入叠加';
+        mn.title = '矿脉已复活：' + def.build + ' ' + s.built + ' 座照常出产，和' + rf.def.cn + '两份收入叠加';
         row.appendChild(mn);
       }
-      /* 熔旧坊的改建工地（和矿场自己的工地不会同时出现） */
+      /* 改建工地（和矿场自己的工地不会同时出现） */
       if (smSite > 0) {
         var smb = doc.createElement('span');
         smb.className = 'site';
         smb.textContent = '改' + smSite;
-        smb.title = '熔旧坊改建中：还要 ' + smSite + ' 回合';
+        smb.title = rf.def.cn + '改建中：还要 ' + smSite + ' 回合';
         row.appendChild(smb);
       }
 
@@ -3456,29 +5209,32 @@
         row.appendChild(st);
       }
 
-      /* ＋ 钮：铁矿场这一行在**矿脉枯竭后**变成「改建熔旧坊」——
-       * 这是熔旧坊唯一的入口（不新增建筑行，也不在别处开口子）。
-       * 没枯的矿、非铁矿行，一律还是原来的「再建一座」。 */
+      /* ＋ 钮：矿"睡了"（枯竭 / 深层休眠）就变成「改建」（熔旧坊 / 淘金场）——
+       * 这是它们唯一的入口（不新增建筑行，也不在别处开口子）。
+       * 矿还在产的、非矿行，一律还是原来的「再建一座」。 */
       var add = doc.createElement('button');
-      var addSmelt = (r.key === 'iron' && s.gone);
+      var addSmelt = refitOn;
       add.className = 'add' + (addSmelt ? ' smelt' : '');
       add.type = 'button';
       if (addSmelt) {
-        add.setAttribute('data-smelt', '1');
+        add.setAttribute(rf.btnAttr, '1');
         add.textContent = '改建';
         add.disabled = !smCk.ok;
         add.title = smCk.ok
-          ? '改建熔旧坊（第 ' + (smN + 1) + ' 座 / 封顶 ' + AO.SMELT.maxPer + '）：' +
-            costText(AO.SMELT.cost) + '，' + effectiveTurns(p.id, p.owner, AO.SMELT.turns) +
+          ? '改建' + rf.def.cn + '（第 ' + (smN + 1) + ' 座 / 封顶 ' + rf.def.maxPer + '）：' +
+            costText(rf.def.cost) + '，' + effectiveTurns(p.id, p.owner, rf.def.turns) +
             ' 回合完工' +
-            '\n每座每回合 +' + smPer.toFixed(2) + ' 铁 · 金耗 = 产量 × ' + AO.SMELT.goldPerIron +
-            '\n' + AO.SMELT.note
+            '\n每座每回合 +' + smPer.toFixed(2) + ' ' + rf.outCn +
+            '\n' + rf.def.payNote +
+            '\n' + rf.def.note
           : '改建不了：' + smCk.why;
       } else {
         add.textContent = '＋';
-        add.disabled = s.gone || s.site > 0;
-        add.title = s.gone ? '已枯竭，不能再建' : s.site > 0 ? '还有工地，等完工' :
-          '再建一座（' + costText(costOf(def, lv2)) + (lv2 ? '，Lv2' : '') + '）';
+        add.disabled = s.gone || s.site > 0 || ironSleep;
+        add.title = s.gone ? '已枯竭，不能再建'
+          : ironSleep ? '矿脉休眠中（还剩 ' + s.cool + ' 回合），先改建熔旧坊'
+            : s.site > 0 ? '还有工地，等完工'
+              : '再建一座（' + costText(costOf(def, lv2)) + (lv2 ? '，Lv2' : '') + '）';
       }
       lockBtn(add, p.owner);
       row.appendChild(add);
@@ -3497,9 +5253,9 @@
         row.appendChild(sprint);
       }
 
-      /* 「升」：科技已研 + 还有旧建筑 + 没有工地，才出现 */
+      /* 「升」：科技已研 + 还有旧建筑 + 没有工地 + 矿醒着，才出现 */
       var up = null;
-      if (lv2 && n1 > 0 && !(s.site > 0) && !s.gone) {
+      if (lv2 && n1 > 0 && !(s.site > 0) && !s.gone && !(r.key === 'iron' && s.cool > 0)) {
         up = doc.createElement('button');
         up.className = 'upg';
         up.type = 'button';
@@ -3527,7 +5283,7 @@
       qb.className = 'qbtn';
       qb.type = 'button';
       qb.textContent = '?';
-      qb.title = asSmelt ? '熔旧坊：产量 / 金耗 / 汇率 / 座数' : '档位 / 产出 / 维护 / 造价 / 剩余';
+      qb.title = asSmelt ? rf.def.cn + '：产量 / 料耗 / 汇率 / 座数' : '档位 / 产出 / 维护 / 造价 / 剩余';
       row.appendChild(qb);
 
       box.appendChild(row);
@@ -3538,7 +5294,7 @@
       box.appendChild(panel);
       if (state.openKey === r.key) qb.classList.add('on');
 
-      (function (btn, pn, key, addBtn, upBtn, pp, spBtn) {
+      (function (btn, pn, key, addBtn, upBtn, pp, spBtn, rf2) {
         btn.addEventListener('click', function () {
           state.openKey = (state.openKey === key) ? null : key;
           var on = pn.classList.toggle('on');
@@ -3546,8 +5302,9 @@
           if (on) renderBldList(pp);
         });
         addBtn.addEventListener('click', function () {
-          /* 枯竭矿的 ＋ 是「改建熔旧坊」—— 同一个钮、两条路，别处不开第二个口子 */
-          if (addBtn.getAttribute('data-smelt') === '1') buildSmelt(pp);
+          /* 枯竭矿的 ＋ 是「改建」—— 同一个钮、两条路（熔旧坊 / 淘金场），
+           * 别处不开第二个口子 */
+          if (rf2 && addBtn.getAttribute(rf2.btnAttr) === '1') rf2.build(pp);
           else buildOne(pp, key);
           renderInfoLists(pp);
         });
@@ -3559,7 +5316,7 @@
           sprintSite(pp, key);
           renderInfoLists(pp);
         });
-      })(qb, panel, r.key, add, up, p, sprint);
+      })(qb, panel, r.key, add, up, p, sprint, rf);
     }
   }
 
@@ -3616,7 +5373,8 @@
       row.title += '\n每座每回合 +' + AO.SCHOOL.per + ' 科研点' +
         '\n全国科研点 ' + R0.pts + '（' + (R0.unlocked ? '科技树已解锁' : '攒满 ' + AO.TECH_UNLOCK_PTS + ' 解锁科技树') + '）';
     } else if (kind === 'market') {
-      row.title += '\n每座可把 ' + AO.MARKET.rate + ' 单位资源换成 1 金（点 ? 手动卖）';
+      row.title += '\n每座可把 ' + AO.MARKET.rate + ' 单位资源换成金，也能拿金去世界市场进货（点 ? 手动交易）' +
+        '\n每省一座（' + AO.MARKET.maxPer + ' 座封顶）—— 要吞吐量就去修货运';
     } else if (kind === 'granary') {
       /* 粮仓：效果写成"每座 +100 粮/渔上限"，并把当前上限一起报出来 ——
        * 玩家关心的是"我现在能不能多囤"，不是"这个建筑叫什么" */
@@ -3665,6 +5423,10 @@
     if (kind === 'granary' && st.n >= AO.GRANARY.maxPer) {
       gateWhy = '已到上限 ' + AO.GRANARY.maxPer + ' 座（粮/渔上限 +' +
         AO.GRANARY.maxPer * AO.GRANARY.capBonus + ' 已经是这个省的极限）';
+    }
+    /* 市场每省一座（v18 追加三）：置灰不隐藏，title 直接给替代方案 */
+    if (kind === 'market' && st.n >= AO.MARKET.maxPer) {
+      gateWhy = '每省一座市场——要吞吐量就去修货运';
     }
     if (D.needTier) {
       var eduN = talentOf(p.owner).total || 0;
@@ -3756,6 +5518,35 @@
           renderInfoLists(p);
         });
       }
+      /* 兑换（v18 / B2）：两排小钮选"付出 / 换回"，再点「兑换」。
+       * 选完要重画（高亮和"这一手"的账都跟着变），所以 chip 也走 renderInfoLists。 */
+      var xgiv = panel.querySelectorAll('button[data-xgive]');
+      for (var xgi = 0; xgi < xgiv.length; xgi++) {
+        xgiv[xgi].addEventListener('click', function () {
+          state.xgive = this.getAttribute('data-xgive');
+          renderInfoLists(p);
+        });
+      }
+      var xgetb = panel.querySelectorAll('button[data-xget]');
+      for (var xgi2 = 0; xgi2 < xgetb.length; xgi2++) {
+        xgetb[xgi2].addEventListener('click', function () {
+          state.xget = this.getAttribute('data-xget');
+          renderInfoLists(p);
+        });
+      }
+      var xdo = panel.querySelector('button[data-xdo]');
+      if (xdo) xdo.addEventListener('click', function () {
+        exchangeResource(p, state.xgive, state.xget);
+        renderInfoLists(p);
+      });
+      /* 出口（v14）：卖到外国 —— 和 fbuy 反过来的一笔，绑法一样 */
+      var exb = panel.querySelectorAll('button[data-exp]');
+      for (var ej = 0; ej < exb.length; ej++) {
+        exb[ej].addEventListener('click', function () {
+          exportForeign(p, this.getAttribute('data-exp'), +this.getAttribute('data-ecid'));
+          renderInfoLists(p);
+        });
+      }
     }
   }
 
@@ -3774,7 +5565,12 @@
       h += '<div class="l"><i>科研</i> 每座每回合 +' + AO.SCHOOL.per + ' 科研点（全国共用，' +
         (st.n ? '本省 +' + (st.n * AO.SCHOOL.per) : '本省 +0') + ' / 回合）</div>';
     } else if (kind === 'market') {
-      h += '<div class="l"><i>换金</i> 每座可把 ' + AO.MARKET.rate + ' 单位资源换成 1 金（手动，本省库存直接扣）</div>';
+      h += '<div class="l"><i>换金</i> 每座可把 ' + AO.MARKET.rate +
+        ' 单位资源换成金（按本国物价指数：缺则贵、积压则贱）</div>' +
+        '<div class="l"><i>进货</i> 走<b>世界市场</b>：价随本国物价走，越缺越贵；供给无限，' +
+        '付出去的金沉没（<b>国库不是商店</b>）</div>' +
+        '<div class="l"><i>一座</i> 每省只建一座市场 —— 要吞吐量就去修货运' +
+        (st.n >= AO.MARKET.maxPer ? '　<em class="ok">已建满</em>' : '') + '</div>';
     } else if (kind === 'granary') {
       /* 粮仓：把"上限"这件事讲清楚 —— 基础 150、每座 +100、3 座封顶 */
       var gcapG = capOf(p.id, 'grain'), gcapF = capOf(p.id, 'fish');
@@ -3822,71 +5618,145 @@
     }
 
     if (kind === 'market') {
-      h += '<div class="l"><i>卖货</i> 七种资源都能卖，' + AO.MARKET.rate + ' 单位换 1 金（库存不够的置灰）</div>';
+      var rs = p.resources || [], bag = SIM[p.id] || {};
+      var cid = p.owner | 0;
+
+      /* ---- 价格板（v14）：七种资源 现价 / 趋势 / 本国库存一句话 ----
+       * 放在卖货钮**上面**是刻意的：玩家先看见"粮 1.8 ↑"，再决定卖不卖。
+       * 一行读法：`粮食 1.80 ↑ · 全国 12 / 需 20（紧）`。 */
+      var needAll = PNEED[cid] || needOf(cid);
+      h += '<div class="pboard">';
+      h += '<div class="pbhead"><span>物价</span><span>现价 · 趋势</span><span>库存 / 需求</span></div>';
+      for (var pi2 = 0; pi2 < rs.length; pi2++) {
+        var pk = rs[pi2].key, pv = priceV(cid, pk), ptr = priceTrend(cid, pk);
+        var cst = countryStock(cid, pk), nd = needAll[pk] || 1;
+        var rr = cst / nd;
+        var tag = rr < AO.PRICES_CFG.ratio.scarce ? '紧缺' : rr < AO.PRICES_CFG.ratio.tight ? '偏紧'
+          : rr < AO.PRICES_CFG.ratio.glut ? '充足' : '积压';
+        h += '<div class="pbrow' + (pv >= AO.PRICES_CFG.tier.tight ? ' up' : pv <= AO.PRICES_CFG.tier.glut ? ' down' : '') +
+          '"><span class="nm">' + cnOf(pk) + '</span>' +
+          '<b>' + priceNum(pv) + ' ' + priceArrow(ptr) + '</b>' +
+          '<em>' + Math.round(cst) + ' / ' + Math.round(nd) + '（' + tag + '）</em></div>';
+      }
+      h += '</div>';
+
+      h += '<div class="l"><i>卖货</i> 一手 ' + AO.MARKET.rate +
+        ' 单位，按本国现价换金（缺则贵、积压则贱）；小数攒整，不会白扣</div>';
       if (!st.n) h += '<div class="l gone"><i>提示</i> 先盖一座市场，才有地方卖货</div>';
       else if (st.halted) h += '<div class="l gone"><i>停产</i> 维护欠费，本回合卖不了货（建造不受影响）</div>';
-      var rs = p.resources || [], bag = SIM[p.id] || {};
       h += '<div class="sellbox">';
       for (var i = 0; i < rs.length; i++) {
         var rk = rs[i].key, ss = bag[rk];
         var have = ss ? ss.stock : 0;
+        var pg = sellGold(cid, rk), ptr2 = priceTrend(cid, rk);
         var off = !st.n || st.halted || have < AO.MARKET.rate || !canAct(p.owner);
         h += '<div class="srow"><span>' + cnOf(rk) + '</span><em>' + have + '</em>' +
           '<button type="button" data-sell="' + rk + '"' + (off ? ' disabled' : '') +
           ' title="' + (!canAct(p.owner) ? lockTitle() : off ? (st.halted ? '市场停产中' : '库存不足 ' + AO.MARKET.rate) :
-            '扣本省 ' + AO.MARKET.rate + ' ' + cnOf(rk) + '，+1 金') + '">' +
-          '卖 ' + AO.MARKET.rate + ' → +1 金</button></div>';
+            '扣本省 ' + AO.MARKET.rate + ' ' + cnOf(rk) + '，+' + priceNum(pg) + ' 金（本国' +
+            cnOf(rk) + '价 ' + priceNum(pg) + ' ' + priceArrow(ptr2) + '）') + '">' +
+          '卖 ' + AO.MARKET.rate + ' → +' + priceNum(pg) + ' 金</button></div>';
       }
       h += '</div>';
 
-      /* ---- 买货：省库金 → 中央进货 → 进本省库存 ----
+      /* ---- 买货：省库金 → 世界市场 → 进本省库存（v18 追加三） ----
        * 和上面的卖货是**两条反向的腿**：卖是把省里的东西换成金，
-       * 买是拿省库的金去中央调货（应急口：缺粮救荒、缺铁复工）。
-       * 中央没货就置灰 —— 中央的库存只由「生产抽税」和「买货」进出，
-       * 所以这里的置灰是真的"中央空了"，不是省里没钱。 */
-      var lot = AO.GOV.buyLot(), cen = ensureCentral(p.owner);
+       * 买是拿省库的金去世界市场进货（应急口：缺粮救荒、缺铁复工）。
+       * **货不来自中央国库**：供给无限，所以这一排钮永不为"中央没货"变灰，
+       * 唯一的闸是省库金够不够；付出去的金沉没（进世界市场，不落任何账）。
+       * 价格 = 基准 × 本国 PI：本国缺什么，补什么就贵 —— 越缺越贵，
+       * 贵到买不起才是真稀缺（这就是"无限供给"的刹车）。
+       * 行首那个数字是**本国现价**（PI），不是库存：库存已经没有意义了。 */
+      var lot = AO.GOV.buyLot();
       var gold = bag.gold ? bag.gold.stock : 0;
-      h += '<div class="l"><i>买货</i> 省库金 <b>' + gold + '</b> · 每次进 ' + lot.n +
-        ' 单位花 ' + lot.gold + ' 金（从中央国库调，比卖价贵）</div>';
+      h += '<div class="l"><i>买货</i> 省库金 <b>' + gold + '</b> · 世界市场每手 ' + lot.n +
+        ' 单位，价 = 基准 ' + lot.gold + ' × 本国物价（越缺越贵 · 供给无限 · 金沉没）</div>';
       h += '<div class="sellbox buy">';
       for (var bi2 = 0; bi2 < rs.length; bi2++) {
-        var bk = rs[bi2].key, cv = Math.floor(cen[bk] || 0);
-        var boff = !st.n || cv < lot.n || gold < lot.gold || !canAct(p.owner) || !!BLOCKADE[p.id];
-        h += '<div class="srow"><span>' + cnOf(bk) + '</span><em>' + cv + '</em>' +
+        var bk = rs[bi2].key;
+        var bprice = buyGold(cid, bk);
+        var boff = !st.n || gold < bprice || !canAct(p.owner) || !!BLOCKADE[p.id];
+        h += '<div class="srow"><span>' + cnOf(bk) + '</span><em>' + priceNum(priceV(cid, bk)) + '</em>' +
           '<button type="button" data-buy="' + bk + '"' + (boff ? ' disabled' : '') +
           ' title="' + (!canAct(p.owner) ? lockTitle()
             : BLOCKADE[p.id] ? '本省被舰队封锁，买不了货'
-              : !st.n ? '先盖一座市场' : cv < lot.n ? '中央没货（只有 ' + cv + '）' :
-                gold < lot.gold ? '省库金不足 ' + lot.gold : '扣省库 ' + lot.gold + ' 金，从中央进 ' +
-                  lot.n + ' ' + cnOf(bk)) + '">' +
-          '买 ' + lot.n + ' ← ' + lot.gold + ' 金</button></div>';
+              : !st.n ? '先盖一座市场'
+                : gold < bprice ? '省库金不足 ' + bprice
+                  : '世界市场进货：价随本国物价走，越缺越贵（扣省库 ' + bprice + ' 金，进 ' +
+                    lot.n + ' ' + cnOf(bk) + '）') + '">' +
+          '买 ' + lot.n + ' ← ' + bprice + ' 金</button></div>';
       }
       h += '</div>';
 
-      /* ---- 外国货源（v9）：中央没货时，找 REL ≥ 20 的存续外国买 ----
+      /* ---- 兑换（v18 / B2）：以物易物，七种两两可换 ----
+       * 上面两条腿是"资源 ↔ 金"，这一条是"资源 ↔ 资源"：
+       * 粮换铁、金换铁、鱼换盐…汇率 = 两边物价之比（再抽一成），
+       * 所以"缺什么就贵什么"自动生效，不需要另立一张兑换表。
+       * 选法：两排小钮（付出 / 换回），选中项高亮；下面一行写这一手的账。
+       * 状态存在 state.xgive / state.xget（不进档，换局重新默认 粮→铁）。 */
+      if (!state.xgive || !bag[state.xgive]) state.xgive = 'grain';
+      if (!state.xget || !bag[state.xget]) state.xget = 'iron';
+      if (state.xgive === state.xget) state.xget = state.xgive === 'iron' ? 'gold' : 'iron';
+      var xg = state.xgive, xt = state.xget;
+      var xlot = AO.MARKET.rate, xout = xchgOut(cid, xg, xt, xlot);
+      var xhave = (bag[xg] && bag[xg].stock) || 0;
+      var xroom = capOf(p.id, xt) - ((bag[xt] && bag[xt].stock) || 0);
+      var xoff = !st.n || st.halted || xhave < xlot || xout <= 0 ||
+        xout > xroom || !canAct(p.owner);
+      var chips = function (which) {
+        var s2 = '';
+        for (var ci = 0; ci < rs.length; ci++) {
+          var ck = rs[ci].key;
+          var on = (which === 'give' ? xg : xt) === ck;
+          s2 += '<button type="button" data-x' + which + '="' + ck + '"' + (on ? ' class="on"' : '') +
+            '>' + cnOf(ck) + '</button>';
+        }
+        return s2;
+      };
+      h += '<div class="l"><i>兑换</i> 以物易物：一手 ' + xlot +
+        ' 单位，按两边物价折算（市场抽 ' +
+        Math.round((AO.MARKET.xchg.spread || 0) * 100) + '%）· 同种不换</div>';
+      h += '<div class="xchgbox">' +
+        '<div class="srow"><span>付出</span><div class="chips">' + chips('give') + '</div></div>' +
+        '<div class="srow"><span>换回</span><div class="chips">' + chips('get') + '</div></div>' +
+        '<div class="srow"><span>这一手</span><em>' + xlot + ' ' + cnOf(xg) + ' → ' +
+        (xout > 0 ? xout + ' ' + cnOf(xt) : '换不到 1 ' + cnOf(xt)) + '</em>' +
+        '<button type="button" data-xdo="1"' + (xoff ? ' disabled' : '') +
+        ' title="' + escHtml(!canAct(p.owner) ? lockTitle()
+          : !st.n ? '先盖一座市场' : st.halted ? '市场停产中'
+            : xhave < xlot ? cnOf(xg) + ' 不够 ' + xlot
+              : xout <= 0 ? '按现在物价换不到 1 单位，换个目标'
+                : xout > xroom ? cnOf(xt) + ' 装不下 ' + xout + '（上限 ' + capOf(p.id, xt) + '）'
+                  : '扣本省 ' + xlot + ' ' + cnOf(xg) + '，换回 ' + xout + ' ' + cnOf(xt)) + '">' +
+        '兑换</button></div></div>';
+
+      /* ---- 外国货源（v9 + v14 比价）：REL ≥ 20 的存续外国 ----
        * 三条和"中央进货"不同的规矩，都写在按钮 title 里：
-       *   ① 溢价（金 × trade.premium），比中央贵；
+       *   ① 价格 = 基准 × 溢价 × **对方 PI** —— 对方缺什么，你去买就贵；
        *   ② 钱进**对方那个省的省库**（不是它的国库）—— 你付的是那家商人的账；
        *   ③ 不走调拨，所以没有损耗；每笔关系 +0.5（累计上限 +20）。
-       * 封锁省断供（和中央进货同一条闸）。 */
-      /* foreignSources 一次只查一种资源，所以先探一圈"有没有任何外国在做生意"，
-       * 有才开这一节 —— 免得面板上常年挂一个空标题。 */
+       * 封锁省断供（和中央进货同一条闸）。
+       * 货源行右侧写"比本国贱 N%" —— **跨国价差在面板上直接可见**，
+       * 便宜的在前面（sort 在 foreignSources 里做）。 */
       var anyForeign = false;
       for (var fi = 0; fi < rs.length; fi++) {
         if (foreignSources(p, rs[fi].key).length) { anyForeign = true; break; }
       }
       if (anyForeign) {
         h += '<div class="l"><i>外购</i> 外国货源：关系 ≥ ' + AO.DIPLO.trade.minRel +
-          ' 的国家可直接买，溢价 ×' + AO.DIPLO.trade.premium +
-          '，钱进对方省库（不走调拨、无损耗）</div>';
+          ' 的国家可直接买，价 = 基准 × 溢价 ' + AO.DIPLO.trade.premium +
+          ' × 对方物价；钱进对方省库（无损耗），比本国便宜的排前面</div>';
         h += '<div class="sellbox buy fbuy">';
         for (var fk = 0; fk < rs.length; fk++) {
           var fkey = rs[fk].key, srcs = foreignSources(p, fkey);
           if (!srcs.length) continue;
           var s0 = srcs[0];
           var foff = !st.n || st.halted || gold < s0.price || !canAct(p.owner) || !!BLOCKADE[p.id];
-          h += '<div class="srow"><span>' + cnOf(fkey) + '<i>' + escHtml(s0.name) + '</i></span>' +
-            '<em>' + s0.stock + '</em>' +
+          var gapTxt = s0.gap > 0.005 ? '比本国贱 ' + Math.round(s0.gap * 100) + '%'
+            : s0.gap < -0.005 ? '比本国贵 ' + Math.round(-s0.gap * 100) + '%' : '与本国同价';
+          h += '<div class="srow"><span>' + cnOf(fkey) + '<i>' + escHtml(s0.name) + ' · ' +
+            priceNum(s0.pi) + ' ' + priceArrow(priceTrend(s0.cid, fkey)) + '</i></span>' +
+            '<em class="gap' + (s0.gap > 0.005 ? ' good' : '') + '">' + gapTxt + '</em>' +
             '<button type="button" data-fbuy="' + fkey + '" data-fcid="' + s0.cid + '"' +
             (foff ? ' disabled' : '') + ' title="' + escHtml(
               !canAct(p.owner) ? lockTitle()
@@ -3894,10 +5764,46 @@
                   : !st.n ? '先盖一座市场' : st.halted ? '市场停产中'
                     : gold < s0.price ? '省库金不足 ' + s0.price
                       : '从 ' + s0.name + '·' + s0.prov + ' 买 ' + s0.n + ' ' + cnOf(fkey) +
-                        '，付 ' + s0.price + ' 金（关系 ' + s0.rel + '）') + '">' +
+                        '，付 ' + s0.price + ' 金（对方价 ' + priceNum(s0.pi) + '，本国价 ' +
+                        priceNum(s0.myPi) + '，关系 ' + s0.rel + '）') + '">' +
             '买 ' + s0.n + ' ← ' + s0.price + ' 金</button></div>';
         }
         h += '</div>';
+      }
+
+      /* ---- 出口（v14）：把本国贱、对方贵的东西卖出去 ----
+       * 这是"倒卖闭环"的另一半：上面那一节是缺了去买，这一节是多了去卖。
+       * 只列价差 ≥ minSpread 的国家 —— 价差太薄的列出来是白让玩家点。
+       * 每省每回合 1 笔（EXP1），已在货源行下面写清。 */
+      var anyExp = false, expH = '';
+      for (var xk = 0; xk < rs.length; xk++) {
+        var xkey = rs[xk].key, exs = exportSources(p, xkey);
+        if (!exs.length) continue;
+        var x0 = exs[0], xhave = stockOf(p.id, xkey);
+        var xoff = !st.n || st.halted || xhave < AO.PRICES_CFG.exportLot ||
+          !canAct(p.owner) || !!BLOCKADE[p.id] || (EXP1[p.id] | 0) === turnNo;
+        anyExp = true;
+        expH += '<div class="srow"><span>' + cnOf(xkey) + '<i>' + escHtml(x0.name) +
+          ' · ' + priceNum(x0.pi) + ' ' + priceArrow(priceTrend(x0.cid, xkey)) + '</i></span>' +
+          '<em class="gap good">价差 +' + priceNum(x0.spread) + '</em>' +
+          '<button type="button" data-exp="' + xkey + '" data-ecid="' + x0.cid + '"' +
+          (xoff ? ' disabled' : '') + ' title="' + escHtml(
+            !canAct(p.owner) ? lockTitle()
+              : BLOCKADE[p.id] ? '本省被舰队封锁，出不了货'
+                : !st.n ? '先盖一座市场' : st.halted ? '市场停产中'
+                  : (EXP1[p.id] | 0) === turnNo ? '本省这回合已经出过一笔了'
+                    : xhave < AO.PRICES_CFG.exportLot ? '本省库存不足 ' + AO.PRICES_CFG.exportLot
+                      : '卖 ' + x0.n + ' ' + cnOf(xkey) + ' 给 ' + x0.name + '，到手 ' +
+                        priceNum(x0.gain) + ' 金（对方价 ' + priceNum(x0.pi) + ' × ' +
+                        AO.PRICES_CFG.exportCut + '；本国价 ' + priceNum(x0.myPi) + '）') + '">' +
+          '出口 ' + x0.n + ' → +' + priceNum(x0.gain) + ' 金</button></div>';
+      }
+      if (anyExp) {
+        h += '<div class="l"><i>出口</i> 卖给外国（关系 ≥ ' + AO.DIPLO.trade.minRel +
+          '、对方价高于本国）：到手 = 对方价 × ' + AO.PRICES_CFG.exportCut +
+          '（那两成是运费与中间商）· 货进对方库存，对方价随后回落 · 每省每回合 ' +
+          AO.PRICES_CFG.exportPerTurn + ' 笔</div>';
+        h += '<div class="sellbox exp">' + expH + '</div>';
       }
     }
 
@@ -3955,7 +5861,7 @@
     if (q) {
       var qrow = doc.createElement('div');
       qrow.className = 'rr site-row';
-      qrow.textContent = '征兵中 · ' + (AO.MIL_ITEM[q.tier] || {}).cn + ' · 剩 ' + q.left + ' 回合成军';
+      qrow.textContent = '征兵中 · 剩 ' + q.left + ' 回合成军（成军后去武库发装备）';
       box.appendChild(qrow);
     }
 
@@ -3989,9 +5895,19 @@
       '\n工期 ' + effectiveTurns(p.id, p.owner, D.turnsAt()) + ' 回合' +
       '\n维护 ' + maintText(D.maint, p.owner) + ' / 座·回合' +
       '\n' + D.desc +
-      (st.order ? '\n当前订单：' + (AO.MIL_ITEM[st.order] || {}).cn : '') +
       (st.halted ? '\n维护欠费，停产中' : '');
     if (!mine) row.title += '\n（非你的国家：只能看）';
+    /* 产能中心（v17）：这一坊每回合几点、怎么用掉的、有没有匠人 —— 行 title 上就要能读到 */
+    if (MILL_KINDS.indexOf(kind) >= 0) {
+      var MG = AO.MILL, pool = MG.poolOf[kind];
+      var art = artisanOf(p.id);
+      row.title += '\n本省产能贡献 ' + millCap(p.id, kind) + ' 点/回合 → ' +
+        MG.poolCn[pool] + '池（全国合计 ' + poolCap(p.owner, pool) + ' 点）';
+      row.title += '\n产线怎么分：顶栏「产能」（全国一张表，20 条线）';
+      if (art) row.title += '\n匠人：' + art.name + '（' + artisanLv(art).cn + '，产能 +' +
+        Math.round(artisanLv(art).bonus * 100) + '%，品质看全国最高那位）';
+      else row.title += '\n匠人：空缺 —— 产能加成 0、品质按学徒档（匠人是加成者，不是钥匙）';
+    }
     /* 工厂的 ×2 要挂在**受益的那几行**上：否则玩家建了工厂却不知道谁受益 */
     if (kind !== 'barracks' && kind !== 'factory') {
       var fbx = FACTORY_BLD[p.id];
@@ -4019,12 +5935,14 @@
       stt.title = '在建：还要 ' + st.site + ' 回合';
       row.appendChild(stt);
     }
-    /* 订单厂的当前订单，直接写在行上（不用点开 ? 才知道在产什么） */
-    if (kind !== 'barracks' && kind !== 'stable' && st.order) {
+    /* 产能中心的当前摆法直接写在行上（不用点开 ? 才知道在产什么）：
+     * 兵刃线优先显示"在产哪种"，其余写"已分配 2/2 点"。 */
+    if (MILL_KINDS.indexOf(kind) >= 0) {
+      var capN = millCap(p.id, kind);
       var od = doc.createElement('span');
       od.className = 'old';
-      od.textContent = (AO.MIL_ITEM[st.order] || {}).cn || '';
-      od.title = '当前订单';
+      od.textContent = '产能 +' + capN;
+      od.title = '本省给' + AO.MILL.poolCn[AO.MILL.poolOf[kind]] + '池贡献 ' + capN + ' 点/回合';
       row.appendChild(od);
     }
 
@@ -4094,16 +6012,7 @@
       bldMsg(r.msg, r.ok ? 'ok' : 'warn');
       renderInfoLists(p);
     });
-    /* 订单按钮：军械坊 / 铸炮厂 / 造船厂 */
-    var obts = panel.querySelectorAll('button[data-ord]');
-    for (var j = 0; j < obts.length; j++) {
-      obts[j].addEventListener('click', function () {
-        var key = this.getAttribute('data-ord');
-        var r = setShopOrder(p.id, kind, key === '-' ? null : key);
-        bldMsg(r.msg, r.ok ? 'ok' : 'warn');
-        renderMilList(p);
-      });
-    }
+    /* v19：省卡上不再有产线 ±（分配表搬到顶栏「产能」的全国表） */
     /* 征兵按钮：步兵 / 骑兵 / 炮兵 */
     var rbts = panel.querySelectorAll('button[data-rec]');
     for (var k2 = 0; k2 < rbts.length; k2++) {
@@ -4132,75 +6041,82 @@
       '（付不起就停产，凑齐自动复工）</div>';
 
     if (kind === 'barracks') {
-      h += '<div class="l"><i>征兵</i> 一回合一支；三样消耗：人口 ' + AO.RECRUIT.popPerUnit +
-        ' · 金 ' + AO.RECRUIT.goldPerUnit + ' · 该代装备 ' + AO.RECRUIT.weaponPerUnit + ' 件</div>';
+      /* v19：招的全是步兵 —— 扣金 + 人口，不扣装备；兵种靠武库发装备 */
+      var info0 = recruitInfo(p.id, 'inf');
+      var need0 = info0.need || { gold: AO.RECRUIT.goldPerUnit, pop: AO.RECRUIT.popPerUnit };
+      h += '<div class="l"><i>征兵</i> 一回合一支步兵 ' + AO.RECRUIT.menPerUnit + ' 人：人口 ' +
+        AO.RECRUIT.popPerUnit + ' · 金 ' + AO.RECRUIT.goldPerUnit +
+        '　<b>不扣装备</b>（兵种是武库发出来的）</div>';
       h += '<div class="sellbox">';
-      var arms = [['inf', '步兵'], ['cav', '骑兵'], ['art', '炮兵']];
-      for (var i = 0; i < arms.length; i++) {
-        var info = recruitInfo(p.id, arms[i][0]);
-        var need = info.need || { gold: AO.RECRUIT.goldPerUnit, pop: AO.RECRUIT.popPerUnit, wpn: AO.RECRUIT.weaponPerUnit };
-        var dis = !info.ok || !mine;
-        h += '<div class="srow"><span>' + arms[i][1] + '</span><em>' +
-          (info.tier ? info.tier.cn : '—') + '</em>' +
-          '<button type="button" data-rec="' + arms[i][0] + '"' + (dis ? ' disabled' : '') +
-          ' title="' + escHtml(!mine ? lockTitle() : info.ok
-            ? ('征一支 ' + info.tier.unit + '：金 ' + need.gold + ' · 人口 ' + need.pop +
-              ' · ' + info.tier.cn + ' ×' + need.wpn + (need.horse ? ' · 战马 ' + need.horse : ''))
-            : info.why) + '">' +
-          '征 ' + AO.RECRUIT.menPerUnit + ' 人</button></div>';
-      }
+      h += '<div class="srow"><span>步兵（裸兵）</span><em class="halted">赤手空拳 · 战力 0.5</em>' +
+        '<button type="button" data-rec="inf"' + (info0.ok && mine ? '' : ' disabled') +
+        ' title="' + escHtml(!mine ? lockTitle() : info0.ok
+          ? ('征一支步兵：金 ' + need0.gold + ' · 人口 ' + need0.pop +
+            '。成军后去顶栏「武库」发兵刃/马/炮 —— 有炮=炮兵、有马=骑兵')
+          : info0.why) + '">征 ' + AO.RECRUIT.menPerUnit + ' 人</button></div>';
       h += '</div>';
+      h += '<div class="l"><i>说明</i> 裸兵能守不能攻（pow 0.5）；AI 也不拿裸兵进攻</div>';
       if (st.n && !mine) h += '<div class="l gone"><i>锁</i> 非你的国家：只能看，不能征</div>';
     } else if (kind === 'stable') {
-      h += '<div class="l"><i>产出</i> 每座每回合 +' + (D.per || 1) + ' 战马（本省库存 ' +
-        itemStock(p.id, 'warhorse') + ' 匹）</div>' +
-        '<div class="l"><i>用途</i> 重骑兵（强弩·具装）成建制要 1 匹马 / 支 —— 这是骑兵的第二道闸</div>';
+      h += '<div class="l"><i>产能</i> 每座每回合 ' + (D.per || 1) + ' 点 → <b>马厩池</b>' +
+        '（四个品种共用这一池）</div>' +
+        '<div class="l"><i>本省</i> 贡献 <b>' + millCap(p.id, 'stable') + '</b> 点 / 回合' +
+        '（全国马厩池 ' + poolCap(p.owner, 'stable') + ' 点）</div>' +
+        '<div class="l"><i>产出</i> 马是**队份**（×1000 匹）：发一份给部队 = 骑兵</div>';
     } else if (kind === 'factory') {
-      /* 工厂：不产东西，只放大本省的军械产能 */
+      /* 工厂：不产东西，只放大本省的产能 */
       var fm = (st.n > 0 && !st.halted) ? (D.prodMul || 2) : 1;
-      h += '<div class="l"><i>效果</i> 本省军械坊 / 驯马场 / 铸炮厂 / 造船厂 每回合产出 <b>×' +
-        (D.prodMul || 2) + '</b>（料不变 —— 工业化解放产能，不解放原料）</div>' +
+      h += '<div class="l"><i>效果</i> 本省军械坊 / 造船厂 的 <b>产能点数 ×' +
+        (D.prodMul || 2) + '</b>（驯马场产出也 ×' + (D.prodMul || 2) + '；料不变 —— 工业化解放产能，不解放原料）</div>' +
         '<div class="l"><i>本省</i> ' + (st.n ? (st.halted ? '工厂停产中 → 产能 ×1' : '产能 ×' + fm)
           : '还没有工厂 → 产能 ×1') + '</div>' +
-        '<div class="l"><i>范围</i> 只放大 <b>本省</b> 的厂；科技只解锁"能接哪种订单"，不提高产量</div>';
+        '<div class="l"><i>范围</i> 只放大 <b>本省</b> 的厂；科技只解锁产线，不提高每点产出</div>';
     } else {
-      /* 三个订单厂：列出已解锁的装备，点一下就改产 */
-      var group = kind === 'armory' ? 'weapon' : kind === 'foundry' ? 'gun' : 'ship';
-      var list = unlockedItems(p.owner, group);
-      var all = group === 'weapon' ? AO.MIL_ORDER : group === 'gun' ? AO.GUN_ORDER : AO.SHIP_ORDER;
-      var fb2 = FACTORY_BLD[p.id];
-      var om = (fb2 && fb2.n > 0 && !fb2.halted) ? (AO.FACTORY.factory.prodMul || 2) : 1;
-      h += '<div class="l"><i>订单</i> 每座每回合按配方产（产能是闸：不随科技涨，想多产就多盖）' +
-        (om > 1 ? '　<em class="ok">本省有工厂：产出 ×' + om + '</em>' : '') + '</div>';
-      h += '<div class="sellbox">';
-      for (var j = 0; j < all.length; j++) {
-        var it = AO.MIL_ITEM[all[j]];
-        var unlocked = it.tech ? !!(RESEARCH[p.owner] && RESEARCH[p.owner].done[it.tech]) : true;
-        var on = st.order === it.key;
-        var rec = [], k;
-        for (k in it.recipe) rec.push((AO.RES_SHORT[k] || k) + it.recipe[k]);
-        h += '<div class="srow"><span>' + it.cn + '</span><em>' + rec.join('+') + '→' + it.out + '</em>' +
-          '<button type="button" data-ord="' + it.key + '"' + ((!unlocked || !mine) ? ' disabled' : '') +
-          (on ? ' class="on"' : '') +
-          ' title="' + escHtml(!mine ? lockTitle() : !unlocked
-            ? ('还没解锁：先研究「' + ((AO.TECH_BY_KEY[it.tech] || {}).cn || it.tech) + '」')
-            : ('订单改成「' + it.cn + '」：每座每回合吃 ' + rec.join('+') + '，出 ' + it.out + ' 件')) +
-          '">' + (on ? '在产' : '接单') + '</button></div>';
-      }
-      if (st.order) {
-        h += '<div class="srow"><span>停工</span><em>—</em>' +
-          '<button type="button" data-ord="-" title="不接单：不产也不耗料">停</button></div>';
-      }
-      h += '</div>';
-      /* 本省库存里已有的该组装备 */
-      var stockLine = [];
-      for (var m = 0; m < all.length; m++) {
-        var sv = itemStock(p.id, all[m]);
-        if (sv > 0) stockLine.push((AO.MIL_ITEM[all[m]] || {}).cn + ' ' + sv);
-      }
-      h += '<div class="l"><i>库存</i> ' + (stockLine.length ? stockLine.join(' · ') : '本省还没有成品') + '</div>';
+      /* 三个产能中心：产线分配卡（每线一行：名 / 吃点 / 产出预览 / ±） */
+      h += millCardHtml(p, kind, mine);
+      /* v19：成品不进省库了，进**全国武库**（队份）。这里只报武库里有多少。 */
+      var wN = arsTotal(p.owner, 'wpn'), mN = arsTotal(p.owner, 'mount');
+      var gN = arsTotal(p.owner, 'gun'), sN = arsTotal(p.owner, 'ship');
+      h += '<div class="l"><i>武库</i> 兵刃 ' + wN + ' 队份 · 马 ' + mN + ' 队份 · 炮 ' + gN +
+        ' 门 · 舰 ' + sN + ' 艘（顶栏「武库」看明细）</div>';
     }
     return h;
+  }
+
+  /* 本省产能贡献（v19）—— 分配表搬到全国「产能」面板了，这里只报一件事：
+   * 这一省给三个池各贡献几点。为什么省卡上不再放 ±：
+   * 全国口径下"给刀 +1 点"不是一个省的决定，逐省调会让同一个问题回答 20 遍。 */
+  function millCardHtml(p, kind, mine) {
+    var M = AO.MILL, pool = M.poolOf[kind];
+    var raw = provCapRaw(p.id, kind), cap = Math.floor(raw);
+    var art = artisanOf(p.id), artLv = art ? artisanLv(art) : null;
+    var D = AO.FACTORY[kind];
+    var src = [];
+    src.push(UNIV[kind][p.id].n + ' 座 × ' + (M.base[kind] || 1) + ' 点');
+    if (kind === 'armory' && hasTech(p.owner, 'mil_std')) src.push('制式装备 +' + M.stdBonus.armory + '/座');
+    var fm = armProdMul(p.id);
+    if (fm > 1) src.push('工厂 ×' + fm);
+    if (art) src.push('匠人 ' + artLv.cn + ' +' + Math.round(artLv.bonus * 100) + '%');
+    var h = '<div class="l"><i>本省产能</i> <b>' + cap + '</b> 点/回合 → <b>' +
+      M.poolCn[pool] + '池</b>' + (raw > cap ? '（零头 ' + (raw - cap).toFixed(1) + '，攒着）' : '') +
+      '<br><span class="millsrc">' + src.join(' · ') + '</span></div>' +
+      '<div class="l"><i>全国</i> ' + M.poolCn[pool] + '池合计 <b>' + poolCap(p.owner, pool) +
+      '</b> 点（' + M.lines[pool].length + ' 条线共用这一池）</div>' +
+      '<div class="l"><i>在哪调</i> 顶栏「产能」：全国一张表，20 条线三段分组</div>' +
+      '<div class="l"><i>要人</i> 匠人是**加成者**不是钥匙：驻在本省 → 产能 +' +
+      '0/10/20/40%；品质 roll 看全国最高的那一位</div>';
+    if (!(UNIV[kind][p.id].n > 0)) {
+      h += '<div class="l gone"><i>没建</i> 这一省还没有' + escHtml(D.cn) + '</div>';
+    } else if (UNIV[kind][p.id].halted) {
+      h += '<div class="l gone"><i>停产</i> 维护欠费 → 本省产能 0（修好或减座数就恢复）</div>';
+    }
+    return h;
+  }
+
+  function recipeText(recipe) {
+    var a = [], k;
+    for (k in recipe) a.push((AO.RES_SHORT[k] || k) + recipe[k]);
+    return a.join('+') || '无';
   }
 
   /* 「货运」栏：等级越高，调拨损耗越低、工期越短 */
@@ -4436,12 +6352,18 @@
     renderHappy(p);
     renderOfficial(p);
     renderFaithRow(p);        // 信仰（名 + 符号 + 国教角标 / 传教倒计时）
+    /* 安定 / 整合 / 安抚（A、B 两批）：和民心一样是"每回合都会变的数"，
+     * 所以挂在这里而不是 showInfo 那一处 —— 结算之后省卡开着也照样刷。 */
+    renderUnrestRows(p);
     renderResList(p);
     renderUniversalList(p);
     renderBldList(p);
     renderFreightList(p);
     renderMilList(p);          // 军备（兵营/军械坊/驯马场/铸炮厂/造船厂 + 本省驻军）
     renderFlow(p);
+    /* 四个建筑组收尾：摘要 / 红点 / 该自动展开的展开（纯读刚画出来的 DOM） */
+    renderGroups();
+    updateDetSum();
     /* 顶栏「维修」的红点跟着刷新（这个省的失修数刚变过）；
      * 面板开着也一起重画 —— 否则点「修」之后清单里那一行还赖着不走。 */
     if (typeof refreshRepBadge === 'function') refreshRepBadge();
@@ -4477,6 +6399,81 @@
   function hideWallRow() {
     var row = $('iWallRow');
     if (row) row.style.display = 'none';
+  }
+
+  /* ---------------- 省卡「安定 / 整合 / 安抚」三行（A、B 两批） ----------------
+   * 安定行永远显示（这一省稳不稳是基本信息）；整合行只有占领省才有；
+   * 安抚钮只在"未整合 或 不安 ≥ 40"时出现 —— 其余省份给它整行隐藏，
+   * 免得每张卡上都挂着一个永远按不动的钮。
+   *
+   * 迷雾遮蔽（seen / unknown）时三行一起收：不安与整合都是**真实数据**，
+   * 不该从一份旧情报里漏出来（和城防、驻军数同一条纪律）。 */
+  function renderUnrestRows(p) {
+    var U = AO.UNREST, I = AO.INTEG;
+    var rowU = $('kvUnrest'), elU = $('iUnrest');
+    if (!rowU || !elU || !p) return;
+    var u = unrestOf(p.id), v = Math.round(u.v);
+    rowU.style.display = '';
+    elU.className = v >= U.warnAt ? 'bad' : (v >= U.riotLine ? 'warn' : '');
+    elU.innerHTML = '<b>' + v + '</b>' +
+      '<span class="ubar"><i style="width:' + Math.round(AO.clamp(v, 0, 100)) + '%"></i></span>';
+    elU.title = unrestTitle(p.id);
+
+    /* 整合：只有占领省才有（OCCUPY + INTEG） */
+    var rowI = $('kvInteg'), elI = $('iInteg');
+    if (rowI && elI) {
+      var it = integOf(p.id);
+      if (!OCCUPY[p.id] || !it) {
+        rowI.style.display = 'none';
+        elI.innerHTML = '';
+        elI.title = '';
+      } else {
+        rowI.style.display = '';
+        elI.innerHTML = '<b>' + Math.round(it.v) + '</b>' +
+          '<span class="ubar"><i style="width:' + Math.round(AO.clamp(it.v, 0, 100)) + '%"></i></span>';
+        elI.title = integTitle(p.id);
+      }
+    }
+
+    /* 安抚钮 */
+    var rowP = $('kvPacify'), boxP = $('iPacifyBox');
+    if (rowP && boxP) {
+      var info = pacifyInfo(p.id);
+      if (!info.show) {
+        rowP.style.display = 'none';
+        boxP.innerHTML = '';
+      } else {
+        rowP.style.display = '';
+        var btn = doc.createElement('button');
+        btn.type = 'button';
+        btn.id = 'iPacify';
+        btn.textContent = '安抚';
+        btn.disabled = !info.ok;
+        btn.title = (info.ok ? '花 ' + I.pacify.cost + ' 金（省库 → 中央 → 同国各省）\n' : info.why + '\n') +
+          (info.occ
+            ? '未整合省：整合 +' + I.pacify.integ + '、不安 −' + I.pacify.unrest
+            : '不安 ≥' + I.pacify.at + ' 的省：不安 −' + I.pacify.unrestOnly) +
+          '\n冷却 ' + I.pacify.cd + ' 回合（金能买人心，但买不了连年）';
+        btn.addEventListener('click', function () {
+          var r = pacify(p.id, false);
+          toast(r.msg, r.ok ? 2600 : 2400);
+          if (r.ok) { renderUnrestRows(p); if (state.renderer) state.renderer.requestDraw(); }
+        });
+        boxP.innerHTML = '';
+        boxP.appendChild(btn);
+        var cost = doc.createElement('span');
+        cost.className = 'pcost';
+        cost.textContent = I.pacify.cost + ' 金';
+        boxP.appendChild(cost);
+      }
+    }
+  }
+  function hideUnrestRows() {
+    var ids = ['kvUnrest', 'kvInteg', 'kvPacify'];
+    for (var i = 0; i < ids.length; i++) {
+      var r = $(ids[i]);
+      if (r) r.style.display = 'none';
+    }
   }
 
   /* ---------------- 收支小结（省卡「信息」栏底部） ----------------
@@ -4546,6 +6543,21 @@
     if (F.d.smelt) parts.push('熔旧坊 +' + F.d.smelt + ' 铁');
     if (F.d.smeltGold) parts.push('熔旧坊耗金 −' + F.d.smeltGold + ' 金' +
       (F.d.smeltC ? '（其中中央垫 ' + F.d.smeltC + '）' : ''));
+    /* 淘金场（v18）：产金进省库、耗省库木材 */
+    if (F.d.wash) parts.push('淘金场 +' + F.d.wash + ' 金');
+    if (F.d.washWood) parts.push('淘金场耗木 −' + F.d.washWood + ' 木');
+    /* 省库上解（v18 / D）：省库 → 中央。单列一行 —— 不然玩家只会看到
+     * "省库金少了 17"，找不到是谁搬走的。 */
+    if (F.d.remit) parts.push('上解 −' + F.d.remit + ' 金（省库 → 中央）');
+    /* 兑换（v18 / B2）：以物易物，一进一出。d.xchg 里正数是"付出"、负数是"换回" */
+    if (F.d.xchg) {
+      var xs = [];
+      for (k in F.d.xchg) {
+        if (!F.d.xchg[k]) continue;
+        xs.push((F.d.xchg[k] > 0 ? '−' : '＋') + Math.abs(F.d.xchg[k]) + ' ' + (AO.RES_SHORT[k] || k));
+      }
+      if (xs.length) parts.push('兑换 ' + xs.join(' · '));
+    }
     if (F.d.salary) parts.push('官员俸禄 −' + F.d.salary + ' 金');
     /* 怨气 ≥90 的官会从省库伸手（v11）：这笔真的流出去了，所以单列一行 ——
      * 不然玩家只会看到"省库金莫名其妙少 1"，找不到原因。 */
@@ -4590,12 +6602,19 @@
    * 一次点击 = settleTurn() 把 1106 个省 × 7 种资源全部结算一遍。 */
   function updateTurnLabel() {
     var el = $('turnNo');
-    if (el) el.textContent = turnNo;
+    if (!el) return;
+    /* 王国历：一回合一个月、一年 12 回合。玩家关心的是"过了几年"，
+     * 不是"第几回合" —— 回合数挪进 title，那是调数值和看 bench 时才要的坐标。
+     * 必须带「月」：只写年的话，点十二次按钮那个字都不动，像卡住。 */
+    el.textContent = AO.calLabel(turnNo);
+    el.title = '第 ' + turnNo + ' 回合 · ' + AO.calLabel(turnNo) +
+      '\n每一回合 = 一个月、一年 12 回合';
   }
 
   function nextTurn() {
     /* 事件弹窗开着 = 这一回合的账还没处置完，不许往下走（回合制不抢戏）。
-     * 三个入口（右上角 / 科技树 / 治理面板）和空格键都汇到这里，所以只守这一处。 */
+     * 六个入口（右上角 / 科技树 / 治理 / 纪要 / 维修 / 编年史）和空格键都汇到这里，
+     * 所以只守这一处 —— 每块常驻面板都自带一颗钮，谁也别想绕过去。 */
     if (AO.evtPending && AO.evtPending()) { toast('先把这件事处置了', 1800); return; }
     /* 玩家在回合中的操作（楼盖好了 / 科技完成 / 宣战）也会往 NOTES 里推。
      * 清空之前先抄进年表，否则这些话跟着 NOTES 一起没了。 */
@@ -4625,7 +6644,13 @@
     /* 维修面板开着就跟着刷（失修清单/拨款额度每回合都变），徽标也重算一次 */
     if (typeof refreshRepBadge === 'function') refreshRepBadge();
     if (REPU && REPU.open) renderRepPanel();
+    /* 平衡分析（20-balance.js）：**必须排在 settleTurn 之后** ——
+     * 它读的是这一回合刚记完的两本流水；排前面采到的会是上一回合的账。 */
+    if (AO.balStep) AO.balStep();
     flushNotes();
+    /* 纪要卡开着就跟着刷（这一回合新攒的提示 / 邸报都在里面） */
+    var np = $('notesPanel');
+    if (np && np.classList.contains('on')) renderNotes();
   }
 
   /* 把这一回合攒下的提示报出来：优先当前看得到的那个国家 / 那个省，
@@ -4662,21 +6687,262 @@
     }
   }
 
-  /* 人口行：数值 + 涨跌箭头；悬停给密度、口粮、上回合涨跌 */
+  /* =============================================================
+   * 界面收敛（v16）：把"偶尔要看"的东西收进抽屉
+   * -------------------------------------------------------------
+   * 三条纪律（都是"为什么"，不是"是什么"）：
+   *
+   *   ① **只搬容器**。所有 id 一个不删不改名，renderXXX 照旧往原 id 写 ——
+   *      收纳是版面的手术，不是数据的手术。任何一处 render 都不必知道抽屉存在。
+   *   ② **状态记在 localStorage**，四个键集中列在 LS 里，读写一律 try/catch：
+   *      file:// 下有些浏览器直接抛（隐私模式），读失败就当没记过。
+   *   ③ **警告优先于整洁**。迷雾快照、迷雾黄条这类"情报有出入"的提示
+   *      永远在最上面，任何折叠都吞不掉它们（CSS 里另有 !important 兜底）。
+   * ============================================================= */
+  var LS = {
+    detail: 'sj.cardDetail',        // 省卡「测绘详情」是否展开
+    grp: 'sj.grp.',                 // + 组名：bld / gen / mil / frt
+    countryTab: 'sj.countryTab',    // 国家卡页签：ov / gov / dip
+    notesTab: 'sj.notesTab'         // 纪要过滤：all / mine / world
+  };
+  function lsGet(k, dft) {
+    try {
+      var v = window.localStorage.getItem(k);
+      return v === null ? dft : v;
+    } catch (e) { return dft; }
+  }
+  function lsSet(k, v) {
+    try { window.localStorage.setItem(k, v); } catch (e) { /* 记不住就算了，不影响这一局 */ }
+  }
+
+  /* ---------------- ① 省卡：概要 / 测绘详情 ---------------- */
+  function detailOn() { return lsGet(LS.detail, '0') === '1'; }
+  function applyDetail() {
+    var info = $('info');
+    if (info) info.classList.toggle('det-open', detailOn());
+    var car = $('detBar') ? $('detBar').querySelector('.dcar') : null;
+    if (car) car.textContent = detailOn() ? '▾' : '▸';
+  }
+  function toggleDetail() {
+    lsSet(LS.detail, detailOn() ? '0' : '1');
+    applyDetail();
+  }
+  /* 折叠时也给一句"里面有什么"：地形 + 邻接数够回答"值得展开吗" */
+  function updateDetSum() {
+    var el = $('detSum');
+    if (!el) return;
+    var t = $('iTerrain') ? $('iTerrain').textContent : '';
+    var d = $('iDeg') ? $('iDeg').textContent : '';
+    el.textContent = t ? ('· ' + t + (d ? ' · 邻接 ' + d : '')) : '';
+  }
+
+  /* ---------------- ② 建筑：四组各自折叠 ----------------
+   * 默认 建筑（资源）+ 通用 展开 —— 这两组每回合都可能动；
+   * 军备 + 货运 收起 —— 它们在，但不是每次都要看。
+   * 组头红点 / 自动展开只认四件事：在建、维护欠费、可改建（熔旧坊）、能征兵。
+   * 「能征兵」只对军备组生效：别的组里的 .upg 是「升 Lv2」，不是征。 */
+  var GRP_KEYS = ['gen', 'bld', 'mil', 'frt'];
+  var GRP_DEF = { gen: 1, bld: 1, mil: 0, frt: 0 };
+  var GRP_DOM = { gen: 'iSchoolList', bld: 'iBldList', mil: 'iMilList', frt: 'iFreightList' };
+  var GRP_SUM = { gen: 'gsumGen', bld: 'gsumBld', mil: 'gsumMil', frt: 'gsumFrt' };
+  /* 上一次报警时这一组的"形态"。同形态不再弹开 —— 否则每回合重画都会把
+   * 玩家刚收起的那一组顶回来（"同事件不反复弹开"）。 */
+  var GRPSIG = { gen: '', bld: '', mil: '', frt: '' };
+
+  function grpOpen(k) {
+    var v = lsGet(LS.grp + k, null);
+    return v === null ? !!GRP_DEF[k] : v === '1';
+  }
+  function grpHead(k) {
+    return document.querySelector('#info .gsec[data-grp="' + k + '"]');
+  }
+  function applyGroups() {
+    for (var i = 0; i < GRP_KEYS.length; i++) {
+      var k = GRP_KEYS[i], on = grpOpen(k);
+      var sec = grpHead(k), box = $(GRP_DOM[k]);
+      var car = sec ? sec.querySelector('.gcar') : null;
+      if (sec) sec.classList.toggle('grp-open', on);
+      if (car) car.textContent = on ? '▾' : '▸';
+      if (box) box.classList.toggle('off', !on);
+    }
+  }
+  /* 读刚画出来的 DOM 数"要在意的"。纯读界面：不碰结算，也不缓存任何世界状态。
+   * 世界被换掉（重新生成 / 读档）时 DOM 自然变了，这里也就自然跟着变。 */
+  function grpProbe(k) {
+    var box = $(GRP_DOM[k]);
+    if (!box) return null;
+    var site = box.querySelectorAll('.site, .site-row').length;
+    var halt = box.querySelectorAll('.dot.halt').length;
+    var smelt = 0, rec = 0, i, arr;
+    arr = box.querySelectorAll('button.add.smelt');
+    for (i = 0; i < arr.length; i++) if (!arr[i].disabled) smelt++;
+    if (k === 'mil') {
+      arr = box.querySelectorAll('button.upg');
+      for (i = 0; i < arr.length; i++) if (!arr[i].disabled) rec++;
+    }
+    return {
+      n: box.querySelectorAll('.rr.bld, .rr.army').length,
+      site: site, halt: halt, smelt: smelt, rec: rec,
+      hot: (site + halt + smelt + rec) > 0,
+      sig: site + '|' + halt + '|' + smelt + '|' + rec
+    };
+  }
+  /* 每次重画建筑栏之后调一次：算摘要、点红点、该弹开的弹开 */
+  function renderGroups() {
+    for (var i = 0; i < GRP_KEYS.length; i++) {
+      var k = GRP_KEYS[i], pr = grpProbe(k);
+      if (!pr) continue;
+      var sec = grpHead(k), sum = $(GRP_SUM[k]);
+      var bits = [pr.n + ' 行'];
+      if (pr.site) bits.push(pr.site + ' 在建');
+      if (pr.halt) bits.push(pr.halt + ' 欠费');
+      if (sum) sum.textContent = ' · ' + bits.join(' · ');
+      if (sec) sec.classList.toggle('grp-new', pr.hot);
+      if (pr.hot && pr.sig !== GRPSIG[k]) {
+        lsSet(LS.grp + k, '1');     // 新事 → 本回合替你展开（玩家随后可以再收起）
+        GRPSIG[k] = pr.sig;
+      } else if (!pr.hot) {
+        GRPSIG[k] = '';             // 事情过去了 → 下次再来算新事
+      }
+    }
+    applyGroups();
+  }
+
+  /* ---------------- ③ 国家卡：概览 / 内政 / 外交 ---------------- */
+  function countryTab() {
+    var t = lsGet(LS.countryTab, 'ov');
+    return (t === 'gov' || t === 'dip') ? t : 'ov';
+  }
+  function applyCountryTab() {
+    var box = $('country');
+    if (!box) return;
+    var t = countryTab();
+    box.classList.toggle('ctab-ov', t === 'ov');
+    box.classList.toggle('ctab-gov', t === 'gov');
+    box.classList.toggle('ctab-dip', t === 'dip');
+    var tabs = $('cTabs') ? $('cTabs').querySelectorAll('.itab') : [];
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle('on', tabs[i].getAttribute('data-ctab') === t);
+    }
+  }
+
+  /* ---------------- ④ 顶栏：☰ 菜单 ---------------- */
+  function openMenu(on) {
+    var pop = $('menuPop'), btn = $('menuBtn');
+    if (!pop) return;
+    if (on === undefined) on = !pop.classList.contains('on');
+    pop.classList.toggle('on', !!on);
+    if (btn) {
+      btn.classList.toggle('on', !!on);
+      btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    }
+  }
+
+  /* ---------------- ⑤ 纪要：三档过滤 ----------------
+   * 过滤只影响**显示循环**：不清数据、不改 NOTES，也不动提示条那一行的选法。
+   * 世界新闻靠 src（flushWorldNews / deliverNews 推的带 'world'）；
+   * 老档 / 老调用点没有 src，一律按 'mine' 读 —— 结构向后兼容。
+   * 另加一条兜底：🌍 开头的都算世界新闻（v15 起邸报就带这个前缀）。 */
+  function notesFilter() {
+    var f = lsGet(LS.notesTab, 'all');
+    return (f === 'mine' || f === 'world') ? f : 'all';
+  }
+  function noteIsWorld(n) {
+    return !!(n && (n.src === 'world' || /^🌍/.test(n.text || '')));
+  }
+  function renderNotes() {
+    var box = $('npList');
+    if (!box) return;
+    var f = notesFilter(), list = [], i, n, world = 0;
+    for (i = 0; i < NOTES.length; i++) {
+      n = NOTES[i];
+      if (!n || !n.text) continue;
+      var w = noteIsWorld(n);
+      if (w) world++;
+      if (f === 'world' && !w) continue;
+      if (f === 'mine' && w) continue;
+      list.push(n);
+    }
+    var cnt = $('npN');
+    if (cnt) cnt.textContent = list.length + ' / ' + NOTES.length + ' 条 · 世界 ' + world;
+    var tabs = $('npTabs') ? $('npTabs').querySelectorAll('button[data-nf]') : [];
+    for (i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle('on', tabs[i].getAttribute('data-nf') === f);
+    }
+    if (!list.length) {
+      box.innerHTML = '<div class="nempty">' + (NOTES.length ? '这一档没有记录' : '这一回合还没有纪事') + '</div>';
+      return;
+    }
+    var h = '';
+    /* 新的在上：NOTES 是"越攒越后"，读邸报却是"先看最新的" */
+    for (i = list.length - 1; i >= 0; i--) {
+      n = list[i];
+      var cls = 'nrow';
+      if (n.rumour) cls += ' rumour';
+      else if (n.late) cls += ' late';
+      else if (n.cls) cls += ' ' + n.cls;
+      h += '<div class="' + cls + '">' + escHtml(n.text) + '</div>';
+    }
+    box.innerHTML = h;
+  }
+  function openNotes(on) {
+    var box = $('notesPanel');
+    if (!box) return;
+    if (on === undefined) on = !box.classList.contains('on');
+    box.classList.toggle('on', !!on);
+    if (on) { narrowSingleSurface('notes'); renderNotes(); }
+  }
+
+  /* 承载力的悬停明细：地形 + 逐项建筑（只列真的有的）+ 科技倍率。
+   * 只列非零项 —— 七项全列（"农场 Lv2×0 +0"之类）会把明细撑成一堵墙，
+   * 玩家要回答的是"我这 40 万是怎么来的"，不是看一张空表。 */
+  function capTitle(p, pc) {
+    if (!pc) return '';
+    var P = AO.POPCAP, t = [];
+    t.push('地形「' + ((AO.TERRAIN_CN || {})[p.terrain] || p.terrain) + '」' + pc.base +
+      (pc.capMul !== 1 ? ' ×' + pc.capMul + '（首都）' : ''));
+    if (pc.farm1) t.push('农场 Lv1×' + pc.farm1 + ' +' + pc.farm1 * P.add.farm1);
+    if (pc.farm2) t.push('农场 Lv2×' + pc.farm2 + ' +' + pc.farm2 * P.add.farm2);
+    if (pc.fishN) t.push('渔港×' + pc.fishN + ' +' + pc.fish);
+    if (pc.granaryN) t.push('粮仓×' + pc.granaryN + ' +' + pc.granary);
+    if (pc.horseN) t.push('牧场×' + pc.horseN + ' +' + pc.horse);
+    if (pc.plowMul !== 1) t.push('铁犁深耕 ×' + pc.plowMul);
+    if (pc.areaMul && pc.areaMul !== 1) t.push('面积 ×' + pc.areaMul.toFixed(2));
+    return t.join(' ＋ ');
+  }
+
+  /* 人口行：数值 / 上限 + 涨跌箭头；悬停给密度、承载力明细、口粮、上回合涨跌 */
   function renderPop(p) {
     var el = $('iPop');
     if (!el) return;
     var s = POP[p.id] || { v: p.population || 0, rate: 0, need: 0 };
     var ppl = Math.round(s.v);
+    /* 承载力：现算（不进 POP 表），悬停要拆明细所以取 parts 而不是 capOf */
+    var pc = AO.POPCAP ? AO.POPCAP.parts(p.terrain, popCapCtx(p.id)) : null;
+    var capv = pc ? Math.round(pc.cap) : 0;
+    var load = capv > 0 ? ppl / capv : 0;
+    var over = capv > 0 && ppl > capv;
+    var atCap = capv > 0 && ppl >= capv;
     var arrow = s.rate > 0 ? '<i class="up">↑</i>' : s.rate < 0 ? '<i class="down">↓</i>' : '';
-    el.innerHTML = AO.formatPop(ppl) + arrow;
+    /* 摸顶写「人丁兴旺」（绿）、超限写「人满为患」（红）——
+     * 两句话都是**状态**，不是箭头：到顶以后箭头永远该是"不动"，
+     * 玩家却更想知道"为什么不涨了"，所以用一枚小签把原因说出来。 */
+    el.innerHTML = AO.formatPop(ppl) +
+      (capv > 0 ? ' <em class="pcap">/ ' + AO.formatPop(capv) + '</em>' : '') +
+      (atCap ? '<span class="pcapt ' + (over ? 'over' : 'full') + '">' +
+        (over ? '人满为患' : '人丁兴旺') + '</span>' : arrow);
     var w = state.world;
     var cty = w ? w.countries[p.owner - 1] : null;
     var km2 = cty && cty.kmPerPx ? p.area * cty.kmPerPx : 0;
     var rateTxt = s.rate > 0 ? '+' + (s.rate * 100).toFixed(1) + '%/回合'
-      : s.rate < 0 ? '−1.5%/回合（闹饥荒）' : '人口稳定';
+      : s.rate < 0
+        ? (over ? '−' + Math.round(AO.POPCAP.overRate * 100) + '%/回合（人满为患，人往外走）'
+                : '−1.5%/回合（闹饥荒）')
+        : (atCap ? '人丁兴旺（已到上限，不再涨）' : '人口稳定');
     el.title = ppl.toLocaleString() + ' 人' +
       (km2 ? '　密度 ' + Math.round(ppl / km2) + ' 人/km²' : '') +
+      (pc ? '\n承载力 ' + AO.formatPop(capv) + '（负载 ' + Math.round(load * 100) + '%）＝ ' +
+        capTitle(p, pc) + '（单位：万）' : '') +
       '\n口粮 ' + (s.need || 0) + ' 单位/回合（每 200 万人 1 单位，先粮食、再渔获）' +
       '\n本回合产出 ' + Math.round(s.prod || 0) + ' 单位 → 富余 ' +
       Math.round((s.prod || 0) - (s.need || 0)) + ' → ' + rateTxt +
@@ -4685,7 +6951,10 @@
           Math.round((HAPPY[p.id] ? HAPPY[p.id].v : AO.GOV.happyStart)) +
           (s.happyMul < 1 ? ' ≤ ' + AO.GOV.happyLow + '，增速打折' : ' ≥ ' + AO.GOV.happyHigh + '，增速加成') + '）'
         : '') +
-      '\n想让人口涨快些，就多盖农场 / 渔港。';
+      (atCap
+        ? '\n地养满了：想再多人，只能先扩承载力 —— 农场（+10/座，Lv2 +20）、渔港 +8、粮仓 +6、牧场 +4，' +
+          '或者研「铁犁深耕」（全境 ×' + AO.POPCAP.plowMul + '）。'
+        : '\n想让人口涨快些，就多盖农场 / 渔港。');
   }
 
   /* 民心一行：数字 + 悬停逐项 drivers（明细由 happyTitle 统一生成） */
@@ -4818,9 +7087,12 @@
     $('infoEmpty').style.display = '';
     $('infoEmpty').innerHTML = '未选中省份';
     $('infoBody').style.display = 'none';
-    state.infoTab = null;
+    state.infoId = 0;
+    /* 页签不清（v17）：手上正开着「建筑」，一不小心点到海面，再点回陆地
+     * 应该还在「建筑」—— 这是玩家的习惯，不是某一块地的属性。 */
     applyInfoTab();
     hideWallRow();              // 城防行跟着省卡一起收起（别把上一省的墙留在版面上）
+    hideUnrestRows();           // 安定/整合/安抚三行同理
     if (state.renderer) state.renderer.selected = 0;
   }
 
@@ -4834,7 +7106,9 @@
       state.infoId = id;
       state.openKey = null;
       state.selKey = null;
-      state.infoTab = null;          // 换省 → 回到"只有两个词"的初始态
+      /* 页签**不重置**（v17）：正开着「建筑」去点另一块地，就该直接给我看那个省的建筑。
+       * 换一个省不是"退出省卡" —— 以前这里把 infoTab 清成 null，点一下就缩回两个词，
+       * 想看邻省的同一种建筑得重新点两次。 */
       bldMsg('');
     }
     $('info').classList.add('on');
@@ -4846,7 +7120,13 @@
     if (vs !== VIS_REAL) { showFogInfo(p); return; }
     $('infoEmpty').style.display = 'none';
     $('infoBody').style.display = '';
+    /* 迷雾快照是 seen 态的产物：回到实时态就得把上一省的快照擦掉，
+     * 否则它会留在概要区顶部，看着像"这个省也是旧情报"。 */
+    var snap0 = $('iFogSnap');
+    if (snap0) snap0.innerHTML = '';
     applyInfoTab();
+    applyDetail();             // 测绘详情：收起 / 展开（跨刷新记在 localStorage）
+    applyGroups();             // 建筑四组：各开各的
     $('iSw').style.background = p.ownerColor;
     $('iName').textContent = p.name;
     $('iNameEn').textContent = p.name_en;
@@ -5019,11 +7299,21 @@
   AO.techTreeOpen = function () { return TT.open; };
 
   /* 四态：done 已完成 / cur 研究中 / lock 锁定 / avail 可研 */
+  /* 前置满足了吗：免费的根（皮革工艺）恒为真 —— 它不进 done 表，
+   * 但它是"开局人人有"，所以挂在它下面的节点不该锁着。 */
+  function reqOk(t, R) {
+    if (!t.req) return true;
+    var pa = AO.TECH_BY_KEY[t.req];
+    if (pa && pa.free) return true;
+    return !!R.done[t.req];
+  }
   function techState(t, R) {
+    /* 免费的根（皮革工艺）：树上画成**已点亮**，不进研究队列 —— 开局人人有 */
+    if (t.free) return 'done';
     if (R.done[t.key]) return 'done';
     if (R.cur && R.cur.key === t.key) return 'cur';
     if (!R.unlocked) return 'lock';
-    if (t.req && !R.done[t.req]) return 'lock';
+    if (!reqOk(t, R)) return 'lock';
     return 'avail';
   }
 
@@ -5109,17 +7399,38 @@
       '<text x="22" y="' + fy + '" text-anchor="middle" font-size="' + fs + '" font-weight="700" fill="#fdfbf6" ' +
       'font-family="system-ui,-apple-system,sans-serif">' + txt + '</text></svg>';
   }
-  /* 军事科技的一句话效果（节点副标题、完成提示共用一份） */
+  /* 一条线的"一炉要几点产能"。v19 把 MILL.pt 改成了 MILL.work（工作量语义没变：
+   * 攒够这么多点出一单），文案这边漏改，读到 undefined['catapult'] 会当场炸 ——
+   * 任何一国研完军事科技就崩在 settleResearch 里。只此一处，两个读点都走它。 */
+  function millPtOf(line) {
+    var M = AO.MILL;
+    var v = (M.work && M.work[line]) || (M.pt && M.pt[line]);
+    return v || 1;
+  }
+  /* 军事科技的一句话效果（节点副标题、完成提示共用一份）。
+   * v17 起措辞改成**产线语汇**：科技解锁的是"这一条产线能不能开"，
+   * 不是"这一坊产什么" —— 加点（+1/座）、×1.5、品质上移都在别的科技上。 */
   function milEffectText(key) {
     var it = AO.MIL_ITEM[key];
     if (!it) return '解锁新装备';
-    var rec = [], k;
-    for (k in it.recipe) rec.push((AO.RES_SHORT[k] || k) + it.recipe[k]);
-    var kindCn = it.kind === 'gun' ? '铸炮厂' : it.kind === 'ship' ? '造船厂' : '军械坊';
-    return '解锁「' + kindCn + ' · ' + it.cn + '」订单：每回合 ' + rec.join(' + ') + ' → ' +
-      it.out + ' 件 · 兵种「' + (it.unit || it.cn) + '」战力 ×' + it.pow +
-      (it.siege ? ' 攻城 ' + it.siege : '') + (it.range ? ' 射程 ' + it.range : '');
+    /* v19：炮线并进军械坊（铸炮厂没了），所以炮/舰两条都写"哪一池的第几条线" */
+    var kindCn = it.kind === 'gun' ? '军械坊（炮线）' : it.kind === 'ship' ? '造船厂' : '军械坊';
+    var pt = millPtOf(it.key);
+    var per = it.kind === 'gun' ? '1 门' : it.kind === 'ship' ? '1 艘' : ('1 队份 ×' + (AO.MILL.batch.blade || 1000));
+    var s = '解锁' + kindCn + '产线「' + it.cn + '」：' + pt + ' 点产能 → ' + per +
+      (it.siege ? ' · 攻城 ' + it.siege : '') + (it.range ? ' · 射程 ' + it.range : '') +
+      (it.pow ? ' · 战力 ×' + it.pow : '');
+    /* 时代节点另外推一份装备材质（拍板④：皮革→gw 的节点要写"同时解锁 XX 材质装备"）。
+     * 材质挂在**科技**上，所以这里顺着装备反查它那条科技。 */
+    var t = it.tech ? AO.TECH_BY_KEY[it.tech] : null;
+    if (t && t.mat) {
+      var mat = null, i;
+      for (i = 0; i < AO.EQUIP.mat.length; i++) if (AO.EQUIP.mat[i].key === t.mat) mat = AO.EQUIP.mat[i];
+      if (mat) s += '；同时解锁「' + mat.cn + '」材质装备（每槽 ' + Math.round(mat.base * 100) + '%）';
+    }
+    return s;
   }
+  AO.milEffectText = milEffectText;
   AO.milBadge = milBadge;
 
   /* 节点图标：资源科技用**该建筑 Lv2 的图**（科技是"升级预告"，
@@ -5173,6 +7484,13 @@
     var foot = '', extra = '', badge = '';
     var canSprint = st === 'cur' && TT.canSprint;
     if (qi >= 0) badge = '<span class="qbadge" title="队列第 ' + (qi + 1) + ' 位（点一下取消）">' + (qi + 1) + '</span>';
+    /* 一句话效果：军工科技写在 desc 上（它们没有 fx、也没有 mil 装备），
+     * 全局科技走 fxDesc，军事科技走 milEffectText —— 三套语汇不能混。 */
+    var sub = t.desc ? t.desc
+      : t.fx ? fxDesc(t)
+        : t.mil ? ((AO.MIL_ITEM[t.mil] || {}).cn + (t.mat ? ' · 材质「' + matCn(t.mat) + '」' :
+          ' · 战力 ×' + ((AO.MIL_ITEM[t.mil] || {}).pow || 1)))
+          : (d ? d.build : t.for) + ' 可升 Lv2';
     if (st === 'lock') {
       foot = R.unlocked ? '需先研「' + (parent ? parent.cn : t.req) + '」' : '建学校开始科研';
     } else if (st === 'cur') {
@@ -5182,8 +7500,8 @@
         (canSprint ? '<button class="ttsprint" type="button" title="冲刺：' +
           costText(AO.BUILDER.sprintCost) + '（中央国库）砍 1 回合">＋</button>' : '');
     } else if (st === 'done') {
-      foot = '研成 · ' + (t.fx ? fxDesc(t) : t.mil ? milEffectText(t.mil).replace(/^解锁/, '') :
-        (d ? d.build : t.for) + ' Lv2 开放');
+      foot = '研成 · ' + (t.desc ? shortDesc(t.desc) : t.fx ? fxDesc(t)
+        : t.mil ? milEffectText(t.mil).replace(/^解锁/, '') : (d ? d.build : t.for) + ' Lv2 开放');
       extra = '<span class="seal">✓</span>';
     } else {
       var lack = [], k;
@@ -5194,9 +7512,6 @@
       if (lack.length) foot = '<em class="lack">' + lack[0] + '</em>';
       else foot = '<em class="go">' + (qi >= 0 ? '已在队列 · 点击取消' : '可研 · 点击入队') + '</em>';
     }
-    var sub = t.fx ? fxDesc(t)
-      : t.mil ? ((AO.MIL_ITEM[t.mil] || {}).cn + ' · 战力 ×' + ((AO.MIL_ITEM[t.mil] || {}).pow || 1))
-        : (d ? d.build : t.for) + ' 可升 Lv2';
     var turnsNow = effectiveTurns(0, TT.owner, t.turns);
     return '<div class="ttnode ' + st + (qi >= 0 ? ' queued' : '') + '" data-tech="' + t.key + '"' +
       ' style="left:' + p.x + 'px;top:' + p.y + 'px"' +
@@ -5208,6 +7523,18 @@
       '<div class="cost">' + t.pts + ' 科研点 · ' + costText(t.cost) + ' · ' + turnsNow + ' 回合</div>' +
       '<div class="ft">' + foot + '</div>' + extra + badge +
       '</div>';
+  }
+  /* 材质键 → 中文（科技节点副标题用） */
+  function matCn(key) {
+    for (var i = 0; i < AO.EQUIP.mat.length; i++) if (AO.EQUIP.mat[i].key === key) return AO.EQUIP.mat[i].cn;
+    return key;
+  }
+  /* 节点的 done 脚注只放得下一行：desc 里取前 12 个字，剩下的在 title 里 */
+  function shortDesc(s) {
+    var t = String(s || '');
+    var i = t.search(/[（(]/);
+    if (i > 6) t = t.slice(0, i);
+    return t.length > 22 ? t.slice(0, 22) + '…' : t;
   }
 
   /* 顶栏：国旗 + 国名·编号 / 科研条 / 正在研究（名 + 剩余回合 + 进度条） */
@@ -5369,6 +7696,8 @@
       return;
     }
     var key = nodeEl.getAttribute('data-tech');
+    var t0 = AO.TECH_BY_KEY[key];
+    if (t0 && t0.free) return;                 // 免费的根：点它没有任何事发生
     var R = researchOf(TT.owner);
     if (!R.unlocked) {
       return bldMsg('建学校开始科研：每座每回合 +' + AO.SCHOOL.per + ' 点，攒满 ' +
@@ -5493,7 +7822,7 @@
    *   民心 读 HAPPY[pid].v        省库 读 SIM[pid].gold.stock
    * 两边各存一份迟早会不一致，而这类不一致玩家一眼就能看出来。
    * ============================================================= */
-  var GP = { open: false, owner: 0, sel: 0, tab: 'gov', selArmy: 0 };
+  var GP = { open: false, owner: 0, sel: 0, tab: 'gov', selArmy: 0, selArt: 0 };
   /* 给渲染器看的：治理面板开着时地图也不吃滚轮（和科技树同一个开关位） */
   AO.govOpen = function () { return GP.open; };
 
@@ -5630,6 +7959,103 @@
     box.innerHTML = h;
   }
 
+  /* ---------------- 工匠（v17）：候选池 + 派驻 ----------------
+   * 交互照官员派遣抄：先在池里点一位选中（GP.selArt），再点省行的「派」。
+   * 为什么不用下拉框：一屏十几个有坊的省，下拉里选"第 37 号省"没人认得；
+   * 而"点人 → 点省"和官员/将领是同一个手感，玩家不用学第三遍。
+   * 一省一匠、一匠一省：派到已有匠人的省会顶替（旧的回池，免费）。 */
+  function renderArtSec(cid) {
+    var box = $('gpArtPool');
+    if (!box) return;
+    var A = artisanPoolOf(cid), mine = canAct(cid);
+    var cost = AO.ARTISAN.examCost || AO.GOV.examCost;
+    var T = talentOf(cid);
+    var postN = 0, pk;
+    for (pk in A.post) if (A.post[pk]) postN++;
+    var nEl = $('gpArtN');
+    if (nEl) nEl.textContent = '· 驻场 ' + postN + ' 位 / 待命 ' + A.pool.length + ' 位';
+
+    var ev = $('gpArtExam');
+    if (ev) {
+      ev.disabled = T.pts < cost || !mine;
+      ev.title = !mine ? lockTitle()
+        : T.pts < cost ? ('人才点不够：还差 ' + fmtPts(cost - T.pts) + ' 点')
+          : ('花 ' + cost + ' 点抽一位匠人（学徒 50 / 巧手 30 / 名师 15 / 宗师 5）。' +
+            '有匠人驻场，这个省的装备三线（盔/甲/靴）才开得起来');
+      lockBtn(ev, cid);
+    }
+
+    if (!A.pool.length) {
+      box.innerHTML = '<div class="pempty">没有待命的匠人 —— ' +
+        (T.pts >= cost ? '点「开工科」抽一位。' : '攒够 ' + cost + ' 点人才点后点「开工科」抽一位。') +
+        '<br>匠人是**装备线**的钥匙：盔 / 甲 / 靴 只在有匠人驻场的省打得出来。</div>';
+    } else {
+      var h = '';
+      for (var i = 0; i < A.pool.length; i++) {
+        var a = A.pool[i], L = artisanLv(a);
+        h += '<div class="ocard rar-' + (a.lv >= 2 ? 'gold' : 'plain') + (GP.selArt === a.id ? ' sel' : '') +
+          '" data-aid2="' + a.id + '" title="' + escHtml(L.cn + '：' + L.desc +
+            '\n俸禄 ' + L.pay + ' 金/回合（省库发）\n点一下选中，再点下面省行的「派」驻场') + '">' +
+          '<span class="av ' + (a.lv >= 2 ? 'gold' : 'plain') + '">' + escHtml(a.name.charAt(0)) + '</span>' +
+          '<div class="om"><b>' + escHtml(a.name) + '</b>' +
+          '<span class="ot ' + (a.lv >= 2 ? 'gold' : 'plain') + '">' + L.cn + '</span>' +
+          '<span class="od">' + escHtml(L.desc) + '</span></div></div>';
+      }
+      box.innerHTML = h;
+    }
+
+    /* 省行：只列"有坊"的省（没坊的省派了也没活干） */
+    var tab = $('gpArtTable');
+    if (!tab) return;
+    var c = coOf(cid), rows = [], j;
+    if (c) {
+      for (j = 0; j < c.provinces.length; j++) {
+        var p = pOf(c.provinces[j]);
+        if (!p) continue;
+        if (!artisanSpot(p.id)) continue;
+        rows.push(p);
+      }
+    }
+    /* 有匠人的排前面（要撤/换的时候找得快），其余按人口 */
+    rows.sort(function (x, y) {
+      var ax = A.post[x.id] ? 1 : 0, ay = A.post[y.id] ? 1 : 0;
+      if (ax !== ay) return ay - ax;
+      return ((POP[y.id] && POP[y.id].v) || 0) - ((POP[x.id] && POP[x.id].v) || 0);
+    });
+    if (!rows.length) {
+      tab.innerHTML = '<div class="pempty">本国还没有军械坊 / 铸炮厂 / 造船厂 —— ' +
+        '匠人得有活干的地方（先盖一座坊，再派人）。</div>';
+      return;
+    }
+    var hh = '<div class="prow head art"><span class="an">省名</span><span class="aw">有坊</span>' +
+      '<span class="aa">驻场匠人</span><span class="ax">派遣</span></div>';
+    for (j = 0; j < rows.length; j++) {
+      var rp = rows[j], ar = A.post[rp.id], sp = artisanSpot(rp.id);
+      var shopCn = (AO.FACTORY[sp] || {}).cn || '—';
+      hh += '<div class="prow art" data-pid="' + rp.id + '">' +
+        '<span class="an">' + escHtml(rp.name) + '</span>' +
+        '<span class="aw">' + escHtml(shopCn) + '</span>' +
+        (ar
+          ? '<span class="aa has" title="' + escHtml(artisanLv(ar).cn + '：' + artisanLv(ar).desc +
+            '\n俸禄 ' + artisanLv(ar).pay + ' 金/回合') + '">' + escHtml(ar.name) +
+            '<em class="otag ' + (ar.lv >= 2 ? 'gold' : 'plain') + '">' + artisanLv(ar).cn + '</em></span>'
+          : '<span class="aa none">空缺</span>') +
+        '<span class="ax">' +
+        (ar ? '<button type="button" class="pgo out" data-art="out" data-pid="' + rp.id +
+          '" title="撤回候选池（免费，随时可换）">撤</button>'
+          : '<button type="button" class="pgo' + (GP.selArt ? ' ready' : '') + '" data-art="in" data-pid="' + rp.id +
+            '"' + (GP.selArt ? '' : ' disabled') + ' title="' +
+            (GP.selArt ? '把选中的匠人派驻这一省（三坊产能按他的等级加成）' : '先在左边候选池里选一位匠人') +
+            '">派</button>') +
+        '</div>';
+    }
+    tab.innerHTML = hh;
+    if (!mine) {
+      var bs = tab.querySelectorAll('button.pgo');
+      for (var bi = 0; bi < bs.length; bi++) lockBtn(bs[bi], cid);
+    }
+  }
+
   /* 省行的「传教」钮（B3）。三个条件全由 16-events 的 canMission 判：
    * 仅玩家国 / 政策=强制 / 省信仰≠国教；已在传教 → 变成「传教 N」（再点 = 撤资）。
    * 不可用时置灰但**不隐藏** —— 隐藏了玩家会以为这一版根本没有传教。 */
@@ -5708,7 +8134,7 @@
 
   function renderGovPanel() {
     if (!GP.open || !state.world) return;
-    var w = state.world, n = w.countries.length;
+    var w = state.world;
     var cid = GP.owner || 1;
     var c = w.countries[cid - 1];
     if (!c) { closeGovPanel(); return; }
@@ -5717,7 +8143,6 @@
     $('gpFlag').style.background = c.color;
     $('gpName').textContent = c.name;
     $('gpNameEn').textContent = c.name_en + ' · #' + c.id;
-    $('gpOwner').textContent = '第 ' + c.id + ' / ' + n + ' 国';
 
     /* 两个页签：治理（钱与人）/ 军务（兵与铁）。
      * 页签只切类名，DOM 不动 —— 和省份卡的「信息 / 建筑」同一个套路。 */
@@ -5820,6 +8245,7 @@
     lockBtn(ex, cid);
 
     renderGovPool(cid);
+    renderArtSec(cid);              // 工匠（v17）：候选池 + 派驻（装备线的钥匙）
     renderCabinet(c);               // 内阁（v12）：拜相 / 罢相 / 四项权限
     renderIntelSection(c);          // 情报署（v6）：预算三档 + 已知国家 + 定向探测
     renderGovRows(c);
@@ -5869,15 +8295,6 @@
     doc.body.classList.remove('gov-open');
   }
 
-  function govStep(d) {
-    var n = state.world ? state.world.countries.length : 0;
-    if (!n) return;
-    GP.owner = ((GP.owner || 1) - 1 + d + n) % n + 1;
-    GP.sel = 0;
-    govMsg('');
-    renderGovPanel();
-  }
-
   /* 税率切换：**即时生效**，下一个回合的税就按新档收。
    * 民心不立刻跳（它是每回合 lerp 的），所以切到"横征暴敛"的当回合
    * 税就涨上去了、民心下回合才慢慢掉下来 —— 这个时序是故意的：
@@ -5889,14 +8306,13 @@
     TAXMAN[owner | 0] = turnNo;        // v12：宰相 3 回合内不许动税率（见 CH_TAX_HOLD）
     var G = AO.GOV;
     govMsg('税率改为「' + G.rateCn[r] + '」：每 ' + G.popCn() + ' ' + G.goldPerUnit[r] +
-      ' 金/回合，民心压力 ' + (G.happyHit[r] > 0 ? '+' : '') + G.happyHit[r] +
+      ' 金 · 每 ' + G.ironCn() + ' ' + G.ironPer2M[r] + ' 铁/回合，民心压力 ' +
+      (G.happyHit[r] > 0 ? '+' : '') + G.happyHit[r] +
       '（民心每回合慢慢靠过去）', 'ok');
   }
 
   function bindGovPanel() {
     $('gpClose').addEventListener('click', closeGovPanel);
-    $('gpPrev').addEventListener('click', function () { govStep(-1); });
-    $('gpNext').addEventListener('click', function () { govStep(1); });
     $('gpTurn').addEventListener('click', nextTurn);
 
     /* 税率：事件委托，重画时不用重新绑 */
@@ -5957,6 +8373,48 @@
       govMsg('开科取士：' + r.off.name + ' —— 「' + tr.cn + '」' + tr.desc, tr.rar === 'bad' ? 'warn' : 'ok');
       renderGovPanel();
       flushNotes();
+    });
+
+    /* 开工科（v17）：和文/武共用人才点、同一次消耗，只是抽的池子不同 */
+    var artExam = $('gpArtExam');
+    if (artExam) artExam.addEventListener('click', function () {
+      var r = examArtisan(GP.owner);
+      if (!r.ok) return govMsg(r.msg, 'warn');
+      govMsg('开工科：' + r.artisan.name + ' —— 「' + r.lv.cn + '」' + r.lv.desc, 'ok');
+      renderGovPanel();
+      flushNotes();
+    });
+    /* 匠人候选池：点卡 = 选中 / 取消 */
+    var artPool = $('gpArtPool');
+    if (artPool) artPool.addEventListener('click', function (e) {
+      var el = e.target && e.target.closest ? e.target.closest('.ocard') : null;
+      if (!el) return;
+      var id = +el.getAttribute('data-aid2');
+      GP.selArt = (GP.selArt === id) ? 0 : id;
+      renderGovPanel();
+    });
+    /* 匠人派驻 / 撤回 */
+    var artTab = $('gpArtTable');
+    if (artTab) artTab.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('button[data-art]') : null;
+      if (!b || b.disabled) return;
+      var pid = +b.getAttribute('data-pid');
+      if (b.getAttribute('data-art') === 'in') {
+        if (!GP.selArt) return govMsg('先在候选池里点一位匠人', 'warn');
+        var r = postArtisan(pid, GP.selArt);
+        if (!r.ok) return govMsg(r.msg, 'warn');
+        govMsg(r.artisan.name + ' 进驻 ' + (pOf(pid) || {}).name + '：' +
+          artisanLv(r.artisan).cn + '（三坊产能 +' + Math.round(artisanLv(r.artisan).bonus * 100) +
+          '%，装备线开）' + (r.replaced ? '；' + r.replaced.name + ' 回池' : ''), 'ok');
+        GP.selArt = 0;
+      } else {
+        var a = unpostArtisan(pid);
+        if (a) govMsg(a.name + ' 撤回候选池：本省装备线（盔/甲/靴）随之锁死', 'warn');
+      }
+      renderGovPanel();
+      /* 省卡开着的话跟着刷（产能预览变了） */
+      var pv = pOf(pid);
+      if (pv && state.renderer && state.renderer.selected === pid) renderInfoLists(pv);
     });
 
     /* 候选池：点卡 = 选中 / 取消选中 */
@@ -6074,7 +8532,7 @@
   function warPageOfArmy(a) {
     var it = itemOf(a), gen = generalOf(a), p = pOf(a.pid), c = coOf(a.owner);
     return {
-      it: it, gen: gen, p: p, c: c,
+      it: it, name: unitNameOf(a), gen: gen, p: p, c: c,
       orderCn: a.order ? (AO.ORDERS[a.order.type] ? AO.ORDERS[a.order.type].cn : a.order.type) : '待命',
       tacCn: a.order && a.order.tactic ? AO.tacOf(a.order.tactic).cn : ''
     };
@@ -6187,8 +8645,8 @@
     if (box) {
       if (!list.length) {
         box.innerHTML = '<div class="pempty">还没有军队。<br>' +
-          '先在兵营省（兵营 ＋ 建）征一支：花金 + 人口 + 该代军械，成建制门槛看本省库存够不够 ' +
-          AO.RECRUIT.weaponPerUnit + ' 件。</div>';
+          '先在兵营省（兵营 ＋ 建）征一支：花金 + 人口，<b>不扣装备</b>；' +
+          '成军后去顶栏「武库」发兵刃 / 马 / 炮 —— 有炮=炮兵、有马=骑兵。</div>';
       } else {
         var h = '<div class="prow head war">' +
           '<span class="wn">军队</span><span class="wm">兵数</span><span class="wg">将领</span>' +
@@ -6197,8 +8655,8 @@
           var a = list[i], info = warPageOfArmy(a);
           h += '<div class="prow war' + (GP.selArmy === a.id ? ' sel' : '') + '" data-aid="' + a.id + '">' +
             '<span class="wn"><i style="background:' + (info.c ? info.c.color : '#888') + '"></i>' +
-            (a.type === 'navy' ? '⚓ 舰队 · ' : '') + escHtml(info.it.cn) +
-            (a.arms === 'cav' ? ' · 骑' : a.arms === 'art' ? ' · 炮' : '') + '</span>' +
+            (a.type === 'navy' ? '⚓ ' : '') + escHtml(info.name) +
+            (a.type === 'navy' ? '' : ' · ' + unitKindCn(a)) + '</span>' +
             '<span class="wm">' + a.men.toLocaleString() + (a.ships ? ' / ' + a.ships + ' 舰' : '') + '</span>' +
             '<span class="wg">' + (info.gen ? escHtml(info.gen.name) + '<em class="otag ' +
               genTrait(info.gen).rar + '">' + genTrait(info.gen).cn + '</em>' : '<em class="none">无将</em>') + '</span>' +
@@ -6207,7 +8665,8 @@
               (info.p && OCCUPY[info.p.id] ? '<em>占领</em>' : '') + '</span>' +
             '<span class="wx">' + (a.starved ? '<em class="bad">断粮</em>' : '') +
               (a.sup ? '<em class="bad">被压制</em>' : '') +
-              (a.order && a.order.type === 'train' ? '<em>练兵</em>' : '') + '</span>' +
+              (a.order && a.order.type === 'train' ? '<em>练兵</em>' : '') +
+              (a.type === 'navy' ? '' : eqChips(a)) + '</span>' +
             '</div>';
           if (GP.selArmy === a.id) h += armyEditorHtml(a);
         }
@@ -6234,6 +8693,22 @@
         (isDecap(cid) ? '　·　<em class="bad">群龙无首</em>（首都已失：战力 −20%、税 ×0.7、科研减半、民心 −10）' : '') +
         (countryDead(cid) ? '　·　<em class="bad">已灭亡</em>' : '');
     }
+  }
+
+  /* 军队行上的装备小芯片：三件各一个色点 + 合计乘数（没有装备就不占位） */
+  function eqChips(a) {
+    if (!a || !a.equip) return '';
+    var E = AO.EQUIP, out = '', n = 0, i;
+    for (i = 0; i < E.slots.length; i++) {
+      var q = a.equip[E.slots[i]];
+      if (!q) continue;
+      n++;
+      out += '<i class="eqd q-' + q + '" title="' + E.slotCn[E.slots[i]] + ' · ' +
+        E.qLong[q] + '">' + E.slotCn[E.slots[i]] + '</i>';
+    }
+    if (!n) return '';
+    return '<em class="eqtag" title="装备合计：战力 ×' + equipMulOf(a).toFixed(3) + '">' +
+      out + '×' + equipMulOf(a).toFixed(2) + '</em>';
   }
 
   /* 选中军队的命令编辑器（就摊在那一行下面，不弹窗） */
@@ -6297,6 +8772,16 @@
       h += '</select></div>';
     }
 
+    /* 武装（v19）：兵种是发出来的 —— 这里只报"现在穿什么"，换装在顶栏「武库」 */
+    if (!isNavy) {
+      var u0 = unitOf(a);
+      h += '<div class="werow"><span>武装</span><em style="flex:1">' + escHtml(gearText(a)) +
+        '　<span class="none">攻 ' + u0.atk.toFixed(2) + ' · 防 ' + u0.def.toFixed(2) +
+        ' · 机动 ' + u0.mov + ' · 攻城 ' + u0.siege + '</span></em>' +
+        (a.weapon ? '' : '<em class="halted" title="没有兵刃：战力只有 0.5，能守不能攻">赤手空拳</em>') +
+        '</div>';
+    }
+
     /* 将领 */
     var pool = milPoolOf(a.owner), gen = generalOf(a);
     h += '<div class="werow"><span>将领</span><select id="wpGen"' + (mine ? '' : ' disabled') + '>' +
@@ -6307,6 +8792,34 @@
       h += '<option value="' + pool[m].id + '">' + escHtml(pool[m].name + '（' + AO.milTraitOf(pool[m].traitKey).cn + '）') + '</option>';
     }
     h += '</select></div>';
+
+    /* 装备三槽（v17）：盔 / 甲 / 靴，各手动选一件或一键配齐。
+     * 换装撤下来的那件回国库（equipArmy 里做），所以玩家可以放心来回试。 */
+    if (!isNavy) {
+      var E = AO.EQUIP, inv = equipOf(a.owner);
+      if (!a.equip) a.equip = { helm: null, chest: null, boots: null };
+      h += '<div class="werow eqrow"><span>装备</span><div class="eqslots">';
+      for (var e1 = 0; e1 < E.slots.length; e1++) {
+        var slot = E.slots[e1], curQ = a.equip[slot];
+        h += '<label class="eqslot' + (curQ ? ' q-' + curQ : '') + '" title="' +
+          escHtml(E.slotCn[slot] + '：一件的加成 = 材质底 × 品质倍（现在材质「' +
+            matOf(a.owner).cn + '」' + Math.round(matOf(a.owner).base * 100) + '%）') +
+          '"><span>' + E.slotCn[slot] + '</span><select data-eqslot="' + slot + '"' +
+          (mine ? '' : ' disabled') + '><option value="">— 空 —</option>';
+        for (var e2 = E.q.length - 1; e2 >= 0; e2--) {
+          var qk = E.q[e2], have = (inv[slot] && inv[slot][qk]) || 0;
+          /* 身上那件也算"可选"（数量 0 也列出来，不然换装时看不见自己穿着什么） */
+          if (!have && curQ !== qk) continue;
+          h += '<option value="' + qk + '"' + (curQ === qk ? ' selected' : '') + '>' +
+            E.qLong[qk] + '（库存 ' + have + '）</option>';
+        }
+        h += '</select></label>';
+      }
+      h += '</div><button type="button" data-eqfit="1"' + (mine ? '' : ' disabled') +
+        ' title="三槽各取国库里最好的一件（已有的更好就不动）">一键配齐</button>' +
+        '<em class="eqmul" title="战力乘数 = 1 + Σ(材质底 × 品质倍)，攻防同乘">战力 ×' +
+        equipMulOf(a).toFixed(3) + '</em></div>';
+    }
 
     /* 舰队：装载同省的陆军 */
     if (isNavy) {
@@ -6356,12 +8869,20 @@
         return;
       }
       /* 开武科 */
-      if (t.closest('#gpMilExam')) {
-        var r = examGeneral(GP.owner);
+      if (t.closest('#gpMilExam')) {        var r = examGeneral(GP.owner);
         if (!r.ok) return govMsg(r.msg, 'warn');
         govMsg('开武科：' + r.gen.name + ' —— 「' + r.trait.cn + '」' + r.trait.desc, r.trait.rar === 'bad' ? 'warn' : 'ok');
         renderGovPanel();
         flushNotes();
+        return;
+      }
+      /* 一键配齐（装备） */
+      if (t.closest('button[data-eqfit]')) {
+        var af = ARMY[GP.selArmy];
+        if (!af) return;
+        var rf = equipAutoFit(af);
+        govMsg(rf.ok ? rf.msg : rf.msg, rf.ok ? 'ok' : 'warn');
+        renderGovPanel();
         return;
       }
       /* 点将领卡 = 派给选中的军队 */
@@ -6446,6 +8967,17 @@
     body.addEventListener('change', function (e) {
       var t = e.target;
       if (!t) return;
+      /* 装备槽（v17）：换一件 → 撤下的回国库、选中的出库 */
+      if (t.getAttribute && t.getAttribute('data-eqslot')) {
+        var ae = ARMY[GP.selArmy];
+        if (!ae) return;
+        var r = equipArmy(ae, t.getAttribute('data-eqslot'), t.value || null);
+        govMsg(r.ok ? (r.q ? ('换上「' + AO.EQUIP.slotCn[t.getAttribute('data-eqslot')] +
+          ' · ' + AO.EQUIP.qLong[r.q] + '」，战力 ×' + equipMulOf(ae).toFixed(3)) : '卸下这件，回库')
+          : r.msg, r.ok ? 'ok' : 'warn');
+        renderGovPanel();
+        return;
+      }
       if (t.id === 'wpTarget') {
         var a = ARMY[GP.selArmy];
         if (!a) return;
@@ -6531,13 +9063,17 @@
     var need = kind === 'ally' ? D.ally.need : D.nap.need;
     var rel = relOf(PLAYER, toCid);
     var left = Math.max(0, (DIPCD[cdKey(PLAYER, toCid, kind)] || 0) - turnNo);
-    var off = rel < need || left > 0;
+    /* 外交锁（v13）：玩家自己是傀儡 → 一颗都按不动。理由写在 title 里，
+     * 而不是只把钮变灰 —— 玩家得知道"为什么"，不然会以为是 bug。 */
+    var suzMe = PLAYER ? suzerainOf(PLAYER) : 0;
+    var off = !!suzMe || rel < need || left > 0;
     /* 上一次提议的结果也写进 title —— 玩家隔了几回合回来，至少知道"上次是被拒了"，
      * 而不是只看到一颗灰钮。 */
     var prop = DIPPROP[warKey(PLAYER, toCid)];
     var last = (prop && prop.kind === kind && !prop.ok && prop.turn)
       ? '\n上次提议（第 ' + prop.turn + ' 回合）：被拒' : '';
-    var tip = left > 0 ? '对方刚拒绝过：还要等 ' + left + ' 回合'
+    var tip = suzMe ? '听命于宗主 ' + nameOf(suzMe) + '：傀儡不能对外缔约'
+      : left > 0 ? '对方刚拒绝过：还要等 ' + left + ' 回合'
       : rel < need ? '关系 ' + rel + ' 不到门槛 ' + need + '（' + pactCn(kind) + '）'
         : '提议' + pactCn(kind) + '：关系 ' + rel + '，AI 按 关系 + 性格 + 共同敌人 评估（≥' +
           D.eval.accept + ' 才答应）';
@@ -6596,6 +9132,35 @@
       h += '<div class="gvrow"><span>条约</span><em class="pact">互不侵犯 · 互不宣战</em></div>';
     }
 
+    /* 傀儡与朝贡（v13）：这张卡是傀儡 → 一行"奉表称臣于 ×"，顺手把
+     * "已 N 回合 / 距可并入 M 回合"一起报出来（那是宗主最关心的两个数）。
+     * 这张卡是宗主 → 每个属国一行。两种身份在同一条关系里只可能出现一种。 */
+    var P13 = AO.DIPLO.puppet || {};
+    var suzOf = suzerainOf(c.id);
+    if (suzOf) {
+      var recS = puppetRecOf(c.id);
+      var held = recS ? Math.max(0, turnNo - recS.since) : 0;
+      var leftA = recS ? Math.max(0, (recS.annexCd || 0) - turnNo) : 0;
+      h += '<div class="gvrow"><span>臣属</span><em class="puppet" title="' +
+        escHtml('奉表称臣于 ' + nameOf(suzOf) + '：每回合上贡中央金入的 ' +
+          Math.round((P13.tribute || 0.2) * 100) + '%，宣战随宗主、外交不得自专。\n' +
+          '满 ' + (P13.annexCd | 0) + ' 回合后宗主可提「和平并入」；每 ' +
+          (P13.indepEvery | 0) + ' 回合有一次机会揭竿而起。') +
+        '">奉表称臣于 ' + escHtml(nameOf(suzOf)) + ' · 已 ' + held + ' 回合 / 距可并入 ' +
+        (leftA > 0 ? leftA + ' 回合' : '已可并入') + '</em></div>';
+    }
+    var vsOf = vassalsOf(c.id);
+    for (i = 0; i < vsOf.length; i++) {
+      var recV = PUPPET[warKey(c.id, vsOf[i])];
+      var heldV = recV ? Math.max(0, turnNo - recV.since) : 0;
+      var leftV = recV ? Math.max(0, (recV.annexCd || 0) - turnNo) : 0;
+      h += '<div class="gvrow"><span>属国</span><em class="vassal" title="' +
+        escHtml('每回合上贡它的中央金入 ' + Math.round((P13.tribute || 0.2) * 100) +
+          '%；你宣战它自动同宣（它被宣你不参战）') +
+        '">' + escHtml(nameOf(vsOf[i])) + ' 奉表 · 已 ' + heldV + ' 回合 · 岁贡' +
+        (leftV > 0 ? ' · 距可并入 ' + leftV + ' 回合' : ' · 可并入') + '</em></div>';
+    }
+
     /* 战争分（v9）：每场仗一条对比条。分从宣战那一刻开始记，
      * 占领省 +10 / 会战胜 +5 / 围城陷城 +8 / 首都易手 +30 / 轰击小胜 +1。 */
     for (i = 0; i < wars.length; i++) {
@@ -6644,26 +9209,33 @@
         h += pactBtnHtml(c.id, 'ally') + pactBtnHtml(c.id, 'nap');
         if (pkCd > 0) h += '<em class="none">刚被拒：还要等 ' + pkCd + ' 回合</em>';
       }
+      /* 宣战（v18.5）：入口**搬到对方的卡上** —— 点谁打谁，目标就是这张卡的国家。
+       * 原来那排"宣战 · 邻国"长在自家卡上，入口和目标分了家：邻国一多，
+       * 得先认"哪块地是谁的"再回自己卡里找钮。declareWar 一行没动，
+       * 傀儡/属国/已交战/毁约背信那些硬闸全在函数里，这里只搬 UI。
+       * 置灰矩阵与原来那排一字不差，**包括"必须陆上接壤"** ——
+       * declareWar 本身不查相邻，以前全靠 UI 挡"隔空宣战"，这层闸不能弄丢。 */
+      var pkD = pactOf(PLAYER, c.id);
+      var suzMe2 = suzerainOf(PLAYER);
+      var isVasC = suzerainOf(c.id) === PLAYER;
+      var adjC = ((coOf(PLAYER) || {}).neighbors || []).indexOf(c.id) >= 0;
+      var offD = !!suzMe2 || !!pkD || isVasC || !adjC;
+      h += '<button type="button" class="warbtn" data-declare="' + c.id + '"' +
+        (offD ? ' disabled' : '') + ' title="' +
+        escHtml(suzMe2 ? ('听命于宗主 ' + nameOf(suzMe2) + '：傀儡不能自行宣战')
+          : isVasC ? (c.name + ' 是你的属国：要收地走「强并入」，不能宣战自己的属国')
+          : pkD ? ('与 ' + c.name + ' 有' + pactCn(pkD) + '：先毁约才能宣战')
+          : !adjC ? '不相邻：跨海的敌国要等舰队'
+          : '向 ' + c.name + ' 宣战：宣战后双方军队才会交战、才能占领对方省份') +
+        '">宣战</button>';
     }
     if (!wars.length) {
-      /* 没在打 → 给"向邻国宣战"（只列陆上邻国，避免一屏 64 个钮）。
-       * 别国的卡上不列 —— 一片灰按钮比没有更难看，这里直接用一句话说明。 */
-      var nb = c.neighbors || [];
-      if (!mine) {
-        if (!canDiplo) h += '<em class="none">宣战只能由玩家国发起</em>';
-      } else if (!nb.length) {
-        h += '<em class="none">四周皆海，没有陆上邻国可宣战（跨海的敌国要等舰队）</em>';
-      }
-      for (i = 0; mine && i < nb.length; i++) {
-        var nc2 = coOf(nb[i]);
-        if (!nc2 || countryDead(nc2.id)) continue;
-        /* 同盟 / 互不侵犯的国家：宣战钮置灰（先毁约再打，spec ②） */
-        var pkN = pactOf(PLAYER, nc2.id);
-        h += '<button type="button" class="warbtn" data-declare="' + nc2.id + '"' +
-          (pkN ? ' disabled' : '') + ' title="' +
-          escHtml(pkN ? ('与 ' + nc2.name + ' 有' + pactCn(pkN) + '：先毁约才能宣战')
-            : '向 ' + nc2.name + ' 宣战：宣战后双方军队才会交战、才能占领对方省份') +
-          '">宣战 · ' + escHtml(nc2.name) + '</button>';
+      /* 自家卡上不再列邻国（v18.5）：入口在对方的卡上，这里只留一句指路。
+       * 「四周皆海」那句也随之消失 —— 不相邻现在由对方卡上那枚钮的置灰态解释。 */
+      if (mine && PLAYER) {
+        h += '<em class="none">宣战：点对方国土，在它的国家卡上宣</em>';
+      } else if (!canDiplo) {
+        h += '<em class="none">宣战只能由玩家国发起</em>';
       }
     } else {
       for (i = 0; i < wars.length; i++) {
@@ -6691,15 +9263,55 @@
       }
     }
     h += '</div>';
+    /* 属国的归属（v13）：两个钮，一条快一条慢。
+     * 「和平并入」要满 60 回合 + 它民心 ≥55 + 最近没被拖着打仗，掷 60%；
+     * 「强并入」随时能按 —— 但宗主全国民心 −8、并入各省不安 +30。
+     * 这一排只出现在**自己的卡**上（mine）：受表是宗主的事，打工仔看不见这两个钮。 */
+    if (mine && vsOf.length) {
+      h += '<div class="diplobtns">';
+      for (i = 0; i < vsOf.length; i++) {
+        var rd = puppetAnnexReady(c.id, vsOf[i]);
+        var vn3 = nameOf(vsOf[i]);
+        var tipP = rd.ok
+          ? '和平并入：省全归你并且直接算正式国土（不整合）· 它掷 ' +
+            Math.round((P13.annexAccept || 0.6) * 100) + '% 答应'
+          : '还不能提：' + rd.why;
+        h += '<button type="button" class="warbtn pact" data-annex="' + vsOf[i] + '"' +
+          (rd.ok ? '' : ' disabled') + ' title="' + escHtml(tipP) + '">和平并入 · ' + escHtml(vn3) + '</button>';
+        h += '<button type="button" class="warbtn" data-force="' + vsOf[i] + '" title="' +
+          escHtml('强并入：立刻吞掉它（省直接是正式国土），代价是全国民心 −' + (P13.forceHappy || 8) +
+            '、并入各省不安 +' + (P13.forceUnrest || 30)) +
+          '">强并入 · ' + escHtml(vn3) + '</button>';
+      }
+      h += '</div>';
+    }
     /* 玩家国自己的卡上给一个"去军务"的入口 —— 宣战之后下一步一定是下命令 */
     if (mine) h += '<button class="gopen" type="button" id="cGoWar">打开军务面板 →</button>';
     box.innerHTML = h;
     var gw = $('cGoWar');
     if (gw) gw.addEventListener('click', function () { openWarPanel(c.id); });
+    /* 并入的两个钮（v13）：都是"我的国 × 属国"，所以结果重画的是**我的卡** */
+    var ans = box.querySelectorAll('button[data-annex]');
+    for (i = 0; i < ans.length; i++) {
+      ans[i].addEventListener('click', function () {
+        var r = tryAnnexPuppet(c.id, +this.getAttribute('data-annex'));
+        toast(r.msg, 3600);
+        refreshAfterAnnex(c.id);
+      });
+    }
+    var fns = box.querySelectorAll('button[data-force]');
+    for (i = 0; i < fns.length; i++) {
+      fns[i].addEventListener('click', function () {
+        var r = forceAnnexPuppet(c.id, +this.getAttribute('data-force'));
+        toast(r.msg, 3600);
+        refreshAfterAnnex(c.id);
+      });
+    }
+    /* 宣战（v18.5）：钮在这张卡上，出手的永远是玩家 —— declareWar(PLAYER, 这张卡) */
     var ds = box.querySelectorAll('button[data-declare]');
     for (i = 0; i < ds.length; i++) {
       ds[i].addEventListener('click', function () {
-        var r = declareWar(c.id, +this.getAttribute('data-declare'));
+        var r = declareWar(PLAYER, c.id);
         toast(r.msg, 3200);
         showCountry(c.id);
       });
@@ -6740,7 +9352,23 @@
       '剩省降到投降线以下就全境并入对方（群龙无首时线放宽）。\n' +
       'v9：关系值决定能不能缔约（同盟 ≥' + AO.DIPLO.ally.need + ' / 互不侵犯 ≥' +
       AO.DIPLO.nap.need + '），同盟与互不侵犯都禁止互宣；\n' +
-      '「求和」开谈判桌 —— 白和永远可选，赔款要战争分领先 ' + AO.DIPLO.talk.payLead + '。';
+      '「求和」开谈判桌 —— 白和永远可选，赔款要战争分领先 ' + AO.DIPLO.talk.payLead + '。\n' +
+      'v13：领先 ' + AO.DIPLO.puppet.talkLead + ' 还能扶植傀儡（不割地、收租）；' +
+      '傀儡上贡中央金入的 ' + Math.round(AO.DIPLO.puppet.tribute * 100) + '%，兵随宗主，外交不得自专。';
+  }
+
+  /* 并入之后的收尾：版图变了（省易主、首都可能丢、INTEG 删了），
+   * 所以底图要重烘、面板要重画 —— 这三件事在占领里已经做过一次，
+   * 但那是"逐省"的，这里补上"整国"那一层（首都表、维修红点、国家卡）。 */
+  function refreshAfterAnnex(cid) {
+    if (typeof refreshRepBadge === 'function') refreshRepBadge();
+    if (state.renderer) {
+      state.renderer.fogRefresh();
+      state.renderer.requestDraw();
+    }
+    if ($('country').classList.contains('on')) showCountry(cid);
+    if (GP.open) renderGovPanel();
+    saveGame(true);
   }
 
 
@@ -6757,7 +9385,8 @@
     var sch = activeSchools(cid);
     box.innerHTML =
       '<div class="gvrow"><span>税率</span><em>' + G.rateCn[rate] +
-        '<i>（' + G.goldPerUnit[rate] + ' 金/' + G.popCn() + '）</i></em></div>' +
+        '<i>（' + G.goldPerUnit[rate] + ' 金 + ' + G.ironPer2M[rate] + ' 铁 / ' +
+          G.popCn() + '）</i></em></div>' +
       '<div class="gvrow"><span>国民幸福度</span><em class="' +
         (hv <= G.happyLow ? 'low' : hv >= G.happyHigh ? 'high' : '') + '">' + Math.round(hv) + '</em></div>' +
       '<div class="gvrow"><span>在任官员</span><em>' + offs + ' / ' + c.provinces.length + ' 省</em></div>' +
@@ -6796,8 +9425,13 @@
       var r = rs[i], v = net[r.key] || 0;
       var cls = v > 0.05 ? ' up' : v < -0.05 ? ' down' : '';
       var txt = Math.abs(v) < 0.05 ? '±0' : (v > 0 ? '＋' : '−') + Math.round(Math.abs(v) * 10) / 10;
+      /* 物价（v14）：国库总览加一列迷你价板 —— 现价 + 箭头。
+       * 放在"库存"和"净流"之间，读法是"这类东西我还有多少、值多少、在涨还是在跌"。 */
+      var pvv = priceV(c.id, r.key), ptr = priceTrend(c.id, r.key);
+      var pcls = ptr > 0 ? ' up' : ptr < 0 ? ' down' : '';
       html += '<div class="trrow"><span class="nm">' + (r.prod || r.cn) + '</span>' +
         '<b>' + Math.round(cen[r.key] || 0) + '</b>' +
+        '<i class="pi' + pcls + '">' + priceNum(pvv) + priceArrow(ptr) + '</i>' +
         '<em class="' + cls.trim() + '">' + txt + '</em></div>';
     }
     var pv = net.pts || 0;
@@ -6879,6 +9513,7 @@
     var c = w && w.countries[cid - 1];
     if (!c) { clearCountry(); return; }
     $('country').classList.add('on');
+    applyCountryTab();          // 概览 / 内政 / 外交：只切容器类名，下面的渲染照旧
 
     $('cFlag').style.background = c.color;
     $('cName').textContent = c.name;
@@ -6899,10 +9534,52 @@
     renderFaiths(c);
 
     $('cPop').textContent = AO.formatPop(c.population) + '（' + c.density + ' 人/km²）';
+    /* 承载（v18.2）：总人口取**活的** POP 表 —— c.population 是开局的静态数，
+     * 而人口每回合都在涨落；总上限把各省现算的承载力加起来（同一份公式，
+     * 省卡上写多少、这里就加多少，不会两处对不上）。 */
+    var capEl = $('cPopCap');
+    if (capEl) {
+      var tPop = 0, tCap = 0, fullN = 0, overN = 0, pi, q2;
+      for (pi = 0; pi < c.provinces.length; pi++) {
+        q2 = w.provinces[c.provinces[pi] - 1];
+        if (!q2) continue;
+        var pv2 = POP[q2.id] ? POP[q2.id].v : (q2.population || 0);
+        var cv2 = popCapOf(q2.id);
+        tPop += pv2; tCap += cv2;
+        if (cv2 > 0 && pv2 > cv2) overN++;
+        else if (cv2 > 0 && pv2 >= cv2) fullN++;
+      }
+      var ld = tCap > 0 ? Math.round(tPop / tCap * 100) : 0;
+      capEl.innerHTML = AO.formatPop(Math.round(tPop)) + ' / ' + AO.formatPop(Math.round(tCap)) +
+        (overN ? ' <b style="color:#b5563f">' + overN + ' 省溢出</b>'
+          : fullN ? ' <em style="color:#4f9d78">' + fullN + ' 省满员</em>' : '');
+      capEl.title = '总人口 ' + Math.round(tPop).toLocaleString() + ' 人 / 总承载力 ' +
+        Math.round(tCap).toLocaleString() + ' 人（负载 ' + ld + '%）' +
+        '\n满员 ' + fullN + ' 省 · 人满为患 ' + overN + ' 省' +
+        '\n每省上限 = （地形基础 × 首都 ' + AO.POPCAP.capMul + ' ＋ 农场/渔港/粮仓/牧场加成）' +
+        ' × 铁犁深耕 ' + AO.POPCAP.plowMul +
+        '\n到顶就不再涨（人丁兴旺）；溢出的每回合 −' +
+        Math.round(AO.POPCAP.overRate * 100) + '% 往回落，并扣民心 ' + AO.POPCAP.overHappy;
+    }
     $('cArea').textContent = c.areaKm2.toLocaleString() + ' km²';
     var cap = w.provinces[c.capital - 1];
     $('cCapital').textContent = cap ? cap.name : '—';
     $('cProv').textContent = c.provinces.length + ' 个';
+    /* 安定（A 批）：几省在骚动 / 几省随时爆发。数字小但信息量大 ——
+     * 一个国"3 省骚动"意味着它正在失血（产出打折、税收不上来）。 */
+    var cu = $('cUnrest');
+    if (cu) {
+      var U = AO.UNREST, riot = 0, hot = 0, i2;
+      for (i2 = 0; i2 < c.provinces.length; i2++) {
+        var vv = unrestOf(c.provinces[i2]).v;
+        if (vv >= U.revoltAt) hot++;
+        else if (vv >= U.riotLine) riot++;
+      }
+      cu.innerHTML = (hot ? '<b style="color:#a8523b">' + hot + ' 省叛乱在即</b>　' : '') +
+        (riot ? '<b style="color:#8a6d34">' + riot + ' 省骚动</b>' : (hot ? '' : '太平'));
+      cu.title = '不安 ≥' + U.riotLine + ' = 骚动（再往上就该安抚、派官或驻军了）；≥' + U.revoltAt +
+        ' = 每回合 ' + Math.round(U.revoltChance * 100) + '% 爆发叛乱（匪乱 / 倒戈 / 独立）';
+    }
 
     var bar = $('cBar'), leg = $('cLegend');
     bar.innerHTML = ''; leg.innerHTML = '';
@@ -7097,9 +9774,811 @@
     return WARBASE[k];
   }
 
-  /* ---------------- 二、装备袋（和七种资源共用 SIM 袋） ----------------
-   * 装备键没有 AO.RESOURCE_BY_KEY，所以 settleTurn 的产出/维护循环会自动跳过，
-   * 而 stockOf / payCost 这类"按 key 取库存"的函数一行都不用改。 */
+  /* =============================================================
+   * 二、军工产线（MILL v19）—— **全国三池 + 19 条产线 + 订单制 + 武库**
+   *
+   * 四张状态表（都要进档，但**不升 SAVE_VER**：读旧档缺什么补什么）：
+   *   MILLS[owner]   = { alloc:{线:点}, prog:{线:进度}, form:{类型:形制}, acc:{池:零头}, wait:{线:1} }
+   *   ARSENAL[owner] = { wpn:{'代|类型|形制|品质':份}, mount:{'品种|品质':份}, gun:{'代|品质':门}, ship:{舰键:艘} }
+   *   EQUIPS[owner]  = { helm:{plain,good,fine,rare}, chest:…, boots:… }   （队份，内部 1 份）
+   *   ARTISANS[owner]= { pool:[匠人], post:{pid:匠人} }
+   *
+   * 三条账要分清：
+   *   池容量  每回合按"Σ每省(座数 × 基准 × 工厂 × 匠人)"算出来的**可用点数**（三池各自封顶）
+   *   工作量  每条线出一单要几点（兵刃/装备/马 5 · 炮 2 · 舰 1~4）
+   *   进度    prog = **当前这一单已经攒了多少点**（不是"零头"，是订单进度）
+   *
+   * 为什么口径从"每省"抬到"全国"（v19）：玩家要回答的是"这回合全国这几点产能
+   * 打刀还是浇炮"，逐省分配时同一个问题要回答 20 遍，而答案往往一样。
+   * 省里只保留一个数：**本省产能贡献 N 点**。
+   * ============================================================= */
+  var MILLS = Object.create(null);     // owner -> 全国分配 / 进度 / 形制
+  var ARSENAL = Object.create(null);   // owner -> 武库（兵刃 / 马 / 炮 / 舰）
+  var EQUIPS = Object.create(null);    // owner -> 盔甲靴三槽（队份，按品质分档）
+  var ARTISANS = Object.create(null);  // owner -> { pool, post }
+  var ARTISAN_ID = 1;
+
+  /* 三个池对应的坊（顺序就是面板上的段序） */
+  var MILL_POOLS = ['arm', 'hor', 'syd'];
+  var MILL_KINDS = ['armory', 'stable', 'shipyard'];
+
+  function newMill() {
+    var m = {
+      alloc: Object.create(null),
+      prog: Object.create(null),
+      wait: Object.create(null),
+      acc: { arm: 0, hor: 0, syd: 0 },
+      /* 兵刃五类型各自的**形制**（默认平平无奇）。品种就是线本身，不用另存。 */
+      form: { dao: 'plain', fu: 'plain', gong: 'plain', qiang: 'plain' }
+    };
+    var M = AO.MILL, i, j;
+    for (i = 0; i < MILL_POOLS.length; i++) {
+      var lines = M.lines[MILL_POOLS[i]];
+      for (j = 0; j < lines.length; j++) { m.alloc[lines[j]] = 0; m.prog[lines[j]] = 0; }
+    }
+    return m;
+  }
+  function millOf(owner) {
+    owner = owner | 0;
+    var m = MILLS[owner];
+    if (!m) m = MILLS[owner] = newMill();
+    if (!m.alloc) m.alloc = Object.create(null);
+    if (!m.prog) m.prog = Object.create(null);
+    if (!m.wait) m.wait = Object.create(null);
+    if (!m.acc) m.acc = { arm: 0, hor: 0, syd: 0 };
+    if (!m.form) m.form = { dao: 'plain', fu: 'plain', gong: 'plain', qiang: 'plain' };
+    var M = AO.MILL, i, j;
+    for (i = 0; i < MILL_POOLS.length; i++) {
+      var lines = M.lines[MILL_POOLS[i]];
+      for (j = 0; j < lines.length; j++) {
+        var l = lines[j];
+        if (typeof m.alloc[l] !== 'number' || !isFinite(m.alloc[l])) m.alloc[l] = 0;
+        if (typeof m.prog[l] !== 'number' || !isFinite(m.prog[l])) m.prog[l] = 0;
+      }
+      if (typeof m.acc[MILL_POOLS[i]] !== 'number' || !isFinite(m.acc[MILL_POOLS[i]])) {
+        m.acc[MILL_POOLS[i]] = 0;
+      }
+    }
+    return m;
+  }
+  /* 一国已研成的科技（军工批的三条判定全走这里，不另建缓存） */
+  function hasTech(owner, key) {
+    var R = RESEARCH[owner];
+    return !!(R && R.done && R.done[key]);
+  }
+  /* 一国研到工艺链第几档（0 = 只有皮革） */
+  function craftIdxOf(owner) {
+    var R = RESEARCH[owner];
+    /* craftIdx 返回的就是 CRAFT.order 的下标（-1 = 只有皮革）；
+     * v19 这里多加了 1，面板会把"铁器"写成"火器"—— 一次 off-by-one。 */
+    return Math.max(0, AO.craftIdx(R && R.done));
+  }
+  /* 时代加成：精密 / 工业 各 +15%（全兵种三维） */
+  function craftMulOf(owner) {
+    var R = RESEARCH[owner];
+    return AO.craftMul(R && R.done);
+  }
+
+  /* ---------------- 工匠 ---------------- */
+  function artisanPoolOf(owner) {
+    var A = ARTISANS[owner];
+    if (!A) A = ARTISANS[owner] = { pool: [], post: {} };
+    if (!A.pool) A.pool = [];
+    if (!A.post) A.post = {};
+    return A;
+  }
+  function artisanOf(pid) {
+    var p = pOf(pid);
+    if (!p || !p.owner) return null;
+    return artisanPoolOf(p.owner).post[pid | 0] || null;
+  }
+  function artisanLv(a) {
+    var L = AO.ARTISAN.lv;
+    return L[AO.clamp((a && a.lv) | 0, 0, L.length - 1)];
+  }
+  /* 这一省的匠人加成（三坊共享）：没有匠人 → 0 */
+  function artisanBonus(pid) {
+    var a = artisanOf(pid);
+    return a ? artisanLv(a).bonus : 0;
+  }
+  /* 全国最高那一位匠人的等级（-1 = 一个都没有）。品质 roll 看它 ——
+   * "大师要驻在产能大省"：产能加成按驻场省算，品质只认全国最高的那一位。 */
+  function bestArtisanLv(owner) {
+    var A = ARTISANS[owner | 0], best = -1, k;
+    if (!A || !A.post) return -1;
+    for (k in A.post) {
+      var a = A.post[k];
+      if (a && (a.lv | 0) > best) best = a.lv | 0;
+    }
+    return best;
+  }
+  /* 开局/读档都要保证 id 不撞（撞了"派驻/撤回"会认错人） */
+  function usedArtisanNames() {
+    var set = Object.create(null), k, i;
+    for (k in ARTISANS) {
+      var A = ARTISANS[k];
+      if (!A) continue;
+      for (i = 0; i < (A.pool || []).length; i++) if (A.pool[i]) set[A.pool[i].name] = 1;
+      for (var pk in (A.post || {})) if (A.post[pk]) set[A.post[pk].name] = 1;
+    }
+    return set;
+  }
+  function pickArtisanName() {
+    var N = AO.OFF_NAMES, used = usedArtisanNames(), t, nm, i;
+    /* 和文官/武将共用一个名字池，并且互相避开 —— 一国里两个"王守仁"很出戏 */
+    var off = usedOffNames(), gen = usedGenNames(), k;
+    for (k in off) used[k] = 1;
+    for (k in gen) used[k] = 1;
+    function rnd() {
+      return N.surnames[(Math.random() * N.surnames.length) | 0] +
+        N.givens[(Math.random() * N.givens.length) | 0];
+    }
+    for (t = 0; t < 60; t++) {
+      nm = rnd();
+      if (!used[nm]) return nm;
+    }
+    var tail = ['匠', '工', '师傅'], n = 2;
+    for (i = 0; i < tail.length; i++) if (!used[nm + tail[i]]) return nm + tail[i];
+    while (used[nm + n]) n++;
+    return nm + n;
+  }
+  function rollArtisanLv() {
+    var L = AO.ARTISAN.lv, total = 0, i, r;
+    for (i = 0; i < L.length; i++) total += L[i].w || 0;
+    r = Math.random() * total;
+    for (i = 0; i < L.length; i++) {
+      r -= L[i].w || 0;
+      if (r <= 0) return i;
+    }
+    return L.length - 1;
+  }
+  /* 开工科：和文/武共用人才点、同一次消耗，区别只是抽的池子不同 */
+  function examArtisan(owner, silent) {
+    var G = AO.GOV, T = talentOf(owner);
+    var cost = AO.ARTISAN.examCost || G.examCost;
+    if (!silent && !canAct(owner)) return { ok: false, msg: lockTitle() };
+    if (T.pts < cost) {
+      return { ok: false, msg: '人才点不够：开工科要 ' + cost + '，现在只有 ' + fmtPts(T.pts) +
+        '（学校每座 +' + G.talentPerSchool + ' / 回合）' };
+    }
+    T.pts -= cost;
+    var lv = rollArtisanLv();
+    var a = { id: ARTISAN_ID++, name: pickArtisanName(), lv: lv, pid: 0 };
+    artisanPoolOf(owner).pool.push(a);
+    if (!silent) {
+      var L = artisanLv(a);
+      NOTES.push({ owner: +owner, cls: lv >= 2 ? 'ok' : '',
+        text: '工科放榜：' + a.name + ' —— 「' + L.cn + '」' + L.desc + '（派驻有坊的省才生效）' });
+    }
+    return { ok: true, artisan: a, lv: AO.ARTISAN.lv[lv] };
+  }
+  /* 这一省能不能驻匠：得有（建成的）军械坊 / 驯马场 / 造船厂 */
+  function artisanSpot(pid) {
+    for (var i = 0; i < MILL_KINDS.length; i++) {
+      var st = UNIV[MILL_KINDS[i]][pid | 0];
+      if (st && st.n > 0) return MILL_KINDS[i];
+    }
+    return null;
+  }
+  /* 派驻：一省一匠。原来那位自动回池（免费，随时换）。 */
+  function postArtisan(pid, aid, silent) {
+    var p = pOf(pid);
+    if (!p) return { ok: false, msg: '没有这个省' };
+    if (!silent && !canAct(p.owner)) return { ok: false, msg: lockTitle() };
+    if (!artisanSpot(pid)) return { ok: false, msg: '这个省没有军械坊 / 驯马场 / 造船厂 —— 匠人去了没活干' };
+    var A = artisanPoolOf(p.owner), idx = -1, i;
+    for (i = 0; i < A.pool.length; i++) if (A.pool[i] && A.pool[i].id === aid) { idx = i; break; }
+    if (idx < 0) return { ok: false, msg: '这位匠人不在候选池里（可能已经驻场了）' };
+    var cur = A.post[pid | 0] || null;
+    if (cur) { cur.pid = 0; A.pool.push(cur); }
+    var a = A.pool.splice(idx, 1)[0];
+    a.pid = pid | 0;
+    A.post[pid | 0] = a;
+    return { ok: true, artisan: a, replaced: cur };
+  }
+  function unpostArtisan(pid, silent) {
+    var p = pOf(pid);
+    if (!p || !p.owner) return null;
+    if (!silent && !canAct(p.owner)) return null;
+    var A = artisanPoolOf(p.owner), a = A.post[pid | 0];
+    if (!a) return null;
+    delete A.post[pid | 0];
+    a.pid = 0;
+    A.pool.push(a);
+    return a;
+  }
+  /* 匠人俸禄（金/回合，从省库发，和官员同一条链）。缺钱就欠着不罚。 */
+  function settleArtisans(owner) {
+    var A = ARTISANS[owner];
+    if (!A || !A.post) return;
+    for (var pid in A.post) {
+      var a = A.post[pid];
+      if (!a) continue;
+      var pay = artisanLv(a).pay || 0;
+      if (!(pay > 0)) continue;
+      var bag = SIM[pid];
+      if (!bag || !bag.gold) continue;
+      var take = Math.min(bag.gold.stock, pay);
+      bag.gold.stock -= take;
+      var F = FLOW[pid];
+      if (F) {
+        F.loss.gold = (F.loss.gold || 0) + take;
+        F.d.ind = (F.d.ind || 0) + take;
+        F.d.wage = (F.d.wage || 0) + take;
+      }
+    }
+  }
+
+  /* 本省军工产能的乘数：有一座**不停产**的工厂就 ×2，否则 ×1。
+   * 抽成函数是为了「结算的实际产能」和「面板上写的 ×2」读同一个数。 */
+  function armProdMul(pid) {
+    var fb = FACTORY_BLD[pid];
+    return (fb && fb.n > 0 && !fb.halted) ? (AO.FACTORY.factory.prodMul || 2) : 1;
+  }
+  AO.resArmProdMul = armProdMul;
+
+  /* ---------------- 产能（三池，全国口径） ---------------- */
+  /* 一省对某个池的**原始**产能（可能是小数，零头在结算里攒） */
+  function provCapRaw(pid, kind) {
+    var st = UNIV[kind][pid | 0];
+    if (!st || !(st.n > 0) || st.halted) return 0;
+    var p = pOf(pid);
+    if (!p) return 0;
+    var M = AO.MILL, n = st.n * (M.base[kind] || 1);
+    /* 「制式装备」：军械坊每座 +1 点 */
+    if (kind === 'armory' && hasTech(p.owner, 'mil_std')) n += st.n * (M.stdBonus.armory || 0);
+    n *= armProdMul(pid);              // 工厂 ×2（停产则 ×1）
+    n *= 1 + artisanBonus(pid);        // 匠人 +0/10/20/40%
+    return n;
+  }
+  /* 一省这回合的产能（面板用整数）—— 省卡只显这个数 */
+  function millCap(pid, kind) { return Math.floor(provCapRaw(pid, kind)); }
+  /* 池键 / 坊键都能收：'arm' 与 'armory' 指的是同一口锅（面板两边都写） */
+  function poolKeyOf(x) {
+    var M = AO.MILL;
+    if (M.poolBld[x]) return x;
+    if (M.poolOf[x]) return M.poolOf[x];
+    return x;
+  }
+  /* 全国某个池的原始容量 */
+  function poolCapRaw(owner, pool) {
+    var M = AO.MILL, kind = M.poolBld[poolKeyOf(pool)], c = coOf(owner | 0);
+    if (!c) return 0;
+    var n = 0, list = c.provinces || [];
+    for (var i = 0; i < list.length; i++) n += provCapRaw(list[i], kind);
+    return n;
+  }
+  /* 面板 / 结算读的整数容量（零头存在 acc[pool]） */
+  function poolCap(owner, pool) {
+    var m = millOf(owner), pk = poolKeyOf(pool);
+    return Math.floor(poolCapRaw(owner, pk) + (m.acc[pk] || 0));
+  }
+  function poolOfLine(line) {
+    var M = AO.MILL;
+    for (var i = 0; i < MILL_POOLS.length; i++) {
+      if (M.lines[MILL_POOLS[i]].indexOf(line) >= 0) return MILL_POOLS[i];
+    }
+    return '';
+  }
+  /* 这条线的工作量（「量产工艺」把兵刃线 5 → 4） */
+  function lineWork(owner, line) {
+    var M = AO.MILL, w = M.work[line] || 1;
+    if (M.kindOf[line] === 'blade' && hasTech(owner, 'mil_massline')) w = M.massWork;
+    return w;
+  }
+  function allocSum(owner, pool) {
+    var M = AO.MILL, lines = M.lines[pool], m = millOf(owner), s = 0, i;
+    for (i = 0; i < lines.length; i++) s += Math.max(0, m.alloc[lines[i]] | 0);
+    return s;
+  }
+  /* 一条线的状态：分配 / 进度 / 工作量 / 是否卡料 / 还剩几回合 */
+  function lineStatus(owner, line) {
+    var m = millOf(owner), work = lineWork(owner, line);
+    var alloc = Math.max(0, m.alloc[line] | 0);
+    var prog = Math.min(work, m.prog[line] || 0);
+    var left = Math.max(0, work - prog);
+    var turns = alloc > 0 ? Math.ceil(left / alloc) : null;
+    return {
+      line: line, pool: poolOfLine(line), kind: AO.MILL.kindOf[line],
+      work: work, alloc: alloc, prog: prog, wait: !!m.wait[line],
+      left: left, turns: turns,
+      full: alloc >= work,
+      done: prog >= work
+    };
+  }
+  /* 设一条线的分配点数。**溢出无效**：超过工作量就封顶（返回 clamped）。
+   * 池子合计也不能超容量 —— 超了就把这条线压到"池里还剩下的点"。 */
+  function setLineAlloc(owner, line, pts, silent) {
+    owner = owner | 0;
+    if (!silent && !canAct(owner)) return { ok: false, msg: lockTitle(), pts: 0 };
+    var M = AO.MILL;
+    if (!M.kindOf[line]) return { ok: false, msg: '没有这条产线', pts: 0 };
+    var pool = poolOfLine(line), m = millOf(owner);
+    var work = lineWork(owner, line), cap = poolCap(owner, pool);
+    var others = allocSum(owner, pool) - Math.max(0, m.alloc[line] | 0);
+    var max = Math.min(work, Math.max(0, cap - others));
+    var want = Math.round(pts | 0);
+    if (want < 0) want = 0;
+    var clamped = false;
+    if (want > max) { want = max; clamped = true; }
+    m.alloc[line] = want;
+    return { ok: true, pts: want, clamped: clamped, work: work, cap: cap,
+      msg: (M.lineCn[line] || line) + ' ' + want + ' 点' + (clamped ? '（已封顶）' : '') };
+  }
+  /* 一条线 ±1 点（面板 ＋ / − 钮） */
+  function bumpLine(owner, line, delta, silent) {
+    var m = millOf(owner);
+    return setLineAlloc(owner, line, Math.max(0, (m.alloc[line] | 0) + (delta | 0)), silent);
+  }
+  /* 形制（线内单选）：刀/斧/弓/枪 各一个，默认平平无奇 */
+  function setLineForm(owner, line, formKey, silent) {
+    owner = owner | 0;
+    if (!silent && !canAct(owner)) return { ok: false, msg: lockTitle() };
+    if (AO.MILL.kindOf[line] !== 'blade') return { ok: false, msg: '只有兵刃线有形制' };
+    var F = AO.gearOf(AO.GEAR.forms, formKey);
+    millOf(owner).form[line] = F.key;
+    return { ok: true, form: F.key, msg: (AO.MILL.lineCn[line] || line) + ' · ' + F.cn };
+  }
+
+  /* ---------------- 武库（ARSENAL） ----------------
+   * 队份 = 武装一个千人队（UI 写 ×1000，内部记 1 份）。
+   * 兵刃按 '代|类型|形制|品质' 分格，马按 '品种|品质'，炮按 '代|品质'，舰按舰键。 */
+  function arsOf(owner) {
+    var A = ARSENAL[owner | 0];
+    if (!A) A = ARSENAL[owner | 0] = { wpn: {}, mount: {}, gun: {}, ship: {} };
+    if (!A.wpn) A.wpn = {};
+    if (!A.mount) A.mount = {};
+    if (!A.gun) A.gun = {};
+    if (!A.ship) A.ship = {};
+    return A;
+  }
+  function arsKey(kind, parts) { return parts.join('|'); }
+  function arsAdd(owner, kind, key, n) {
+    if (!n) return 0;
+    var A = arsOf(owner);
+    var v = (A[kind][key] | 0) + n;
+    if (v <= 0) delete A[kind][key]; else A[kind][key] = v;
+    return n;
+  }
+  function arsTake(owner, kind, key, n) {
+    var A = arsOf(owner), have = A[kind][key] | 0;
+    if (have < n) return false;
+    A[kind][key] = have - n;
+    if (A[kind][key] <= 0) delete A[kind][key];
+    return true;
+  }
+  function arsTotal(owner, kind) {
+    var A = arsOf(owner), n = 0, k;
+    for (k in A[kind]) n += A[kind][k] | 0;
+    return n;
+  }
+  /* 武库里**最高材质**的兵刃（同材质里挑品质最高的）。征兵 / AI 默认读它。 */
+  function arsBestWeapon(owner) {
+    var A = arsOf(owner), best = null, bestIdx = -1, bestQ = -1, k;
+    for (k in A.wpn) {
+      if (!(A.wpn[k] > 0)) continue;
+      var p = k.split('|'), idx = AO.MIL_ORDER.indexOf(p[0]), qi = AO.GEAR.q.indexOf(p[3]);
+      if (idx > bestIdx || (idx === bestIdx && qi > bestQ)) {
+        bestIdx = idx; bestQ = qi;
+        best = { tier: p[0], type: p[1], form: p[2], q: p[3], n: A.wpn[k] };
+      }
+    }
+    return best;
+  }
+  /* 工艺链决定的"能造什么材质"—— 兵刃线**产什么材质**读它。
+   * 为什么不读库存：库存里那批是**上一单**的产物，用它当产线目标会永远
+   * 停在旧材质上（研了新工艺也不换代）。 */
+  function craftWeapon(owner) {
+    var list = unlockedItems(owner, 'weapon');
+    return list.length ? list[list.length - 1] : AO.MIL_ITEM.leather;
+  }
+  /* 一国当前"最高材质"的军械（**库存最高材质**，任务书第七节）。
+   * 征兵 / 民兵 / AI 读它；库存为空时退回工艺链那一档。 */
+  function bestMaterial(owner) {
+    var bw = arsBestWeapon(owner);
+    if (bw && AO.MIL_ITEM[bw.tier]) return AO.MIL_ITEM[bw.tier];
+    return craftWeapon(owner);
+  }
+  /* 旧名保留：任务书第八节把 bestWeapon 改成 bestMaterial，但外部脚本还在用旧名 */
+  function bestWeapon(owner) { return bestMaterial(owner); }
+  /* 武库一行一行读出来（面板用）：按"代新→旧、品质高→低"排 */
+  function arsRows(owner, kind) {
+    var A = arsOf(owner), out = [], k, i;
+    var Q = AO.GEAR.q;
+    for (k in A[kind]) {
+      var n = A[kind][k] | 0;
+      if (!(n > 0)) continue;
+      var p = k.split('|'), row = { key: k, n: n, parts: p };
+      if (kind === 'wpn') {
+        var it = AO.MIL_ITEM[p[0]] || AO.MIL_ITEM.leather;
+        row.tier = p[0]; row.type = p[1]; row.form = p[2]; row.q = p[3];
+        row.cn = it.cn + ' · ' + typeCnOf({ type: p[1], tier: p[0] }) + ' · ' +
+          AO.gearOf(AO.GEAR.forms, p[2]).cn;
+        row.color = it.color || '#888';
+        row.icon = wpnIcon(p[1], p[0]);
+        row.ord = (AO.MIL_ORDER.indexOf(p[0]) * 10) + Q.indexOf(p[3]);
+      } else if (kind === 'mount') {
+        row.breed = p[0]; row.q = p[1];
+        row.cn = AO.gearOf(AO.GEAR.breeds, p[0]).cn;
+        row.ord = (AO.GEAR.breeds.findIndex(function (b) { return b.key === p[0]; }) * 10) + Q.indexOf(p[1]);
+      } else if (kind === 'gun') {
+        var gi = AO.MIL_ITEM[p[0]] || {};
+        row.tier = p[0]; row.q = p[1];
+        row.cn = (gi.cn || p[0]);
+        row.ord = (AO.GUN_ORDER.indexOf(p[0]) * 10) + Q.indexOf(p[1]);
+      } else {
+        var si = AO.MIL_ITEM[p[0]] || {};
+        row.cn = si.cn || p[0];
+        row.ord = AO.SHIP_ORDER.indexOf(p[0]);
+      }
+      out.push(row);
+    }
+    out.sort(function (a, b) { return b.ord - a.ord; });
+    return out;
+  }
+  /* 武库里的"最优一份"：给一键配齐 / AI 用（同代里挑品质最高、词条最优） */
+  function arsBest(owner, kind) {
+    var rows = arsRows(owner, kind);
+    return rows.length ? rows[0] : null;
+  }
+
+  /* ---------------- 二b、装备袋（盔甲靴） ----------------
+   * 装备是**资产**：打造一次，永久叠在那支部队身上（不像兵刃会被换掉回库）。 */
+  function equipOf(owner) {
+    var e = EQUIPS[owner];
+    if (!e) e = EQUIPS[owner] = {};
+    for (var i = 0; i < AO.EQUIP.slots.length; i++) {
+      var s = AO.EQUIP.slots[i];
+      if (!e[s]) e[s] = { plain: 0, good: 0, fine: 0, rare: 0 };
+      for (var q = 0; q < AO.EQUIP.q.length; q++) {
+        var k = AO.EQUIP.q[q];
+        if (typeof e[s][k] !== 'number' || !isFinite(e[s][k])) e[s][k] = 0;
+      }
+    }
+    return e;
+  }
+  function equipStockOf(owner, slot) {
+    var e = equipOf(owner)[slot], n = 0;
+    if (!e) return 0;
+    for (var i = 0; i < AO.EQUIP.q.length; i++) n += e[AO.EQUIP.q[i]] || 0;
+    return n;
+  }
+  function equipTotal(owner) {
+    var n = 0;
+    for (var i = 0; i < AO.EQUIP.slots.length; i++) n += equipStockOf(owner, AO.EQUIP.slots[i]);
+    return n;
+  }
+  /* 一国当前的装备材质（按工艺链爬到哪一档） */
+  function matOf(owner) {
+    var M = AO.EQUIP.mat, idx = 0;
+    for (var i = 0; i < M.length; i++) {
+      if (!M[i].tech || hasTech(owner, M[i].tech)) idx = i;
+    }
+    return M[idx];
+  }
+  function matIdxOf(owner) {
+    var M = AO.EQUIP.mat, idx = 0;
+    for (var i = 0; i < M.length; i++) if (!M[i].tech || hasTech(owner, M[i].tech)) idx = i;
+    return idx;
+  }
+  /* 品质 roll：看**全国最高**那位匠人（没有匠人就按学徒档），
+   * 「淬火工艺」再上移一档。整队同品质 —— 一单只 roll 一次。 */
+  function rollQuality(owner) {
+    var A = AO.ARTISAN;
+    var idx = bestArtisanLv(owner);
+    if (idx < 0) idx = 0;
+    if (hasTech(owner, 'mil_quench')) idx++;
+    idx = AO.clamp(idx, 0, A.roll.length - 1);
+    var w = A.roll[idx], total = 0, i, r;
+    for (i = 0; i < w.length; i++) total += w[i];
+    r = Math.random() * total;
+    for (i = 0; i < w.length; i++) {
+      r -= w[i];
+      if (r <= 0) return AO.EQUIP.q[i];
+    }
+    return 'plain';
+  }
+  /* 一件装备的加成：材质底 × 品质倍率 */
+  function equipPieceBonus(owner, q) {
+    return matOf(owner).base * (AO.EQUIP.qMul[q] || 1);
+  }
+  /* 一支部队的三件装备合计加成（加算：1 + Σ） */
+  function equipMulOf(a) {
+    if (!a || a.type === 'navy' || !a.equip) return 1;
+    var sum = 0, E = AO.EQUIP;
+    for (var i = 0; i < E.slots.length; i++) {
+      var q = a.equip[E.slots[i]];
+      if (!q) continue;
+      sum += equipPieceBonus(a.owner, q);
+    }
+    return 1 + sum;
+  }
+  /* 配发一件（换下来的回库）。q 为空 = 卸下。 */
+  function equipArmy(a, slot, q, silent) {
+    if (!a) return { ok: false, msg: '没有这支军队' };
+    if (!silent && !canAct(a.owner)) return { ok: false, msg: lockTitle() };
+    if (a.type === 'navy') return { ok: false, msg: '舰队不吃盔甲靴（船上没有列阵的地方）' };
+    if (AO.EQUIP.slots.indexOf(slot) < 0) return { ok: false, msg: '没有这个槽' };
+    if (!a.equip) a.equip = { helm: null, chest: null, boots: null };
+    var inv = equipOf(a.owner), old = a.equip[slot] || null;
+    if (q) {
+      if (!inv[slot] || !(inv[slot][q] > 0)) {
+        return { ok: false, msg: '武库里没有「' + AO.EQUIP.slotCn[slot] + ' · ' +
+          AO.EQUIP.qCn[q] + '」了（先下产线）' };
+      }
+      inv[slot][q]--;
+    }
+    if (old) inv[slot][old]++;
+    a.equip[slot] = q || null;
+    return { ok: true, old: old, q: q || null };
+  }
+  /* 一键配齐：三槽各取库存里**最优**的一件（已有的更好就不动）。 */
+  function equipAutoFit(a, silent) {
+    if (!a) return { ok: false, msg: '没有这支军队', n: 0 };
+    if (!silent && !canAct(a.owner)) return { ok: false, msg: lockTitle(), n: 0 };
+    if (a.type === 'navy') return { ok: false, msg: '舰队不吃盔甲靴', n: 0 };
+    if (!a.equip) a.equip = { helm: null, chest: null, boots: null };
+    var E = AO.EQUIP, inv = equipOf(a.owner), n = 0, i, j;
+    for (i = 0; i < E.slots.length; i++) {
+      var slot = E.slots[i];
+      var curRank = a.equip[slot] ? E.q.indexOf(a.equip[slot]) : -1;
+      for (j = E.q.length - 1; j > curRank; j--) {
+        var q = E.q[j];
+        if (!(inv[slot][q] > 0)) continue;
+        if (a.equip[slot]) inv[slot][a.equip[slot]]++;
+        inv[slot][q]--;
+        a.equip[slot] = q;
+        n++;
+        break;
+      }
+    }
+    return { ok: true, n: n, msg: n ? ('配齐 ' + n + ' 件，战力 ×' + equipMulOf(a).toFixed(3)) : '已经是库存里最好的了' };
+  }
+  function equipClear(a) {
+    if (!a || !a.equip) return 0;
+    var inv = equipOf(a.owner), n = 0, i;
+    for (i = 0; i < AO.EQUIP.slots.length; i++) {
+      var slot = AO.EQUIP.slots[i], q = a.equip[slot];
+      if (!q) continue;
+      inv[slot][q]++;
+      a.equip[slot] = null;
+      n++;
+    }
+    return n;
+  }
+  /* 军队覆没：随军装备销毁（胜者不缴获） */
+  function equipDestroy(a) {
+    if (!a || !a.equip) return 0;
+    var n = 0, i;
+    for (i = 0; i < AO.EQUIP.slots.length; i++) if (a.equip[AO.EQUIP.slots[i]]) n++;
+    a.equip = { helm: null, chest: null, boots: null };
+    return n;
+  }
+  /* 换代回收（装备）：新材质研成的那一刻，旧库存折半回炉换铁。 */
+  function equipRecycle(owner, why) {
+    owner = owner | 0;
+    var E = AO.EQUIP, inv = equipOf(owner), lost = 0, i, j;
+    for (i = 0; i < E.slots.length; i++) {
+      var slot = E.slots[i];
+      for (j = 0; j < E.q.length; j++) {
+        var q = E.q[j], n = inv[slot][q] | 0;
+        if (n <= 0) continue;
+        var keep = Math.ceil(n / 2);
+        lost += n - keep;
+        inv[slot][q] = keep;
+      }
+    }
+    if (!lost) return 0;
+    var iron = Math.floor(lost * (E.recycle.iron || 0));
+    var cen = ensureCentral(owner);
+    cen.iron = (cen.iron || 0) + iron;
+    if (PLAYER && owner === PLAYER) {
+      NOTES.push({ owner: PLAYER, cls: 'ok',
+        text: (why || '新材质') + '：旧装备库存折半回炉（' + lost + ' 件 → ' + iron +
+          ' 铁）。库存只剩一代，往后打的都按新材质算' });
+    }
+    return lost;
+  }
+  /* 换代回收（兵刃）：研出新工艺那一刻，**全国所有更低材质**的兵刃队份
+   * 折半回炉，每份返 0.5 铁 —— 武器库存永远只有当前材质。
+   * 发放不做选择题：玩家不用自己挑"哪些旧货不要了"，换代那一刻统一清。
+   * 炮与舰不回收（拍板项：炮是重资产，舰是船台上的东西，换代了也还能用）。 */
+  function gearRecycle(owner, why) {
+    owner = owner | 0;
+    var A = arsOf(owner), cur = craftWeapon(owner).key;
+    var curIdx = AO.MIL_ORDER.indexOf(cur), lost = 0, k;
+    var keys = Object.keys(A.wpn);
+    for (var i = 0; i < keys.length; i++) {
+      k = keys[i];
+      var tier = k.split('|')[0];
+      if (AO.MIL_ORDER.indexOf(tier) >= curIdx) continue;
+      var n = A.wpn[k] | 0;
+      if (n <= 0) continue;
+      var keep = Math.ceil(n / 2);
+      lost += n - keep;
+      if (keep > 0) A.wpn[k] = keep; else delete A.wpn[k];
+    }
+    if (!lost) return 0;
+    var iron = Math.floor(lost * (AO.EQUIP.recycle.iron || 0));
+    var cen = ensureCentral(owner);
+    cen.iron = (cen.iron || 0) + iron;
+    var txt = '换代回收：' + (why || '新工艺') + ' 研成 —— 旧兵刃 ' + lost + ' 队份折半回炉 → 铁锭 ×' + iron +
+      '（库存只留「' + (AO.MIL_ITEM[cur] || {}).cn + '」这一档材质）';
+    WARLOG.unshift({ turn: turnNo, cls: 'ok', text: txt });
+    if (PLAYER && owner === PLAYER) NOTES.push({ owner: PLAYER, cls: 'ok', text: txt });
+    return lost;
+  }
+
+  /* ---------------- 三、军队的三维（装备决定兵种） ----------------
+   * 招的全是步兵：兵种是武库里发装备发出来的 ——
+   *   发了炮 = 炮兵（接触段打 5 折、攻城值最高）
+   *   发了马 = 骑兵
+   *   否则   = 步兵
+   * 三维 = **类型基准 × 材质倍率 × 品质 × 形制词条** × 时代加成（占位）。
+   * 类型是绝对基准（刀 1.00/0.80/2），材质是唯一的数值乘数（皮 1.0 → 火器 1.55），
+   * 品质与形制是在这上面乘/加 —— 这就是"科技只卖材质、兵器全靠工匠打"。
+   * 弓在**火器材质**下显示「铳」、射程 +1（同一件东西换名字与射程，不是新类型）。 */
+  function unitOf(a) {
+    var G = AO.GEAR;
+    if (!a) return { atk: G.bare.atk, def: G.bare.def, mov: G.bare.mov, range: 0, siege: 0, pow: G.bare.atk };
+    if (a.type === 'navy') {
+      var sh = AO.MIL_ITEM[a.tier] || AO.MIL_ITEM.galley;
+      return { atk: sh.pow, def: sh.pow, mov: 2, range: 1, siege: 0, pow: sh.pow };
+    }
+    var w = a.weapon, mt = a.mount, g = a.gun;
+    var atk = G.bare.atk, def = G.bare.def, mov = G.bare.mov, range = 0, siege = 0;
+    if (w) {
+      var T = AO.gearOf(G.types, w.type), F = AO.gearOf(G.forms, w.form);
+      var M = AO.MIL_ITEM[w.tier] || AO.MIL_ITEM.leather;
+      var qm = G.qMul[w.q] || 1, mm = M.mul || 1;
+      atk = T.atk * mm * qm * (1 + (F.atk || 0) / 100);
+      def = T.def * mm * qm * (1 + (F.def || 0) / 100);
+      mov = (T.mov || 2) + (F.mov || 0);
+      range = (T.range || 0) + (isChong(w) ? 1 : 0);
+    }
+    if (mt) {
+      var B = AO.gearOf(G.breeds, mt.breed), bm = G.qMul[mt.q] || 1;
+      atk *= (1 + B.atk / 100) * bm;
+      def *= (1 + B.def / 100) * bm;
+      mov += (B.mov || 0);
+    }
+    if (g) {
+      var gi = AO.MIL_ITEM[g.tier];
+      if (gi) {
+        siege = Math.max(siege, gi.siege || 0);
+        range = Math.max(range, gi.range || 0);
+      }
+    }
+    var cm = craftMulOf(a.owner);
+    atk *= cm; def *= cm;
+    mov = AO.clamp(Math.round(mov), 1, 3);
+    return { atk: atk, def: def, mov: mov, range: range, siege: siege, pow: atk };
+  }
+  /* 兵器图标：**形状 × 材质色**批量导出（tools/res-icons.html 的矩阵），
+   * id 免映射表 —— item-wpn-<类型>-<材质>.png 直接拼出来。
+   * 弓在火器下画的是"铳身"变体，但文件名仍是 wpn-gong-powder（同一格）。 */
+  function wpnIcon(type, mat) {
+    return 'assets/res/item-wpn-' + (type || 'dao') + '-' + (mat || 'leather') + '.png';
+  }
+  /* 弓在火器材质下就是「铳」：名字与射程都换，类型仍是弓（图标走 gong 的铳身变体） */
+  function isChong(w) { return !!w && w.type === 'gong' && w.tier === 'powder'; }
+  function typeCnOf(w) {
+    if (!w) return '';
+    if (isChong(w)) return '铳';
+    return AO.gearOf(AO.GEAR.types, w.type).cn;
+  }
+  /* 部队的名字（战报 / 面板）：材质 + 类型 + 兵种，例如「铁刀步兵」 */
+  function unitNameOf(a) {
+    if (!a) return '部队';
+    if (a.type === 'navy') return (AO.MIL_ITEM[a.tier] || {}).cn || '舰队';
+    if (a.weapon) {
+      var it = AO.MIL_ITEM[a.weapon.tier] || {};
+      return (it.cn || '') + typeCnOf(a.weapon) + unitKindCn(a);
+    }
+    return unitKindCn(a);
+  }
+  /* 兵种（有炮=炮兵、有马=骑兵、否则步兵） */
+  function unitKindOf(a) {
+    if (!a) return 'inf';
+    if (a.type === 'navy') return 'navy';
+    if (a.gun) return 'art';
+    if (a.mount) return 'cav';
+    return 'inf';
+  }
+  function unitKindCn(a) {
+    var k = unitKindOf(a);
+    return k === 'art' ? '炮兵' : k === 'cav' ? '骑兵' : k === 'navy' ? '舰队' : '步兵';
+  }
+  /* 军队卡上那行话术：「铁 · 刀 · 锋锐（良）」，骑兵再加「马：具装马（上）」 */
+  function gearText(a) {
+    var G = AO.GEAR, out = [];
+    if (a.weapon) {
+      var it = AO.MIL_ITEM[a.weapon.tier] || AO.MIL_ITEM.leather;
+      out.push(it.cn + ' · ' + typeCnOf(a.weapon) + ' · ' +
+        AO.gearOf(G.forms, a.weapon.form).cn + '（' + G.qCn[a.weapon.q] + '）');
+    } else out.push('赤手空拳');
+    if (a.mount) out.push('马：' + AO.gearOf(G.breeds, a.mount.breed).cn + '（' + G.qCn[a.mount.q] + '）');
+    if (a.gun) out.push('炮：' + (AO.MIL_ITEM[a.gun.tier] || {}).cn + '（' + G.qCn[a.gun.q] + '）');
+    return out.join(' · ');
+  }
+  /* 发武器：从武库取一份（换下的回库）。key = '代|类型|形制|品质' */
+  function issueWeapon(a, key, silent) {
+    if (!a) return { ok: false, msg: '没有这支军队' };
+    if (!silent && !canAct(a.owner)) return { ok: false, msg: lockTitle() };
+    if (a.type === 'navy') return { ok: false, msg: '舰队不吃兵刃' };
+    if (!key) {                                   // 卸下
+      if (a.weapon) arsAdd(a.owner, 'wpn', a.weapon.key, 1);
+      a.weapon = null;
+      syncArms(a);
+      return { ok: true, msg: '卸下兵刃，回武库' };
+    }
+    var A = arsOf(a.owner);
+    if (!(A.wpn[key] > 0)) return { ok: false, msg: '武库里没有这一份了' };
+    if (a.weapon) arsAdd(a.owner, 'wpn', a.weapon.key, 1);
+    arsTake(a.owner, 'wpn', key, 1);
+    var p = key.split('|');
+    a.weapon = { key: key, tier: p[0], type: p[1], form: p[2], q: p[3] };
+    syncArms(a);
+    return { ok: true, msg: '换装：' + gearText(a) };
+  }
+  function issueMount(a, key, silent) {
+    if (!a) return { ok: false, msg: '没有这支军队' };
+    if (!silent && !canAct(a.owner)) return { ok: false, msg: lockTitle() };
+    if (a.type === 'navy') return { ok: false, msg: '舰队不骑马' };
+    if (!key) {
+      if (a.mount) arsAdd(a.owner, 'mount', a.mount.key, 1);
+      a.mount = null;
+      syncArms(a);
+      return { ok: true, msg: '卸下马，回武库' };
+    }
+    var A = arsOf(a.owner);
+    if (!(A.mount[key] > 0)) return { ok: false, msg: '武库里没有这一份马了' };
+    if (a.mount) arsAdd(a.owner, 'mount', a.mount.key, 1);
+    arsTake(a.owner, 'mount', key, 1);
+    var p = key.split('|');
+    a.mount = { key: key, breed: p[0], q: p[1] };
+    syncArms(a);
+    return { ok: true, msg: '发马：' + gearText(a) + '（兵种 → ' + unitKindCn(a) + '）' };
+  }
+  function issueGun(a, key, silent) {
+    if (!a) return { ok: false, msg: '没有这支军队' };
+    if (!silent && !canAct(a.owner)) return { ok: false, msg: lockTitle() };
+    if (a.type === 'navy') return { ok: false, msg: '舰炮不算陆军的炮' };
+    if (!key) {
+      if (a.gun) arsAdd(a.owner, 'gun', a.gun.key, 1);
+      a.gun = null;
+      syncArms(a);
+      return { ok: true, msg: '卸下炮，回武库' };
+    }
+    var A = arsOf(a.owner);
+    if (!(A.gun[key] > 0)) return { ok: false, msg: '武库里没有这一门炮了' };
+    if (a.gun) arsAdd(a.owner, 'gun', a.gun.key, 1);
+    arsTake(a.owner, 'gun', key, 1);
+    var p = key.split('|');
+    a.gun = { key: key, tier: p[0], q: p[1] };
+    syncArms(a);
+    return { ok: true, msg: '发炮：' + gearText(a) + '（兵种 → ' + unitKindCn(a) + '）' };
+  }
+  /* a.arms 是给战报 / 面板读的派生字段，和 unitKindOf 永远同源 */
+  function syncArms(a) {
+    if (!a) return;
+    a.arms = unitKindOf(a);
+  }
+  /* 一键配齐（武器 / 马 / 炮 / 盔甲靴 一起）：取武库里最优的一套 */
+  function armyFitAll(a, silent) {
+    if (!a) return { ok: false, msg: '没有这支军队' };
+    if (!silent && !canAct(a.owner)) return { ok: false, msg: lockTitle() };
+    if (a.type === 'navy') return { ok: false, msg: '舰队不用配装' };
+    var n = 0, i;
+    if (!a.weapon) { var w = arsBest(a.owner, 'wpn'); if (w) { issueWeapon(a, w.key, true); n++; } }
+    if (!a.mount) { var m = arsBest(a.owner, 'mount'); if (m) { issueMount(a, m.key, true); n++; } }
+    if (!a.gun) { var g = arsBest(a.owner, 'gun'); if (g) { issueGun(a, g.key, true); n++; } }
+    var e = equipAutoFit(a, true);
+    n += e.n || 0;
+    return { ok: true, n: n, msg: n ? ('配齐 ' + n + ' 项：' + gearText(a)) : '武库里没有能配的东西' };
+  }
+
+  /* ---------------- 四、装备袋与产线（兼容层） ---------------- */
   function itemStock(pid, key) {
     var bag = SIM[pid];
     if (!bag) return 0;
@@ -7113,34 +10592,40 @@
     s.stock += n;
     return n;
   }
-  function itemOf(a) { return AO.MIL_ITEM[a.tier] || AO.MIL_ITEM.leather; }
-
+  /* 面板上"这支部队叫什么"：陆军的名字由 材质+类型+兵种 拼出来（「铁刀步兵」），
+   * 舰队直接用舰种名。返回的是**显示用**的小对象，不是库存表里的那一行。 */
+  function itemOf(a) {
+    if (!a) return AO.MIL_ITEM.leather;
+    if (a.type === 'navy') return AO.MIL_ITEM[a.tier] || AO.MIL_ITEM.galley;
+    return {
+      cn: unitNameOf(a),
+      color: (a.weapon && (AO.MIL_ITEM[a.weapon.tier] || {}).color) || '#888'
+    };
+  }
   /* 一国已解锁的装备（该 kind：weapon / gun / ship） */
   function unlockedItems(owner, kind) {
     var order = kind === 'gun' ? AO.GUN_ORDER : kind === 'ship' ? AO.SHIP_ORDER : AO.MIL_ORDER;
-    var out = [];
+    var out = [], R = RESEARCH[owner], done = R && R.done;
     for (var i = 0; i < order.length; i++) {
       var it = AO.MIL_ITEM[order[i]];
       if (!it) continue;
-      if (!it.tech || (RESEARCH[owner] && RESEARCH[owner].done[it.tech])) out.push(it);
+      if (kind === 'weapon') {
+        if (AO.craftHave(done, it.craft)) out.push(it);
+      } else if (!it.tech || (done && done[it.tech])) out.push(it);
     }
     return out;
   }
-  /* 该国当前"最高档"的可用军械（征兵的默认选择） */
-  function bestWeapon(owner) {
-    var list = unlockedItems(owner, 'weapon');
-    return list.length ? list[list.length - 1] : AO.MIL_ITEM.leather;
+  function lastUnlocked(owner, kind) {
+    var list = unlockedItems(owner, kind);
+    return list.length ? list[list.length - 1] : null;
   }
 
-  /* ---------------- 三、装备厂：建厂条件 / 订单 / 产出 ---------------- */
+  /* ---------------- 四b、建厂（＋ 钮与真建厂读同一份规则） ---------------- */
   function factoryCtx(p) {
-    /* edu = 累计教育（只加不减，解锁用）；talent = 能花的人才点（抽卡会扣）。
-     * 建厂门槛一律看 edu —— 看 pts 的话"抽一位官员"就能把自己的厂锁掉。 */
+    /* edu = 累计教育（只加不减，解锁用）；talent = 能花的人才点（抽卡会扣）。 */
     var T = talentOf(p.owner);
     return { bag: SIM[p.id], edu: T.total || 0, talent: T.pts || 0 };
   }
-  /* 建一座装备厂（付账 → 开工）。门槛由 AO.FACTORY.check 统一回答，
-   * 所以 ＋钮的 title 和真建厂读的是同一段判断，不会出现"说明说能建、点了不让建"。 */
   function buildFactory(p, kind, silent) {
     var say = silent ? noop : bldMsg;
     var D = AO.FACTORY[kind];
@@ -7158,97 +10643,144 @@
     say(D.cn + '开工：' + costText(D.cost) + '，' + st.site + ' 回合后完工（' + D.desc + '）', 'ok');
   }
 
-  /* 军械坊 / 铸炮厂 / 造船厂下订单：只能从**已解锁**的装备里挑。 */
-  function setShopOrder(pid, kind, key) {
-    var p = pOf(pid);
-    if (!p) return { ok: false, msg: '没有这个省' };
-    if (!canAct(p.owner)) return { ok: false, msg: lockTitle() };
-    var it = key ? AO.MIL_ITEM[key] : null;
-    if (key && !it) return { ok: false, msg: '没有这种装备' };
-    if (it) {
-      var order = kind === 'armory' ? AO.MIL_ORDER : kind === 'foundry' ? AO.GUN_ORDER : AO.SHIP_ORDER;
-      if (order.indexOf(key) < 0) return { ok: false, msg: AO.FACTORY[kind].cn + ' 产不了' + it.cn };
-      if (it.tech && !(RESEARCH[p.owner] && RESEARCH[p.owner].done[it.tech])) {
-        var t = AO.TECH_BY_KEY[it.tech];
-        return { ok: false, msg: '还没解锁「' + it.cn + '」，先研究「' + (t ? t.cn : it.tech) + '」' };
+  /* ---------------- 五、订单结算（全国，每国一次） ---------------- */
+  /* 一国这一回合的料：先中央、再各省（从库存多的省开始）—— 全国口径的生产
+   * 没有"本省"这个概念，所以不能只吃一个省。 */
+  function millPay(owner, recipe) {
+    var k, cen = ensureCentral(owner), need = {}, total = 0;
+    for (k in recipe) { need[k] = recipe[k]; total += recipe[k]; }
+    if (!total) return true;
+    var have = 0;
+    for (k in need) have += (cen[k] || 0) + 0;
+    var provs = (coOf(owner) || {}).provinces || [], i;
+    for (i = 0; i < provs.length; i++) {
+      var bag = SIM[provs[i]];
+      if (!bag) continue;
+      for (k in need) if (bag[k]) have += bag[k].stock || 0;
+    }
+    for (k in need) {
+      var got = Math.min(need[k], Math.max(0, cen[k] || 0));
+      cen[k] = (cen[k] || 0) - got;
+      need[k] -= got;
+      if (need[k] <= 0) continue;
+      /* 省里凑：按库存从多到少（大省先出，小省留着过日子） */
+      var list = provs.slice().sort(function (a, b) {
+        var ba = SIM[a], bb = SIM[b];
+        return ((bb && bb[k] && bb[k].stock) || 0) - ((ba && ba[k] && ba[k].stock) || 0);
+      });
+      for (i = 0; i < list.length && need[k] > 0; i++) {
+        var b2 = SIM[list[i]];
+        if (!b2 || !b2[k]) continue;
+        var take = Math.min(need[k], b2[k].stock || 0);
+        if (take <= 0) continue;
+        b2[k].stock -= take;
+        need[k] -= take;
+        var F = FLOW[list[i]];
+        if (F) { F.loss[k] = (F.loss[k] || 0) + take; F.d.ind = (F.d.ind || 0) + take; }
+      }
+      if (need[k] > 0) return false;          // 缺料：整单不成立（不烧半份料）
+    }
+    var FC = FLOWC[owner];
+    if (FC) for (k in recipe) FC.d.ind = (FC.d.ind || 0) + recipe[k];
+    return true;
+  }
+  /* 一单的料 */
+  function orderCost(owner, line) {
+    var M = AO.MILL, kind = M.kindOf[line], k, out = {};
+    if (kind === 'blade') {
+      var it = craftWeapon(owner);
+      for (k in it.recipe) out[k] = it.recipe[k] * (M.bladeMul || 1);
+    } else if (kind === 'equip') {
+      for (k in M.equipRecipe) out[k] = M.equipRecipe[k];
+    } else if (kind === 'mount') {
+      for (k in M.mountRecipe) out[k] = M.mountRecipe[k];
+    } else {
+      var gi = AO.MIL_ITEM[line];
+      if (gi && gi.recipe) for (k in gi.recipe) out[k] = gi.recipe[k];
+    }
+    return out;
+  }
+  /* 出一单：把这一单的东西放进武库（兵刃/马/炮/舰）或装备库（盔甲靴） */
+  function makeOrder(owner, line) {
+    var M = AO.MILL, kind = M.kindOf[line], q = rollQuality(owner);
+    if (kind === 'blade') {
+      var it = craftWeapon(owner), form = millOf(owner).form[line] || 'plain';
+      var key = [it.key, line, form, q].join('|');
+      arsAdd(owner, 'wpn', key, 1);
+      return { kind: kind, key: key, q: q, n: 1 };
+    }
+    if (kind === 'equip') {
+      var inv = equipOf(owner);
+      inv[line][q] = (inv[line][q] || 0) + 1;
+      return { kind: kind, key: line + '|' + q, q: q, n: 1 };
+    }
+    if (kind === 'mount') {
+      var mk = line + '|' + q;
+      arsAdd(owner, 'mount', mk, 1);
+      return { kind: kind, key: mk, q: q, n: 1 };
+    }
+    if (kind === 'gun') {
+      var gk = line + '|' + q;
+      arsAdd(owner, 'gun', gk, 1);
+      return { kind: kind, key: gk, q: q, n: 1 };
+    }
+    arsAdd(owner, 'ship', line, 1);
+    return { kind: kind, key: line, q: q, n: 1 };
+  }
+  /* 全国产能结算：每国一次（放在省循环之后、人口税之前那一位）。
+   * 顺序：算池 → 分配 clamp → 逐线推进 → 满工作量就出单（缺料卡在 100%）。 */
+  function settleIndustry(owner) {
+    owner = owner | 0;
+    if (!owner || countryDead(owner)) return;
+    var M = AO.MILL, m = millOf(owner), i, j;
+    for (i = 0; i < MILL_POOLS.length; i++) {
+      var pool = MILL_POOLS[i], kind = M.poolBld[pool];
+      var raw = poolCapRaw(owner, pool) + (m.acc[pool] || 0);
+      var cap = Math.floor(raw);
+      m.acc[pool] = raw - cap;
+      var lines = M.lines[pool], sum = 0;
+      for (j = 0; j < lines.length; j++) sum += Math.max(0, m.alloc[lines[j]] | 0);
+      /* 产能缩水（工厂停产 / 匠人被撤）：**从工作量最高的线往下扣** */
+      while (sum > cap) {
+        var hi = -1, hiW = -1;
+        for (j = 0; j < lines.length; j++) {
+          var ln = lines[j], a0 = Math.max(0, m.alloc[ln] | 0);
+          if (!a0) continue;
+          if (lineWork(owner, ln) > hiW) { hiW = lineWork(owner, ln); hi = j; }
+        }
+        if (hi < 0) break;
+        m.alloc[lines[hi]]--; sum--;
+      }
+      for (j = 0; j < lines.length; j++) {
+        var line = lines[j];
+        var alloc = Math.min(Math.max(0, m.alloc[line] | 0), lineWork(owner, line));
+        var work = lineWork(owner, line);
+        var prog = Math.min(work, (m.prog[line] || 0) + alloc);
+        if (prog >= work) {
+          if (millPay(owner, orderCost(owner, line))) {
+            makeOrder(owner, line);
+            prog = 0;
+            m.wait[line] = 0;
+          } else {
+            m.wait[line] = 1;               // 卡在 100% 等料：不烧料、不丢进度
+          }
+        } else {
+          m.wait[line] = 0;
+        }
+        m.prog[line] = prog;
       }
     }
-    var st = univOf(kind, pid);
-    st.order = key || null;
-    return { ok: true, msg: key ? (AO.FACTORY[kind].cn + ' 改产「' + it.cn + '」') : (AO.FACTORY[kind].cn + ' 停工待单') };
   }
-
-  /* 本省军械产能的乘数：有一座**不停产**的工厂就 ×2，否则 ×1。
-   * 抽成函数是为了「settleIndustry 的实际产出」和「? 面板/行 title 上写的 ×2」
-   * 读同一个数 —— 面板说翻倍、结算没翻，这种错最难查。 */
-  function armProdMul(pid) {
-    var fb = FACTORY_BLD[pid];
-    return (fb && fb.n > 0 && !fb.halted) ? (AO.FACTORY.factory.prodMul || 2) : 1;
-  }
-  AO.resArmProdMul = armProdMul;
-
-  /* 装备厂结算：每回合一次，跑在资源产出之后。
-   * **产能是闸**：每座每回合 out 件，料从本省库存 → 中央国库扣（不走调拨，
-   * 和 payMaint 同一个口径 —— 厂子在本地，料也该在本地）。
-   *
-   * 工厂（15 档）是唯一的产能放大器：本省只要有一座不停产的工厂，
-   * 军械坊 / 驯马场 / 铸炮厂 / 造船厂 的**产出 ×2、料不变** ——
-   * 工业化解放的是产能，不是原料（否则"缺铁"就成了唯一瓶颈，
-   * 工厂反而变成负担）。 */
-  function settleIndustry(pid, owner) {
-    var bag = SIM[pid];
-    if (!bag) return;
-    var i, kind, st, D;
-    /* 本省工厂的产能乘数：0 座或停产 → 1 */
-    var outMul = armProdMul(pid);
-    for (i = 0; i < UNIV_MIL.length; i++) {
-      kind = UNIV_MIL[i];
-      st = UNIV[kind][pid];
-      if (!st || !(st.n > 0)) continue;
-      D = AO.FACTORY[kind];
-      if (st.halted) continue;                     // 维护欠费 → 停产（复用 payMaint 的结果）
-      var F = (CUR.pid === (pid | 0)) ? CUR.F : null;
-
-      if (kind === 'stable') {                     // 驯马场：产战马（骑兵的第二道闸）
-        var hn = st.n * (D.per || 1) * outMul;
-        addItem(pid, 'warhorse', hn);
-        if (F) F.gain.warhorse = (F.gain.warhorse || 0) + hn;
-        continue;
-      }
-      if (kind === 'barracks' || kind === 'factory') continue;  // 不产东西：兵营开征兵口、工厂给产能
-
-      /* 三个订单厂：armory / foundry / shipyard */
-      var key = st.order;
-      if (!key) continue;                          // 没下单 → 空转（不下单不花钱，这是故意的）
-      var it = AO.MIL_ITEM[key];
-      if (!it) { st.order = null; continue; }
-      if (it.tech && !(RESEARCH[owner] && RESEARCH[owner].done[it.tech])) continue;  // 订单失效
-
-      /* 凑料：先本省，再中央。凑不齐就这一回合不产（料不扣半份）。 */
-      var cen = ensureCentral(owner), need = {}, k, okMat = true;
-      for (k in it.recipe) need[k] = it.recipe[k] * st.n;
-      for (k in need) {
-        var have = stockOf(pid, k) + (cen[k] || 0);
-        if (have < need[k]) { okMat = false; break; }
-      }
-      if (!okMat) continue;
-      for (k in need) {
-        var take = Math.min(stockOf(pid, k), need[k]);
-        if (take > 0) {
-          bag[k].stock -= take;
-          if (F) { F.loss[k] = (F.loss[k] || 0) + take; F.d.ind = (F.d.ind || 0) + take; }
-        }
-        var rest = need[k] - take;
-        if (rest > 0) {
-          cen[k] = (cen[k] || 0) - rest;
-          var FC = FLOWC[owner];
-          if (FC) { FC.loss[k] = (FC.loss[k] || 0) + rest; FC.d.ind = (FC.d.ind || 0) + rest; }
-        }
-      }
-      var outN = (it.out || 1) * st.n * outMul;
-      addItem(pid, key, outN);
-      if (F) F.gain[key] = (F.gain[key] || 0) + outN;
+  /* 一国的产线总览（面板 / AI 读同一份） */
+  function millReport(owner) {
+    var M = AO.MILL, out = [], i, j;
+    for (i = 0; i < MILL_POOLS.length; i++) {
+      var pool = MILL_POOLS[i];
+      out.push({ pool: pool, cap: poolCap(owner, pool), used: allocSum(owner, pool), lines: [] });
+      var lines = M.lines[pool];
+      for (j = 0; j < lines.length; j++) out[out.length - 1].lines.push(lineStatus(owner, lines[j]));
     }
+    return out;
   }
 
   /* ---------------- 四、将领（武科抽卡） ----------------
@@ -7361,14 +10893,38 @@
     for (var i = 0; i < ids.length; i++) if (ARMY[ids[i]].owner === (owner | 0)) out.push(ARMY[ids[i]]);
     return out;
   }
+  /* 兼容入口：把"装备代"（旧键）或材质键读成一份**凡品刀**
+   * （旧脚本/老档里 newArmy(..., {tier:'ironwp'}) 的写法照旧能用）。 */
+  function weaponFromTier(t) {
+    if (!t) return null;
+    var m = AO.MAT_ALIAS[t] ? AO.matKeyOf(t)
+      : (AO.MIL_ITEM[t] && AO.MIL_ITEM[t].kind === 'weapon' ? t : null);
+    if (!m) return null;
+    return { key: m + '|dao|plain|plain', tier: m, type: 'dao', form: 'plain', q: 'plain' };
+  }
   function newArmy(owner, pid, opt) {
     opt = opt || {};
     var id = ARMY_ID++;
     var a = {
       id: id, owner: owner | 0, type: opt.type || 'army',
-      tier: opt.tier || 'leather', men: Math.max(100, opt.men || AO.RECRUIT.menPerUnit),
+      /* tier：舰队存舰种键；陆军存**材质**键（旧档的"代"读进来先折算，见 AO.matKeyOf） */
+      tier: opt.type === 'navy' ? (opt.tier || 'galley') : AO.matKeyOf(opt.tier || 'leather'),
+      men: Math.max(100, opt.men || AO.RECRUIT.menPerUnit),
       ships: opt.type === 'navy' ? (opt.ships || 1) : 0, cargo: null,
-      generalId: opt.generalId || 0, order: null, pid: pid | 0, sup: false, starved: false
+      generalId: opt.generalId || 0, order: null, pid: pid | 0, sup: false, starved: false,
+      /* 装备三槽（盔/甲/靴，存品质键；材质不入件，见 AO.EQUIP）。
+       * 新军默认空手 —— 配发是武库面板上的一个动作，不是征兵附送的。 */
+      equip: { helm: null, chest: null, boots: null },
+      /* v19：兵刃 / 马 / 炮三份"队份"（各存武库的键）。
+       * **兵种是从这里派生的**：有炮=炮兵、有马=骑兵、否则步兵。
+       * opt.tier 是**兼容入口**（旧脚本 / 测试 / 存档里"建一支铁甲军"的写法）：
+       * 旧键（ironwp / crossbow / musket…）先折算成材质，再发一份该材质的刀
+       * （平平无奇 · 凡品）—— 不用调用方改口。 */
+      weapon: opt.weapon || weaponFromTier(opt.tier),
+      mount: opt.mount || null,
+      /* 炮也一样：opt.tier 给的是炮键 → 当成"发了一门炮"（炮兵） */
+      gun: opt.gun || (opt.tier && (AO.MIL_ITEM[opt.tier] || {}).kind === 'gun'
+        ? { key: opt.tier + '|plain', tier: opt.tier, q: 'plain' } : null)
     };
     ARMY[id] = a;
     if (a.generalId && GENERALS[a.generalId]) GENERALS[a.generalId].armyId = id;
@@ -7379,45 +10935,28 @@
     if (!a) return;
     var g = generalOf(a);
     if (g) { g.armyId = 0; milPoolOf(a.owner).push(g); }
+    /* 覆没的军队把随军装备一起带走（拍板⑥：胜者不缴获）。
+     * 为什么放在这个唯一出口上：全歼 / 断粮溃散 / 装船沉没 / 解散 都走 disbandArmy，
+     * 在这里销毁一次就够，各调用点不用各记一遍。 */
+    equipDestroy(a);
     delete ARMY[id];
     if (why) WARLOG.unshift({ turn: turnNo, cls: 'bad', text: why });
   }
 
-  /* 征兵：三样消耗（人口 / 金 / 该代装备）齐全才成军。
-   * **成建制门槛**：省里该代装备不够 N 件时直接不让征（title 里写差几件）。 */
+  /* 征兵（v19）：**只出步兵** —— 扣金 + 人口，不扣装备。
+   * 兵种是武库里发装备发出来的（有炮=炮兵、有马=骑兵），所以征兵这一步
+   * 只回答"有没有人、有没有钱"，不回答"穿什么"。
+   * 裸兵 pow 0.5（见 GEAR.bare）：能守不能攻，AI 也不拿裸兵进攻。 */
   function recruitInfo(pid, arms, tierKey) {
-    var p = pOf(pid), out = { ok: false, why: '', tier: null, arms: arms || 'inf' };
+    var p = pOf(pid), out = { ok: false, why: '', tier: null, arms: 'inf' };
     if (!p) { out.why = '没有这个省'; return out; }
     var bq = BARRACKS[pid];
     if (!bq || !(bq.n > 0)) { out.why = '本省没有兵营'; return out; }
     if (bq.halted) { out.why = '兵营维护欠费，停产中'; return out; }
-    var it = tierKey ? AO.MIL_ITEM[tierKey] : (arms === 'art' ? lastUnlocked(p.owner, 'gun') : bestWeapon(p.owner));
-    if (!it) { out.why = '还没有可用的装备（先研究军械 / 铸炮）'; return out; }
+    var it = bestWeapon(p.owner);
     out.tier = it;
-    if (it.tech && !(RESEARCH[p.owner] && RESEARCH[p.owner].done[it.tech])) {
-      out.why = '还没解锁「' + it.cn + '」'; return out;
-    }
-    if (arms === 'cav' && it.arms !== 'cav' && !hasCavTech(p.owner)) {
-      out.why = '重骑兵要「强弩·具装」解锁'; return out;
-    }
-    if (arms === 'art' && it.kind !== 'gun') { out.why = '炮兵要炮'; return out; }
     var R = AO.RECRUIT;
-    out.need = {
-      pop: R.popPerUnit, gold: R.goldPerUnit, wpn: R.weaponPerUnit,
-      horse: arms === 'cav' ? R.horsePerCav : 0,
-      gun: arms === 'art' ? R.gunPerArt : 0
-    };
-    var wpnHave = itemStock(pid, it.key);
-    out.have = { wpn: wpnHave, horse: itemStock(pid, 'warhorse'), gun: arms === 'art' ? wpnHave : 0 };
-    if (wpnHave < out.need.wpn) {
-      out.why = '军械不够：本省「' + it.cn + '」只有 ' + wpnHave + ' 件，成建制要 ' + out.need.wpn +
-        ' 件（差 ' + (out.need.wpn - wpnHave) + ' 件 —— 让军械坊接着产）';
-      return out;
-    }
-    if (arms === 'cav' && itemStock(pid, 'warhorse') < out.need.horse) {
-      out.why = '战马不够：要 ' + out.need.horse + ' 匹，本省有 ' + itemStock(pid, 'warhorse') + '（盖驯马场）';
-      return out;
-    }
+    out.need = { pop: R.popPerUnit, gold: R.goldPerUnit, wpn: 0, horse: 0, gun: 0 };
     var gold = (SIM[pid].gold && SIM[pid].gold.stock) || 0;
     var cen = CENTRAL[p.owner] || {};
     if (gold + (cen.gold || 0) < out.need.gold) {
@@ -7427,30 +10966,24 @@
     var popv = (POP[pid] && POP[pid].v) || 0;
     if (popv < out.need.pop) { out.why = '人口不够：要 ' + out.need.pop + ' 人，本省只有 ' + Math.round(popv); return out; }
     if (RECRUITQ[pid]) { out.why = '本省正在征兵（剩 ' + RECRUITQ[pid].left + ' 回合）'; return out; }
+    /* 裸兵提醒：不是闸，是让玩家知道"还得去武库发装备" */
+    out.bare = true;
     out.ok = true;
     return out;
   }
-  function lastUnlocked(owner, kind) {
-    var list = unlockedItems(owner, kind);
-    return list.length ? list[list.length - 1] : null;
-  }
   function hasCavTech(owner) {
     var R = RESEARCH[owner];
-    return !!(R && R.done.mil_crossbow);
+    return !!(R && R.done && R.done.mil_iron);
   }
 
   function recruit(pid, arms, tierKey) {
-    arms = arms || 'inf';
     var p = pOf(pid);
     if (!p) return { ok: false, msg: '没有这个省' };
     if (!canAct(p.owner)) return { ok: false, msg: lockTitle() };
-    var info = recruitInfo(pid, arms, tierKey);
+    var info = recruitInfo(pid, 'inf', tierKey);
     if (!info.ok) return { ok: false, msg: info.why };
-    var it = info.tier, R = AO.RECRUIT, need = info.need;
+    var R = AO.RECRUIT, need = info.need;
 
-    /* 扣装备（本省库存） */
-    SIM[pid][it.key].stock -= need.wpn;
-    if (need.horse) addItem(pid, 'warhorse', -need.horse);
     /* 扣金：先省库、再中央 */
     var g = SIM[pid].gold, left = need.gold;
     var take1 = Math.min(g.stock, left);
@@ -7467,28 +11000,28 @@
       if (gt && gt.fx.rec) delay = Math.max(0, delay - gt.fx.rec);
     }
     if (delay <= 0) {
-      var a0 = spawnArmy(p.owner, pid, it.key, arms);
-      return { ok: true, msg: p.name + ' 成军：「' + it.unit + '」' + AO.RECRUIT.menPerUnit + ' 人（' +
-        it.cn + ' ×' + need.wpn + ' · 金 ' + need.gold + ' · 人口 ' + need.pop + '）', army: a0, instant: true };
+      var a0 = spawnArmy(p.owner, pid);
+      return { ok: true, msg: p.name + ' 成军：步兵 ' + AO.RECRUIT.menPerUnit + ' 人（金 ' +
+        need.gold + ' · 人口 ' + need.pop + '）—— 赤手空拳，去「武库」发装备', army: a0, instant: true };
     }
-    RECRUITQ[pid] = { left: delay, tier: it.key, arms: arms, owner: p.owner | 0 };
-    return { ok: true, msg: p.name + ' 征兵中：「' + it.unit + '」' + delay + ' 回合后成军（' +
-      it.cn + ' ×' + need.wpn + ' · 金 ' + need.gold + ' · 人口 ' + need.pop + '）' };
+    RECRUITQ[pid] = { left: delay, owner: p.owner | 0 };
+    return { ok: true, msg: p.name + ' 征兵中：步兵 ' + delay + ' 回合后成军（金 ' +
+      need.gold + ' · 人口 ' + need.pop + '）' };
   }
 
-  /* 成军：同省同代同兵种 → 并进去（避免一个省堆十支小军） */
-  function spawnArmy(owner, pid, tier, arms) {
+  /* 成军：同省同国 → 并进去（避免一个省堆十支小军） */
+  function spawnArmy(owner, pid) {
     var list = armiesIn(pid), i;
     for (i = 0; i < list.length; i++) {
       var a = list[i];
-      if (a.owner === (owner | 0) && a.type === 'army' && a.tier === tier && (a.arms || 'inf') === (arms || 'inf') &&
+      if (a.owner === (owner | 0) && a.type === 'army' && !a.weapon && !a.mount && !a.gun &&
         a.men < AO.RECRUIT.maxMen) {
         a.men = Math.min(AO.RECRUIT.maxMen, a.men + AO.RECRUIT.menPerUnit);
         return a;
       }
     }
-    var na = newArmy(owner, pid, { type: 'army', tier: tier, men: AO.RECRUIT.menPerUnit });
-    na.arms = arms || 'inf';
+    var na = newArmy(owner, pid, { type: 'army', men: AO.RECRUIT.menPerUnit });
+    syncArms(na);
     return na;
   }
   function recruitTick() {
@@ -7499,9 +11032,8 @@
       delete RECRUITQ[pid];
       var p = pOf(pid);
       if (!p) continue;
-      spawnArmy(q.owner, +pid, q.tier, q.arms);
-      WARLOG.unshift({ turn: turnNo, cls: 'ok',
-        text: p.name + ' 新军成军（' + (AO.MIL_ITEM[q.tier] || {}).cn + '）' });
+      spawnArmy(q.owner, +pid);
+      WARLOG.unshift({ turn: turnNo, cls: 'ok', text: p.name + ' 新军成军（步兵，待发装备）' });
     }
   }
 
@@ -7670,6 +11202,7 @@
 
   function sideStat(list, prov, isDef) {
     var B = AO.BATTLE, pow = 0, shoot = 0, men = 0, ships = 0, siege = 0;
+    var defSum = 0, movSum = 0;
     var hasNight = false, hasWall = false, hasAmbush = false, first = 1;
     for (var i = 0; i < list.length; i++) {
       var a = list[i], u = armyUnits(a);
@@ -7677,11 +11210,15 @@
       var m = 1;
       if (fx.powMul) m *= fx.powMul;
       if (isDef && fx.defMul) m *= fx.defMul;
+      /* 装备三件（v17）：战力 ×(1 + Σ(材质底 × 品质倍))，攻防同乘 ——
+       * 乘在 v 上，所以射击相位（shoot += v）也一起吃到，不用乘两次。 */
+      m *= equipMulOf(a);
       if (a.sup) m *= B.suppress;                    // 被轰击压制
       if (a.starved) m *= 0.85;                      // 断粮
       if (isDecap(a.owner)) m *= B.decap;            // 群龙无首
       var v = u.base * m;
       pow += v; men += a.men; ships += a.ships || 0;
+      defSum += (u.def || 1) * a.men; movSum += (u.mov || 2) * a.men;
       if (u.range > 0) shoot += v;
       if (u.siege > siege) siege = u.siege;
       var tac = a.order && a.order.tactic;
@@ -7701,18 +11238,24 @@
     return {
       pow: pow * terrMul, shoot: shoot * terrMul, men: men, ships: ships, siege: siege,
       terr: terrMul, terrain: prov.terrain, hasNight: hasNight, hasWall: hasWall,
+      /* 三维（v19）：def / mov 按兵数加权 —— 一支混编军队的"防御"不是一个整数，
+       * 而是"每个兵的那一档乘他的人数"再除总兵数。 */
+      def: men > 0 ? defSum / men : 1,
+      mov: men > 0 ? movSum / men : 2,
       first: first, dice: rnd(B.diceLo, B.diceHi), n: list.length
     };
   }
   function armyUnits(a) {
     if (a.type === 'navy') {
       var sh = AO.MIL_ITEM[a.tier] || AO.MIL_ITEM.galley;
-      return { pow: sh.pow, base: (a.ships || 0) * sh.pow, range: 1, siege: 0 };
+      return { pow: sh.pow, base: (a.ships || 0) * sh.pow, range: 1, siege: 0,
+        def: sh.pow, mov: 2 };
     }
-    var it = itemOf(a);
-    var base = (a.men / 1000) * it.pow;
-    /* 炮兵在接触相位很脆：射击段按满战力，接触段打 5 折 */
-    return { pow: it.pow, base: base, range: it.range, siege: it.siege };
+    /* v19：三维由**装备**算出来（unitOf），不是查兵种表 ——
+     * 招的都是步兵，兵种是武库发出来的。 */
+    var u = unitOf(a);
+    return { pow: u.atk, base: (a.men / 1000) * u.atk, range: u.range, siege: u.siege,
+      def: u.def, mov: u.mov };
   }
 
   /* 伤亡：按兵比例摊到各军，人从 POP 扣，装备按比例损毁 */
@@ -7731,13 +11274,8 @@
       /* 阵亡兵从省人口里扣（征的时候扣过一次，死的时候再扣一次 —— 这是人头，不是税收） */
       var pop = POP[a.pid];
       if (pop) pop.v = Math.max(1000, pop.v - real);
-      /* 装备按比例损毁：每死 1000 人损 1 件（就地从驻省库存扣） */
-      var lost = Math.floor(real / 1000);
-      if (lost > 0 && a.type !== 'navy') {
-        var have = itemStock(a.pid, a.tier);
-        var cut = Math.min(have, lost);
-        if (cut > 0) addItem(a.pid, a.tier, -cut);
-      }
+      /* v19：武器不再按人头从省库扣 —— 装备是**部队身上的**东西（武库发下来的
+       * 队份），死的是人不是装备；整支打光了才在 disbandArmy 里随军销毁。 */
       if (a.type === 'navy') a.ships = Math.max(0, (a.ships || 0) - Math.floor(real / 1000));
     }
     return dead;
@@ -7787,6 +11325,19 @@
       D.shoot *= wMul;
     }
 
+    /* ---- 三维（v19）：def 减伤 + mov 先手 ----
+     * 减伤 = (def守 / def攻)^0.5，封顶 defMitCap（1.3）：
+     *   守方吃到的伤亡**除以**它。铁器(def2.0) 挨 皮甲(def1.0) 打 = ÷1.41，
+     *   反过来只有 ÷1（下限 1，防御再差也不会"受伤加倍"）。
+     * 先手 = mov 差每高一档，射击相位 +5%（封顶 ±15%）—— 骑兵先撞上枪线，
+     * 弓手先放一轮，这都在"射击"这一段里体现，不另开相位。 */
+    var mit = Math.pow(Math.max(0.01, D.def) / Math.max(0.01, A.def), B.defMitExp);
+    mit = AO.clamp(mit, 1, B.defMitCap);
+    var movDiff = (A.mov || 2) - (D.mov || 2);
+    var init = AO.clamp(movDiff * B.initPerStep, -B.initCap, B.initCap);
+    if (init > 0) A.shoot *= (1 + init);
+    else if (init < 0) D.shoot *= (1 - init);
+
     var aMen0 = A.men, dMen0 = D.men;
     var defImmune = defList.some(function (x) {
       var tr = genTrait(generalOf(x));
@@ -7803,7 +11354,7 @@
     if (aS + dS > 0) {
       var rateA = B.lossBase * (aS / (aS + dS));   // 攻方造成的损失率（打在守方身上）
       var rateD = B.lossBase * (dS / (aS + dS));
-      shootRec.deadD = hurtWall(wallSt, wallRec, defList, dMen0 * rateA);
+      shootRec.deadD = hurtWall(wallSt, wallRec, defList, dMen0 * rateA / mit);
       shootRec.deadA = hurt(atkList, aMen0 * rateD);
     }
     /* ---- 相位二：接触（炮兵接触段打折） ---- */
@@ -7814,7 +11365,7 @@
     if (aM + dM > 0) {
       var mrA = B.lossBase * (aM / (aM + dM));
       var mrD = B.lossBase * (dM / (aM + dM));
-      meleeRec.deadD = hurtWall(wallSt, wallRec, defList, Math.max(0, dMen1) * mrA);
+      meleeRec.deadD = hurtWall(wallSt, wallRec, defList, Math.max(0, dMen1) * mrA / mit);
       meleeRec.deadA = hurt(atkList, Math.max(0, aMen1) * mrD);
     }
 
@@ -7845,6 +11396,7 @@
       atk: { owner: atkOwner, men0: aMen0, men1: aLeft, pow: A.pow, dice: A.dice, terr: 1, n: atkList.length },
       def: { owner: defOwner, men0: dMen0, men1: dLeft, pow: D.pow, dice: D.dice, terr: D.terr, n: defList.length },
       shoot: shootRec, melee: meleeRec, night: nightSkip, winner: winner,
+      three: { mit: mit, movA: A.mov, movD: D.mov, init: init, defA: A.def, defD: D.def },
       gA: gA ? gA.name : '', gD: gD ? gD.name : '',
       deadA: aMen0 - aLeft, deadD: dMen0 - dLeft,
       wall: wallRec
@@ -7854,6 +11406,18 @@
     for (var ci3 = 0; ci3 < defList.length; ci3++) defList[ci3].sup = false;
     if (winner === 'atk') { winList = atkList; loserList = defList; }
     else { winList = defList; loserList = atkList; }
+    /* ---- 三维（v19）：追击 ----
+     * 败方机动每低一档，多损 5%（B.pursuePerStep）。打崩了跑不掉才是真崩 ——
+     * 这条只加在**已经判负**的一方身上，不影响胜负判定本身。 */
+    var wMov = winner === 'atk' ? A.mov : D.mov, lMov = winner === 'atk' ? D.mov : A.mov;
+    var pursueMul = Math.max(0, (wMov || 2) - (lMov || 2)) * B.pursuePerStep;
+    rep.pursue = 0;
+    if (pursueMul > 0) {
+      rep.pursue = hurt(loserList, sumMen(loserList) * pursueMul);
+      aLeft = sumMen(atkList); dLeft = sumMen(defList);
+      rep.atk.men1 = aLeft; rep.def.men1 = dLeft;
+      rep.deadA = aMen0 - aLeft; rep.deadD = dMen0 - dLeft;
+    }
     rep.retreat = retreat(loserList, winner === 'atk' ? atkOwner : defOwner, prov);
     recWarReport(rep);
     /* 存一份"最后一场会战"的完整战报：验收要能从战报复算伤亡，
@@ -7871,8 +11435,12 @@
       if (a.sup) m *= AO.BATTLE.suppress;
       if (a.starved) m *= 0.85;
       if (isDecap(a.owner)) m *= AO.BATTLE.decap;
+      /* 装备（v17）：接触相位是**另一段**独立算的战力，装备必须在这里再乘一次 ——
+       * sideStat 里那份只喂给射击相位和战报。冷兵器没有射程，全部伤害走这一段，
+       * 漏了这行的话"盔甲靴"就只影响战报上那个数字，一点血都不少吃。 */
+      m *= equipMulOf(a);
       var base = u.base * m;
-      if (a.type === 'army' && (a.arms === 'art' || (AO.MIL_ITEM[a.tier] || {}).arms === 'art')) base *= 0.5;
+      if (a.type === 'army' && unitKindOf(a) === 'art') base *= 0.5;
       v += base;
     }
     if (list.length >= 2) v *= AO.BATTLE.encircle;
@@ -7930,7 +11498,8 @@
     var an = ownerName(rep.atk.owner), dn = ownerName(rep.def.owner);
     var winnerName = rep.winner === 'atk' ? an : dn;
     var tcn = (AO.TERRAIN_CN && AO.TERRAIN_CN[rep.terrain]) || rep.terrain;
-    var txt = '⚔ ' + rep.prov + '（' + tcn + '·守 ×' + rep.def.terr.toFixed(2) + '）：' +
+    var txt = '⚔ ' + rep.prov + ' · ' + AO.calTag(turnNo) +
+      '（' + tcn + '·守 ×' + rep.def.terr.toFixed(2) + '）：' +
       an + ' ' + rep.gA + ' ' + rep.atk.men0 + ' 人（战 ' + fmtPts(rep.atk.pow) +
       '·骰 ' + rep.atk.dice.toFixed(2) + '）攻 ' +
       dn + ' ' + rep.gD + ' ' + rep.def.men0 + ' 人（战 ' + fmtPts(rep.def.pow) +
@@ -7988,6 +11557,17 @@
       newC.provinces.sort(function (a, b) { return a - b; });
     }
     OCCUPY[pid] = { by: by | 0, turn: turnNo };
+    /* 整合（B1）：刚打下来 = 未整合。这一行同时管两件事：
+     *   ① 首次占领 → INTEG 从 0 开始；
+     *   ② **被对方夺回去**（原来是你整合好的省）→ 直接归零重算。
+     * 所以"被夺回 INTEG 清零"不需要在别处再判一次，易主就是清零。 */
+    INTEG[pid | 0] = { v: 0 };
+    /* 不安：换主子等于重新洗牌 —— 旧怨跟着旧朝廷散了，但"占领"本身
+     * 那 +15 立刻接上（下一回合 settleUnrest 会算出来）。上限压到 30，
+     * 否则一个 90 不安的省会带着 90 投到新主门下，新主开局就爆。 */
+    var uo = unrestOf(pid);
+    uo.v = Math.min(uo.v, 30); uo.target = uo.v;
+    delete UNWARN[pid | 0];
     delete SIEGE[pid];
     /* 战争分（v9）：占领 +10，围城开城 +8（省了攻城的血，分也少一点），
      * 拿下对方首都再 +30 —— 首都易手是这一仗的胜负手，值得单独记一笔。 */
@@ -8005,15 +11585,18 @@
     if (before) see(before, pid, false);
     WARLOG.unshift({ turn: turnNo, cls: 'ok',
       text: '🚩 ' + p.name + ' 易主：' + (oldC ? oldC.name : '?') + ' → ' + (newC ? newC.name : '?') +
-        (via ? '（' + via + '）' : '') + '；占领省产出 ×' + AO.BATTLE.occupyProd + '、民心 ' + AO.BATTLE.occupyHappy +
+        (via ? '（' + via + '）' : '') + '；未整合省产出 ×' + AO.INTEG.prodAt0 +
+        '（整合满 ×' + AO.BATTLE.occupyProd + '，完成归附 ×1）、民心 ' + AO.BATTLE.occupyHappy +
         (wsGain ? '；战争分 +' + wsGain : '') });
     /* 编年史（v5）：只读一次状态 —— 玩家刚把最后一块地打下来时，
      * 史记要当场翻到"天下归一"那一页，而不是等下一回合结算。 */
     if (AO.chronoCheck) AO.chronoCheck();
-    /* 「遥远的战争」（v10）：都城易手是远方最值得知道的那一条 */
+    /* 「世界消息」（v15）：都城易手是远方最值得知道的那一条 ——
+     * 但它同样要走情报渠道（灭国级的消息最容易被传走样，见 0 档的「夸大其词」） */
     if (oldC && oldC.capital === pid && PLAYER !== by && PLAYER !== before) {
       worldNews('都城易手：' + (newC ? newC.name : '?') + ' 攻下 ' + p.name +
-        '（' + oldC.name + ' 的都城）', 'warn');
+        '（' + oldC.name + ' 的都城）', 'warn',
+        { parties: [by, before], kind: 'capital' });
     }
     return true;
   }
@@ -8148,42 +11731,144 @@
     var frac = isDecap(loser) ? AO.BATTLE.surrenderFracDecap : AO.BATTLE.surrenderFrac;
     var line = Math.max(1, Math.ceil((baseLoser || 1) * frac));
     if (lc.provinces.length > line) return;
+
+    /* 投降线的三分支（v13）：全吞 / 傀儡 / 被 AI 要求称臣。
+     *
+     * 为什么不是"全都收成傀儡"：朝贡是**收租**，但一个已经崩掉的国家，租子也
+     * 收不上来（它的省被打烂、民心见底）。所以全吞仍然是默认的解，傀儡是
+     * 概率分支 —— 40% 是"AI 也懂留个收租的"和"别让世界只剩灭国一种结局"的折中。
+     *
+     * 顺序不能反：
+     *   ① 已经是别人的属国 → 直接全吞（没有"傀儡的傀儡"，表上也没法表达）
+     *   ② 玩家是胜方 → 弹卡，让玩家自己选（这一批要给的就是这个决定）
+     *   ③ 玩家是败方 → AI 掷点（40% 要称臣）
+     *   ④ AI 对 AI → 同上。
+     * 判定本身在 surrenderBranch 里（纯函数 + 一次掷点），这里只负责落地。 */
+    var branch = surrenderBranch(loser, winner);
+    if (branch === 'card') {
+      /* 已经弹着一张受降卡 → 不重复弹（一次只能选一件事，第二仗下一回合再说） */
+      if (SURR.open) return;
+      openSurrender(loser, winner);
+      return;
+    }
+    if (branch === 'puppet') {
+      var pr = makePuppet(winner, loser);
+      if (pr.ok) return;
+    }
     annex(loser, winner);
   }
-  /* 全境并入：省全给赢家、军队/官员/科技清空、NOTES 宣布灭亡 */
-  function annex(loser, winner) {
+  /* 投降线的三分支判定（**纯函数**，掷点在里面）。
+   * 单独拎出来是为了能对"玩家是败方 40% 被要求称臣"统计掷点频率 ——
+   * 埋在 trySurrender 里就只能靠造 200 次灭国来验，那验的是别的代码。
+   *
+   * 顺序不能反：
+   *   ① 已经是别人的属国 → annex（没有"傀儡的傀儡"，表上也表达不了）
+   *   ② 玩家是胜方 → card（这一批要给的就是"全吞还是收租"这个决定）
+   *   ③ 其余（玩家败方 / AI 对 AI）→ 40% 收成朝贡国，否则全吞 */
+  function surrenderBranch(loser, winner) {
+    var P = AO.DIPLO.puppet;
+    if (suzerainOf(loser)) return 'annex';
+    if (PLAYER && PLAYER === (winner | 0)) return 'card';
+    if (Math.random() < (P.surrenderP || 0.4) && canTakeVassal(winner, loser)) return 'puppet';
+    return 'annex';
+  }
+  /* 全境并入：省全给赢家、军队/官员/科技清空、NOTES 宣布灭亡。
+   *
+   * v13 起多了第三个参数 opt（**不传就是原来的行为**，投降那条路一行没变）：
+   *   integrated     省直接算正式国土（删 OCCUPY / INTEG，产出 ×1.0）
+   *   keepOfficials  官员留任（不删 OFFICIAL）
+   *   armyKeep       军队转编比例（其余解散）
+   *   via            战报里的动词（'投降并入' / '和平并入' / '强并入'）
+   *   puppet         'peace' | 'force' | ''（只影响战报文案）
+   * 傀儡用得到这四项，投降用不到 —— 所以是"加参数"，不是"改流程"。 */
+  function annex(loser, winner, opt) {
+    opt = opt || {};
     var lc = coOf(loser), wc = coOf(winner);
-    if (!lc || !wc) return;
+    if (!lc || !wc) return { ok: false, list: [] };
     var list = lc.provinces.slice(), i;
-    for (i = 0; i < list.length; i++) occupyProvince(list[i], winner, '投降并入');
+    /* 它自己的属国先放生（v13）：宗主亡了，附庸自动解除臣属 ——
+     * 新主子不继承附庸（继承会让"吞一个国顺带接管一片"成为最强的扩张方式）。
+     * 放生之后它们对赢家的态度是"刚被解除的敌国属国"，不带任何自动参战。 */
+    var vs = vassalsOf(loser);
+    for (i = 0; i < vs.length; i++) {
+      dropPuppetRec(loser, vs[i]);
+      var vt = '⚑ ' + nameOf(vs[i]) + ' 的宗主 ' + lc.name + ' 已亡 —— 臣属关系自动解除';
+      WARLOG.unshift({ turn: turnNo, cls: 'warn', text: vt });
+      if (PLAYER === vs[i] || PLAYER === loser || PLAYER === winner) {
+        NOTES.push({ owner: PLAYER, cls: 'warn', text: vt });
+      } else {
+        worldNews(vt.replace('⚑ ', ''), 'warn', { parties: [vs[i], loser], kind: 'puppet' });
+      }
+    }
+    for (i = 0; i < list.length; i++) {
+      occupyProvince(list[i], winner, opt.via || '投降并入');
+      if (opt.integrated) {
+        /* 傀儡并入：这些省本来就是它的地（只是腰包和兵不归自己），
+         * 一进门就是正式国土 —— 不删 OCCUPY 的话玩家拿回自己的省还要再整合
+         * 25~100 回合，"和平并入"就成了另一种全吞，等于白做一条路。 */
+        delete OCCUPY[list[i]];
+        delete INTEG[list[i]];
+      }
+    }
     lc.provinces = [];
-    /* 军队 / 将领 / 官员 / 科技一律清空 */
-    var ids = armyIds();
+    /* 军队 / 将领：默认全解散；傀儡并入按 armyKeep 转编一部分（其余就地解散）。
+     * 转编的兵留在原省（那省已经易主），如果它现在不在赢家手里（被第三方占着），
+     * 那支部队无处可去 —— 就地解散。 */
+    var ids = armyIds(), keepN = 0;
     for (i = 0; i < ids.length; i++) {
       var a = ARMY[ids[i]];
-      if (a && a.owner === loser) disbandArmy(a.id);
+      if (!a || a.owner !== loser) continue;
+      var keep = opt.armyKeep > 0 ? Math.round((a.men || 0) * opt.armyKeep) : 0;
+      if (keep >= 100) {
+        var ap = pOf(a.pid);
+        if (!ap || ap.owner !== (winner | 0)) { disbandArmy(a.id); continue; }
+        a.men = keep;
+        a.owner = winner | 0;
+        a.order = { type: 'defend', cid: winner | 0, pid: a.pid, tactic: 'assault' };
+        a.aiMen0 = 0;
+        var g0 = GENERALS[a.generalId];
+        if (g0) g0.owner = winner | 0;       // 将领跟着部队改换门庭
+        keepN++;
+      } else {
+        disbandArmy(a.id);
+      }
     }
     for (var gid in GENERALS) if (GENERALS[gid] && GENERALS[gid].owner === loser) delete GENERALS[gid];
-    /* 官员清空：并入的省由赢家重新派官（老的跟着旧朝廷一起没了） */
-    for (i = 0; i < list.length; i++) delete OFFICIAL[list[i]];
+    /* 官员：投降并入时清空（并入的省由赢家重新派官，老的跟着旧朝廷一起没了）；
+     * 傀儡并入时留任 —— 它本来就是你的地，官不用重新派。 */
+    if (!opt.keepOfficials) for (i = 0; i < list.length; i++) delete OFFICIAL[list[i]];
     var T = talentOf(loser);
     T.pool = []; T.milPool = []; T.pts = 0;
     RESEARCH[loser] = newResearch();
-    DEAD[loser] = { turn: turnNo, by: winner };
+    DEAD[loser] = { turn: turnNo, by: winner, puppet: opt.puppet || '' };
     /* 把跟它的战争状态全部撤掉 */
     for (var k in WARSET) {
       var ab = k.split('|');
       if (+ab[0] === loser || +ab[1] === loser) delete WARSET[k];
     }
+    /* 傀儡表里跟它有关的记录（自己是傀儡的那条在 annexPuppet 里已经删了，
+     * 这里兜底：投降被吞的国如果还是某人的傀儡，那条记录也该没了） */
+    for (k in PUPPET) {
+      var pr = PUPPET[k];
+      if (pr && ((pr.s | 0) === (loser | 0) || (pr.p | 0) === (loser | 0))) delete PUPPET[k];
+    }
     CAPS = null; CPROV.w = null;
     invalidateGeo();
-    var txt = '💀 ' + lc.name + ' 灭亡 —— 全境并入 ' + wc.name + '（剩省 ' + list.length + '，投降线 ' +
-      Math.round(frac100(loser) * 100) + '%）';
-    WARLOG.unshift({ turn: turnNo, cls: 'bad', text: txt });
+    var txt = opt.puppet
+      ? '🏳 ' + lc.name + ' 归附 ' + wc.name + '（' + list.length + ' 省，' + (opt.via || '并入') +
+        (keepN ? ' · 转编 ' + keepN + ' 支' : '') + '）'
+      : '💀 ' + lc.name + ' 灭亡 —— 全境并入 ' + wc.name + '（剩省 ' + list.length + '，投降线 ' +
+        Math.round(frac100(loser) * 100) + '%）';
+    WARLOG.unshift({ turn: turnNo, cls: opt.puppet ? 'ok' : 'bad', text: txt });
     if (PLAYER === loser || PLAYER === winner) NOTES.push({ owner: PLAYER, cls: 'warn', text: txt });
-    /* 「遥远的战争」（v10）：灭国是最大的那种远方大事，两边都不是玩家就进世界纪要 */
-    if (PLAYER !== loser && PLAYER !== winner) worldNews(txt.replace('💀 ', ''), 'bad');
+    /* 「世界消息」（v15）：灭国是最大的那种远方大事 —— 也最经不起传话，
+     * 0 档会把"某国挨打"传成"某国已亡"，所以它同样走情报渠道 */
+    if (PLAYER !== loser && PLAYER !== winner) {
+      worldNews(txt.replace(opt.puppet ? '🏳 ' : '💀 ', ''), 'bad',
+        { parties: [loser, winner], kind: opt.puppet ? 'puppet' : 'fall' });
+    }
     if (PLAYER === loser) toast('你被灭了 —— ' + wc.name + ' 吞并了 ' + lc.name + '。可以「退出游戏」回到工坊模式。', 6000);
+    return { ok: true, list: list, n: list.length, keep: keepN, text: txt };
   }
   function frac100(owner) {
     return isDecap(owner) ? AO.BATTLE.surrenderFracDecap : AO.BATTLE.surrenderFrac;
@@ -8231,16 +11916,17 @@
       }
       if (!spot && c.provinces.length) spot = c.provinces[0];
       if (!spot) continue;
+      /* v19：装备从**武库**发（不是省库）—— 有兵刃发兵刃、有炮发炮，都没有就是裸兵。
+       * 裸兵能守不能攻，AI 也不会拿它去进攻（见 18-ai 的 aiEquipFit）。 */
       var pick = bestWeapon(c.id);
-      /* 该省库存里要是有更好的，就用更好的（民兵也算有装备） */
-      var guns = unlockedItems(c.id, 'gun');
-      if (guns.length && itemStock(spot, guns[guns.length - 1].key) > 0) pick = guns[guns.length - 1];
+      var bw = arsBestWeapon(c.id), bg = arsBest(c.id, 'gun');
       var cen = ensureCentral(c.id);
+      /* 与玩家同价：AI 的民兵动员也付同一个单价 —— 同规则，不是两套账 */
       cen.gold = Math.max(0, (cen.gold || 0) - AO.RECRUIT.goldPerUnit);
-      var a = newArmy(c.id, spot, {
-        type: 'army', tier: pick.key, men: AO.RECRUIT.aiMen
-      });
-      a.arms = (pick.arms === 'art') ? 'art' : 'inf';
+      var a = newArmy(c.id, spot, { type: 'army', men: AO.RECRUIT.aiMen });
+      if (bw) issueWeapon(a, bw.key, true);
+      if (bg) issueGun(a, bg.key, true);
+      syncArms(a);
       a.order = { type: 'defend', cid: c.id, pid: spot, tactic: 'assault' };
       /* 顺手给它抽一位将（走同一个 MIL_TRAITS 池） */
       var tr = rollMilTrait();
@@ -8388,7 +12074,7 @@
     }
     /* 轰击：不移动，对相邻敌省打一轮（不触发会战） */
     if (o.type === 'bombard') {
-      var p = pOf(a.pid), it = itemOf(a);
+      var p = pOf(a.pid), it = unitOf(a);
       if (!p || !(it.range > 0)) return false;
       var tgt = 0, foes = 0, i;
       var nb = p.neighbors || [];
@@ -8434,7 +12120,7 @@
        * 空放一轮不加分，否则只要摆一门炮就能刷分。 */
       if (tp && (wallCut > 0 || dead > 0)) wsAdd(a.owner, tp.owner, 'bombard');
       WARLOG.unshift({ turn: turnNo, cls: 'warn',
-        text: '💥 ' + (pOf(a.pid) || {}).name + ' 的' + it.cn + '轰击 ' + (tp ? tp.name : '?') + '：' +
+        text: '💥 ' + (pOf(a.pid) || {}).name + ' 的' + unitNameOf(a) + '轰击 ' + (tp ? tp.name : '?') + '：' +
           (wallCut > 0
             ? '城墙 −' + (Math.round(wallCut * 10) / 10) + ' → 剩 ' + Math.round(tw.hp) + '/' + wmax2 +
               (sup ? '，磨穿了：敌军亡 ' + dead + ' 人' : '，墙还没塌，伤不到守军')
@@ -8491,6 +12177,9 @@
       }
       var tr2 = genTrait(generalOf(a));
       var steps = (tr2 && tr2.fx.move) ? tr2.fx.move : 1;
+      /* 三维（v19）：快档（mov ≥ 3）一回合行军 2 省 —— 轻装疾行的那一份装备
+       * 在这一行兑现。将领的「奔袭」仍然叠加（取大的那个）。 */
+      if (unitOf(a).mov >= AO.BATTLE.fastMove) steps = Math.max(steps, AO.BATTLE.fastMoveHops);
       var path3 = landPath(a.pid, tpid, a.owner);
       if (!path3) {
         if (!a.noPathNote) {
@@ -8601,9 +12290,23 @@
   }
 
   /* ---------------- 十四、宣战 / 停战 ---------------- */
-  function declareWar(a, b) {
+  function declareWar(a, b, opt) {
+    opt = opt || {};
     if (!a || !b || a === b) return { ok: false, msg: '不能对自己宣战' };
     if (countryDead(a) || countryDead(b)) return { ok: false, msg: '对方已经灭亡了' };
+    /* 外交锁（v13）：傀儡不能宣战 —— 它的兵是宗主的，仗也该由宗主去开。
+     * force 只给"揭竿而起"用：那一下是它**唯一**能自己决定的开战。 */
+    if (!opt.force) {
+      var suz = suzerainOf(a);
+      if (suz) {
+        return { ok: false, msg: nameOf(a) + ' 听命于宗主 ' + nameOf(suz) + '，不能自行宣战' };
+      }
+      /* 反过来也不行：宣战自己的属国是自相矛盾（它的兵本来就要跟着你打）。
+       * 想要那块地走「强并入」—— 那才是这一档关系的最后一个动作。 */
+      if (suzerainOf(b) === (a | 0)) {
+        return { ok: false, msg: nameOf(b) + ' 是你的属国 —— 要收地走「强并入」，不必宣战' };
+      }
+    }
     var k = warKey(a, b);
     if (WARSET[k]) return { ok: false, msg: '已经在交战' };
     /* 条约禁止互宣：同盟 / 互不侵犯的国家之间，宣战钮是置灰的（面板层），
@@ -8643,10 +12346,15 @@
         text: '🤝 盟友 ' + (ca ? ca.name : '?') + ' 已对 ' + (cb ? cb.name : '?') +
           ' 宣战 —— 跟不跟？（同盟不强制参战）' });
     }
-    /* 「遥远的战争」（v10）：两边都不是玩家 → 攒进世界纪要（结算尾定量放出） */
+    /* 「世界消息」（v15）：两边都不是玩家 → 攒进邸报（结算尾只放**到期**的那几条） */
     if (PLAYER !== a && PLAYER !== b) {
-      worldNews(txt.replace('📜 ', '') + (wasAlly || wasNap ? '（背信）' : ''));
+      worldNews(txt.replace('📜 ', '') + (wasAlly || wasNap ? '（背信）' : ''),
+        'warn', { parties: [a, b], kind: 'war' });
     }
+    /* 兵随宗主（v13）：**单向** leash —— 宗主开战，属国自动同宣（走 WARSET）。
+     * 反过来不成立：属国被宣，宗主不流血。这条是"朝贡"比"同盟"硬的那一档：
+     * 盟友只是提示你去跟牌，属国不用问，直接上。 */
+    leashVassals(a, b);
     /* 宣战后给双方边境军一个默认命令：不然刚宣战谁都不动，玩家会以为没生效 */
     return { ok: true, msg: txt };
   }
@@ -8674,6 +12382,19 @@
     var ca = coOf(a), cb = coOf(b);
     var txt = '🕊 ' + (ca ? ca.name : '?') + ' 与 ' + (cb ? cb.name : '?') + ' 停战';
     WARLOG.unshift({ turn: turnNo, cls: 'ok', text: txt });
+    /* 宗主停战 → 属国跟着停（v13）：它的仗本来就是被拖进来的，宗主收手它没有
+     * 单独打下去的理由；而且它自己也媾不了和（AI 侧 tryPeace 对傀儡关掉）。
+     * 单向：属国停战不会把宗主一起带走。 */
+    var vs = vassalsOf(a), vn;
+    for (vn = 0; vn < vs.length; vn++) {
+      if (!endWarOneSide(vs[vn], b)) continue;
+      var vt = '🕊 ' + nameOf(vs[vn]) + ' 随宗主 ' + nameOf(a) + ' 停战';
+      if (PLAYER === a || PLAYER === b || PLAYER === vs[vn]) {
+        NOTES.push({ owner: PLAYER, cls: 'ok', text: vt });
+      } else {
+        worldNews(vt.replace('🕊 ', ''), 'ok', { parties: [vs[vn], a, b], kind: 'peace' });
+      }
+    }
     return { ok: true, msg: txt };
   }
 
@@ -8721,6 +12442,11 @@
     /* 换了国 → 「维修」面板看的是另一个国家：红点和面板一起重算 */
     if (typeof refreshRepBadge === 'function') refreshRepBadge();
     if (REPU && REPU.open) renderRepPanel();
+    /* 工坊段（尺寸 / 种子 / 生成 / 涂色 / 自检）：
+     * 选了国就整段收起 —— 对局中按「生成新世界」等于把刚选的国换掉。
+     * 这是选国 / 退出唯一的副作用处（choosePlayer 和 exitGame 都走这里）。 */
+    var wb = $('workshopBar');
+    if (wb) wb.style.display = PLAYER ? 'none' : '';
     var b = $('playBtn');
     if (b) {
       var c = coOf(PLAYER);
@@ -8970,6 +12696,9 @@
     VIS.dirty = true;
     FOGSTAT = null;
     FOGVER++;
+    /* 世界消息（v15）的"耳目圈"= 自国省 + 已探省的邻国 —— 迷雾一变它就变，
+     * 所以挂在同一个入口上清，不另找地方（漏一处就是"探了新地界，消息还是听不见"）。 */
+    newsFogTouch();
   }
   /* 玩家视角的三态（数值版，渲染层用；热路径上比字符串便宜） */
   function visCode(pid) {
@@ -9090,12 +12819,16 @@
   /* 性格权重：军国 −10（谁都不信）/ 均衡 0 / 经营 +10（和气生财）。
    * 读的是 18-ai.js 已经算好的性格（personaOf 是纯读，不会替它掷新值）——
    * 这一批**不改 18-ai.js**，只借它的结果用。 */
-  function personaWeightOf(cid) {
+  function personaKeyOf(cid) {
     var key = 'balanced', dbg = AO.aiDebug;
     if (dbg && dbg.personaOf) {
       try { key = dbg.personaOf(cid | 0) || 'balanced'; } catch (e) { key = 'balanced'; }
     }
+    return key;
+  }
+  function personaWeightOf(cid) {
     var m = (AO.DIPLO.eval.persona) || {};
+    var key = personaKeyOf(cid);
     return typeof m[key] === 'number' ? m[key] : 0;
   }
   /* 共同敌人：和 cid 交战、同时也和 other 交战的国家有几个（有就算"敌人的敌人"） */
@@ -9116,6 +12849,9 @@
    * 分数够了但交情没到，一样不签：那是"信任"，不是"算账"。 */
   function aiDiploEval(cid, kind, other) {
     cid = cid | 0; other = other | 0;
+    /* 扶植傀儡（v13）：**另一套账**（分差/性格/快顶不住了），不在缔约这套里，
+     * 但入口留在一起 —— 上层（谈判桌 / AI / 测试）只需要记一个名字。 */
+    if (kind === 'puppet') return aiPuppetEval(cid, other);
     var D = AO.DIPLO;
     var need = kind === 'ally' ? D.ally.need : D.nap.need;
     var rel = relOf(cid, other);
@@ -9150,6 +12886,11 @@
     if (kind !== 'ally' && kind !== 'nap') return { ok: false, msg: '没有这种条约' };
     if (countryDead(from) || countryDead(to)) return { ok: false, msg: '对方已经灭亡了' };
     if (atWar(from, to)) return { ok: false, msg: '交战中不能缔约 —— 先求和' };
+    /* 外交锁（v13）：傀儡不能对外缔约 —— 它的外交权在宗主手里。
+     * 两侧都判：自己是傀儡不能签，对方是傀儡也签不了（那张表上没有它说话的份）。 */
+    var suzF = suzerainOf(from), suzT = suzerainOf(to);
+    if (suzF) return { ok: false, msg: nameOf(from) + ' 听命于宗主 ' + nameOf(suzF) + '，不能对外缔约' };
+    if (suzT) return { ok: false, msg: nameOf(to) + ' 听命于宗主 ' + nameOf(suzT) + '，不能对外缔约' };
     if (isAlly(from, to)) return { ok: false, msg: '已经是同盟了' };
     if (isNap(from, to)) return { ok: false, msg: '已经有互不侵犯条约了' };
     var k = warKey(from, to), ck = cdKey(from, to, kind), cd = DIPCD[ck] || 0;
@@ -9265,6 +13006,16 @@
     for (k in DIPPROP) if (deadKey(k)) delete DIPPROP[k];
     for (k in TRADEACC) if (deadKey(k)) delete TRADEACC[k];
     for (k in RELACC) if (deadKey(k)) delete RELACC[k];
+    /* 傀儡表同样清死国（v13）：不清的话"奉表于 ?"会永远躺在面板上 */
+    for (k in PUPPET) if (deadKey(k)) delete PUPPET[k];
+    /* 宗主 ⇄ 傀儡的关系锁（v13）：钉在 −80（貌合神离）。
+     * 缓释在这里**不适用** —— 一层"称臣"的关系不会因为几年没打仗就回暖；
+     * 想回暖只有一条路：散伙（独立或者并入）。 */
+    var PLOCK = (AO.DIPLO.puppet && AO.DIPLO.puppet.relLock) || -80;
+    for (k in PUPPET) {
+      if (!PUPPET[k]) continue;
+      if (REL[k] !== PLOCK) REL[k] = PLOCK;
+    }
 
     for (i = 0; i < cs.length; i++) {
       var ca = cs[i];
@@ -9275,6 +13026,8 @@
         var a = ca.id, b = cb.id, kk = warKey(a, b);
         if (countryDead(a) || countryDead(b)) continue;
         if (atWar(a, b)) continue;
+        /* 傀儡与宗主之间不缓释（关系锁由上面那段直接写死） */
+        if (PUPPET[kk]) continue;
         if (RELHIT[kk] === turnNo) continue;
         var v = relOf(a, b);
         if (v > 0) v -= D.rel.drift;
@@ -9308,13 +13061,18 @@
 
   /* 外国货源：REL ≥ 20 的存续外国，各自"该资源最富的省"有货才算一个来源。
    * 为什么按最富省取货：那是它真有货的地方；挑一个空省挂个"有货"的牌子
-   * 只会让玩家点了才发现买不到。 */
+   * 只会让玩家点了才发现买不到。
+   *
+   * 价格（v14）：`buyLot.gold × premium × 对方 PI` —— 对方缺这种资源，
+   * 你去买就贵；对方积压，你去买就便宜。**这就是跨国价差**，
+   * 也是"货源行显示对方价与本国价对比"的依据（gap 是差多少百分比）。
+   * 排序：便宜的在前面（同一个 key 里按 price 升序）——
+   * 价格板上看见谁家便宜，货源表第一条就该是谁家。 */
   function foreignSources(p, key) {
     var D = AO.DIPLO, out = [];
     var w = state.world;
     if (!w || !p) return out;
-    var lot = AO.GOV.buyLot();
-    var price = Math.ceil(lot.gold * D.trade.premium);
+    var lot = AO.GOV.buyLot(), myPi = priceV(p.owner, key);
     for (var i = 0; i < w.countries.length; i++) {
       var c = w.countries[i];
       if (!c || c.id === p.owner) continue;
@@ -9329,19 +13087,22 @@
         if (st > bestN) { bestN = st; best = q; }
       }
       if (!best || bestN < lot.n) continue;
+      var pi = priceV(c.id, key);
       out.push({
         cid: c.id, name: c.name, pid: best.id, prov: best.name,
-        stock: bestN, n: lot.n, price: price, rel: relOf(p.owner, c.id)
+        stock: bestN, n: lot.n, price: fBuyGold(c.id, key), pi: pi, myPi: myPi,
+        gap: myPi > 0 ? (1 - pi / myPi) : 0,
+        rel: relOf(p.owner, c.id)
       });
     }
-    out.sort(function (x, y) { return y.stock - x.stock; });
+    out.sort(function (x, y) { return x.price - y.price || y.stock - x.stock; });
     return out;
   }
   AO.resForeignSources = foreignSources;
 
   /* 买外国货：扣本省省库金 → 金进对方该资源最富省的省库 → 货进本省。
    * **不走调拨**，所以没有损耗 —— 这是"直接跟外国人买"，不是"从国内运"。
-   * 封锁省断供（和中央进货同一条闸）。 */
+   * 封锁省断供（和世界市场进货同一条闸）。 */
   /* asAi=true：AI 走同一条账，但**不写 bldMsg、不受 canAct 锁**
    * （那不是"按玩家的东西"，是 AI 自己的省在买货）。
    * 所有失败分支统一返回 { ok:false, msg }，AI 侧静默跳过。 */
@@ -9374,7 +13135,8 @@
     var d = addTradeRel(p.owner, cid);
     if (!asAi) {
       bldMsg('买 ' + src.n + ' ' + cnOf(key) + ' ← ' + nameOf(cid) + '·' + src.prov +
-        '（' + src.price + ' 金，溢价 ×' + AO.DIPLO.trade.premium + '）' +
+        '（' + src.price + ' 金 = 基准 × 溢价 ' + AO.DIPLO.trade.premium +
+        ' × 对方' + cnOf(key) + '价 ' + priceNum(src.pi) + '）' +
         (got < src.n ? '　⚠ 省库满仓，只收下 ' + got : '') +
         (d > 0 ? '　关系 +' + d : '　关系已到贸易上限'), 'ok');
     }
@@ -9384,6 +13146,154 @@
   AO.resBuyForeign = buyForeign;
   /* AI 的买货入口（18-ai 的 tryTrade）：同一个函数，只是不带玩家那套提示 */
   AO.resAiBuy = function (p, key, cid) { return buyForeign(p, key, cid, true); };
+
+  /* ---------------- 出口（③：倒卖闭环的另外半边） ----------------
+   * 买是"缺了去外面买"，卖到外国是"多了卖给外面" —— 一边是救急，一边是生意。
+   *
+   * 规则（全部写在按钮 title 里）：
+   *   ① 只列 REL ≥ minRel、不在交战、且**对方这种资源比本国贵**的国家
+   *      （价差小于 minSpread 也列出来没意义 —— 那是白搬货）；
+   *   ② 卖一手 exportLot 单位 → 到手 `对方 PI × exportCut` 金（八折，
+   *      那两成是运费 + 中间商）；
+   *   ③ 货从**本省**库存出，进对方该资源最富省的库存；
+   *   ④ 每省每回合最多 exportPerTurn 笔（EXP1 存回合号）。
+   *
+   * **为什么这条链不会变成印钞机**：货进了对方库存 → 对方比值上去 →
+   * 对方目标价下来 → 价差收窄。所以"一直卖同一家"会自己赚不到钱，
+   * 玩家得去找下一个缺货的邻国 —— 这正是我们要的经济行为。
+   *
+   * 记账：己方 FLOW.gain.export 记**货量**（不是金额，金额走 gain.gold，
+   * 因为金真的进了省库）；对方 FLOW.gain.import 记同一批货量。
+   * 两边记同一个单位，所以 bench 里"对账相等"可以直接比数。 */
+
+  /* 出口对象：谁愿意出高价。按**价差**降序（赚得最多的排第一）。
+   *
+   * 收货省怎么挑：**对方这种资源最富的省**（那是它真有仓的地方），
+   * 但如果那个省已经顶到库存上限（cap 150），货就白送了 —— 换个"装得下"的省。
+   * 一个国家所有省都装满，就不出现在列表里（送过去也是烂在路上）。
+   * 这一步同时保证了两边记账能对上：出口 n = 进口 n（下面 exportForeign 里）。 */
+  function exportSources(p, key) {
+    var D = AO.DIPLO, C = AO.PRICES_CFG, out = [];
+    var w = state.world;
+    if (!w || !p) return out;
+    var myPi = priceV(p.owner, key);
+    for (var i = 0; i < w.countries.length; i++) {
+      var c = w.countries[i];
+      if (!c || c.id === p.owner || !c.provinces || !c.provinces.length) continue;
+      if (countryDead(c.id)) continue;
+      if (atWar(p.owner, c.id)) continue;
+      if (relOf(p.owner, c.id) < D.trade.minRel) continue;
+      var pi = priceV(c.id, key);
+      if (pi - myPi < C.minSpread) continue;
+      /* 先按库存挑最富的省；装不下就退到"空位最多"的省 */
+      var best = null, bestN = -1, roomy = null, roomMax = 0;
+      for (var j = 0; j < c.provinces.length; j++) {
+        var q = pOf(c.provinces[j]);
+        if (!q) continue;
+        var st = stockOf(q.id, key), room = capOf(q.id, key) - st;
+        if (st > bestN) { bestN = st; best = q; }
+        if (room > roomMax) { roomMax = room; roomy = q; }
+      }
+      if (!best) continue;
+      var target = best;
+      if (capOf(best.id, key) - bestN < C.exportLot) {
+        if (roomMax < C.exportLot) continue;    // 全境装满 → 不列
+        target = roomy;
+      }
+      out.push({
+        cid: c.id, name: c.name, pid: target.id, prov: target.name,
+        stock: stockOf(target.id, key),
+        n: C.exportLot, pi: pi, myPi: myPi, gain: expGold(c.id, key),
+        spread: pi - myPi, rel: relOf(p.owner, c.id)
+      });
+    }
+    out.sort(function (x, y) { return y.spread - x.spread; });
+    return out;
+  }
+  AO.resExportSources = exportSources;
+
+  function exportForeign(p, key, cid, asAi) {
+    var C = AO.PRICES_CFG;
+    var fail = asAi ? function (t) { return { ok: false, msg: t }; }
+      : function (t) { return bldMsg(t, 'warn'); };
+    if (!asAi && !canAct(p.owner)) return fail(lockTitle());
+    if (BLOCKADE[p.id]) return fail('本省被舰队封锁，出不了货');
+    var mk = MARKET[p.id];
+    if (!mk || !(mk.n > 0)) return fail('本省还没有市场');
+    if (mk.halted) return fail('市场维护欠费，停产中（出不了货）');
+    if ((EXP1[p.id] | 0) === turnNo) {
+      return fail('本省这回合已经出过一笔了（每省每回合 ' + C.exportPerTurn + ' 笔）');
+    }
+    var n = C.exportLot, s = SIM[p.id] && SIM[p.id][key];
+    if (!s || s.stock < n) return fail(cnOf(key) + ' 不够：出口一手要 ' + n);
+    var src = null, list = exportSources(p, key);
+    for (var i = 0; i < list.length; i++) if (list[i].cid === (cid | 0)) { src = list[i]; break; }
+    if (!src) return fail('这家现在不出这个价（对方' + cnOf(key) + '价没比本国高）');
+    var q = pOf(src.pid);
+    if (!q) return fail('对方的收货省没了');
+    /* 真扣：货出本省、进对方最富省；钱进本省省库（攒整，见 sellResource） */
+    s.stock -= n;
+    var raw = expGold(cid, key);
+    SELLACC[p.id] = (SELLACC[p.id] || 0) + raw;
+    var whole = Math.floor(SELLACC[p.id] + 1e-9);
+    SELLACC[p.id] = SELLACC[p.id] - whole;
+    if (whole > 0) gainStock(p.id, 'gold', whole, flowOf(p.id));
+    var took = gainStock(q.id, key, n, flowOf(q.id));
+    /* 双方对账：己方记"出口了多少货"，对方记"进口了多少货"（同单位） */
+    var F = flowOf(p.id), FQ = flowOf(q.id);
+    F.gain.export = (F.gain.export || 0) + (took > 0 ? n : 0);
+    FQ.gain.import = (FQ.gain.import || 0) + took;
+    EXP1[p.id] = turnNo;
+    var d = addTradeRel(p.owner, cid);
+    if (!asAi) {
+      bldMsg('出口 ' + n + ' ' + cnOf(key) + ' → ' + nameOf(cid) + '·' + src.prov +
+        '：+' + priceNum(raw) + ' 金（对方价 ' + priceNum(src.pi) + ' × ' + C.exportCut +
+        '，本国价 ' + priceNum(src.myPi) + '）' +
+        (whole < raw - 1e-9 ? '　零头攒整' : '') +
+        (d > 0 ? '　关系 +' + d : ''), 'ok');
+    }
+    fogInvalidate();
+    return { ok: true, got: whole, raw: raw, qty: n, to: src.pid, rel: d };
+  }
+  AO.resExportForeign = exportForeign;
+  /* AI 的出口入口（18-ai 的 trySell）：同一条账，不带玩家提示 */
+  AO.resAiExport = function (p, key, cid) { return exportForeign(p, key, cid, true); };
+
+  /* 「商队到访」（⑤ 新事件）的落地：外国商人以 ×mul 价收本省 10 单位土产。
+   * 为什么"挑最富的那样"：商队收的是这地方拿得出手的货，不是随便一样；
+   * 而且库存最多的那种卖起来最不心疼，玩家不会因为一个随机事件被抽走命根子。
+   * 钱走 SELLACC 攒整（和卖货同一个零头池），所以"卖 2.6 金"能真的到手 2.6。 */
+  function caravanDeal(pid, key, mul) {
+    var C = AO.PRICES_CFG, bag = SIM[pid | 0];
+    var p = pOf(pid);
+    if (!bag || !p) return null;
+    if (!key) {
+      var bestN = 0;
+      for (var k in bag) {
+        if (k === 'gold') continue;
+        var s = bag[k];
+        if (s && s.stock > bestN) { bestN = s.stock; key = k; }
+      }
+    }
+    if (!key) return null;
+    var s2 = bag[key];
+    var n = Math.min(10, s2 ? Math.floor(s2.stock) : 0);
+    if (!(n > 0)) return null;
+    var lots = n / (AO.MARKET.rate || 5);
+    var raw = priceV(p.owner, key) * (mul || 1.3) * lots;
+    s2.stock -= n;
+    SELLACC[pid | 0] = (SELLACC[pid | 0] || 0) + raw;
+    var whole = Math.floor(SELLACC[pid | 0] + 1e-9);
+    SELLACC[pid | 0] -= whole;
+    if (whole > 0) gainStock(pid | 0, 'gold', whole, flowOf(pid));
+    if (PLAYER && (p.owner | 0) === PLAYER) {
+      NOTES.push({ owner: PLAYER, pid: pid | 0, cls: 'ok',
+        text: '🐫 商队收走 ' + n + ' ' + cnOf(key) + '，付 ' + priceNum(raw) + ' 金（物价 ×' +
+          (mul || 1.3) + '，当时' + cnOf(key) + '价 ' + priceNum(priceV(p.owner, key)) + '）' });
+    }
+    return { key: key, n: n, gold: raw };
+  }
+  AO.resCaravan = caravanDeal;
 
   /* ---------------- 六、谈判桌 ----------------
    * 只有 PLAYER 能开（交战国卡上的「求和」钮），对象必须是正在交战的国。
@@ -9469,7 +13379,10 @@
         '<i class="tkB" style="flex:' + (s.theirs / tot) + '"></i>';
     }
     $('tkText').textContent = lead >= D.talk.payLead
-      ? '战争分领先 ' + lead + '（≥ ' + D.talk.payLead + '）：可以提赔款。白和永远可选。'
+      ? '战争分领先 ' + lead + '（≥ ' + D.talk.payLead + '）：可以提赔款' +
+        (lead >= (D.puppet ? D.puppet.talkLead : 40)
+          ? '，也可以扶植傀儡（≥ ' + D.puppet.talkLead + '）' : '') +
+        '。白和永远可选。'
       : '战争分领先 ' + lead + '（不到 ' + D.talk.payLead + '，提不了赔款）：只能白和 —— 现状承认。';
     var h = '';
     h += '<button type="button" class="evopt" data-term="white">' +
@@ -9489,6 +13402,19 @@
       h += '<button type="button" class="evopt" data-term="pay' + amt + '"' + (off ? ' disabled' : '') +
         ' title="' + escHtml(tip) + '"><b>赔款 ' + amt + ' 金 · 停战</b><em>' +
         (off ? escHtml(tip) : escHtml(mood)) + '</em></button>';
+    }
+    /* 扶植傀儡（v13）：比赔款更重的胜利 —— 不割地，收租。
+     * 解锁线比赔款高一倍（40 对 20），因为它换来的是一条长期关系，不是一笔现钱。
+     * 按钮上的口气同样读真账（aiPuppetEval），和点下去用的是同一个分数。 */
+    var P = D.puppet;
+    if (P && lead >= P.talkLead) {
+      var evP = aiPuppetEval(to, PLAYER);
+      var moodP = evP.accept
+        ? (evP.score >= 8 ? '对方已经撑不住，多半会奉表' : '对方还在算账，但这一笔谈得成')
+        : '对方宁死不屈，多半会拒（拒了要等 ' + D.talk.cd + ' 回合）';
+      h += '<button type="button" class="evopt" data-term="puppet">' +
+        '<b>扶植傀儡 · 称臣停战</b><em>' + escHtml(moodP) +
+        '　不割地：它留着自己的省，每回合上贡两成岁入，兵随你调</em></button>';
     }
     h += '<button type="button" class="evopt" data-term="cancel"><b>先不谈</b><em>关掉谈判桌，仗接着打</em></button>';
     box.innerHTML = h;
@@ -9513,6 +13439,8 @@
     if (!atWar(PLAYER, to)) { closeTalk(); return { ok: false, msg: '两国已经不在交战' }; }
     var k = warKey(PLAYER, to);
     var lead = talkLead(), pay = 0;
+    /* 扶植傀儡（v13）：单独一条路 —— 它不走赔款/白和那套转账，成交就是"停战 + 立表"。 */
+    if (kind === 'puppet') return talkPuppet(to, lead);
     if (kind === 'white') {
       pay = 0;
     } else if (/^pay\d+$/.test(kind)) {
@@ -9540,6 +13468,35 @@
       }
     }
     var r = applyPeaceDeal(PLAYER, to, pay);
+    closeTalk();
+    return r;
+  }
+
+  /* 谈判桌上的「扶植傀儡」（v13）。
+   * 三道闸：领先分够（40）、这层关系立得起来（它不能已经有主）、AI 点头。
+   * **地不吐**：已经占下的省留在占领方手里（这里一行都不动归属）——
+   * 傀儡交出来的是腰包和兵，不是已经打下来的地。 */
+  function talkPuppet(to, lead) {
+    var D = AO.DIPLO, P = D.puppet;
+    to = to | 0;
+    if (lead < P.talkLead) {
+      return { ok: false, msg: '战争分领先 ' + lead + '，不到 ' + P.talkLead + '，提不了扶植傀儡' };
+    }
+    if (!canTakeVassal(PLAYER, to)) {
+      return { ok: false, msg: suzerainOf(PLAYER) ? '你正在称臣于 ' + nameOf(suzerainOf(PLAYER)) + '，受不了表'
+        : suzerainOf(to) ? (nameOf(to) + ' 已经奉表于 ' + nameOf(suzerainOf(to)))
+          : (nameOf(to) + ' 自己还有属国，不能称臣') };
+    }
+    var ev = aiPuppetEval(to, PLAYER);
+    if (!ev.accept) {
+      TALKCD[warKey(PLAYER, to)] = turnNo + D.talk.cd;
+      closeTalk();
+      var no = '🏳 ' + nameOf(to) + ' 拒绝了称臣：' + ev.why +
+        '（' + D.talk.cd + ' 回合后可再谈）';
+      NOTES.push({ owner: PLAYER, cls: 'warn', text: no });
+      return { ok: false, msg: no, ev: ev };
+    }
+    var r = makePuppet(PLAYER, to);
     closeTalk();
     return r;
   }
@@ -9586,8 +13543,10 @@
       (pay > 0 ? '（赔款 ' + pay + ' 金，关系 ' + relOf(from, to) + '）' : '（白和，现状承认）');
     NOTES.push({ owner: from, cls: 'ok', text: txt });
     NOTES.push({ owner: to, cls: 'ok', text: txt });
-    /* 两边都不是玩家 → 这是一件"远方的事"，进世界纪要 */
-    if (PLAYER !== from && PLAYER !== to) worldNews(txt.replace('📜 ', ''));
+    /* 两边都不是玩家 → 这是一件"远方的事"，进邸报（v15：要等它走到你耳朵里） */
+    if (PLAYER !== from && PLAYER !== to) {
+      worldNews(txt.replace('📜 ', ''), 'warn', { parties: [from, to], kind: 'peace' });
+    }
     return { ok: true, msg: txt, pay: pay };
   }
   AO.resApplyPeace = applyPeaceDeal;
@@ -9597,6 +13556,559 @@
   AO.resCloseTalk = closeTalk;
   AO.resTalkDeal = talkDeal;
   AO.resTalk = TALK;
+
+  /* =============================================================
+   * 七、傀儡与朝贡（v13）—— 战争的第三种结局
+   *
+   * 问题：一仗打到"只剩 3 个省"，玩家只有两条路 —— 白和（白打）或者啃到它投降、
+   * 然后每省 25~100 回合整合。后期的乐趣就被"一格一格啃"吃掉了。
+   *
+   * 于是补中间档：**不吞地，收租**。对方交出的是三样东西，不是土地：
+   *   ① 腰包 —— 每回合中央金入的 20%（FLOWC 双方各记一笔，国家卡上能对账）
+   *   ② 兵   —— 宗主宣战它自动同宣；出兵权重 = 宗主 warBias × 0.5
+   *   ③ 外交 —— 不能缔约、不能宣战（卡上置灰"听命于宗主"）
+   * 它还是个国家：内政、官员、整合都照跑，只是这三样不归它自己。
+   *
+   * 退出这条路有三条，各有各的价：
+   *   和平并入（满 60 回合 + 民心 ≥55 + 没被拖着打 → 60%）：省白得，还是正式国土
+   *   强并入（随时）：快，但宗主全国民心 −8、并入各省不安 +30
+   *   揭竿而起（傀儡自己掷）：宗主陷 2 场战争 / 它兵够多 / 民心思变，凑够 40 分独立
+   *
+   * 一仗只能有一个结果，所以这张表和 WARSET 互斥：称臣那一刻战争结束，
+   * 独立那一刻战争重开 —— 三张表（WARSET / WSCORE / PUPPET）之间不留中间态。
+   * ============================================================= */
+
+  /* ---------------- 7.1 读表 ---------------- */
+  /* 一国当傀儡的那份记录（没有就是 null）。表很小（≤ 64 条），线性找足够快，
+   * 而且"一国只能当一家的属国"这条不变量靠的就是"按 p 找唯一"。 */
+  function puppetRecOf(cid) {
+    cid = cid | 0;
+    if (!cid) return null;
+    for (var k in PUPPET) {
+      var r = PUPPET[k];
+      if (r && (r.p | 0) === cid) return r;
+    }
+    return null;
+  }
+  function suzerainOf(cid) {
+    var r = puppetRecOf(cid);
+    return r ? (r.s | 0) : 0;
+  }
+  function vassalsOf(cid) {
+    cid = cid | 0;
+    var out = [], k, r;
+    if (!cid) return out;
+    for (k in PUPPET) {
+      r = PUPPET[k];
+      if (r && (r.s | 0) === cid) out.push(r.p | 0);
+    }
+    return out.sort(function (a, b) { return a - b; });
+  }
+  /* 两国之间的那条记录（不分方向） */
+  function puppetRec(a, b) {
+    a = a | 0; b = b | 0;
+    if (!a || !b || a === b) return null;
+    var r = PUPPET[warKey(a, b)];
+    if (!r) return null;
+    return ((r.s | 0) === a && (r.p | 0) === b) || ((r.s | 0) === b && (r.p | 0) === a) ? r : null;
+  }
+  /* 能不能收它当属国：不能自己已经是傀儡、不能自己还有属国（没有"傀儡的傀儡"） */
+  function canTakeVassal(suz, pup) {
+    suz = suz | 0; pup = pup | 0;
+    if (!suz || !pup || suz === pup) return false;
+    if (countryDead(suz) || countryDead(pup)) return false;
+    if (suzerainOf(suz) || suzerainOf(pup)) return false;   // 自己称臣的人不能受表
+    if (vassalsOf(pup).length) return false;                // 它自己还带着附庸
+    var sc = coOf(suz), pc = coOf(pup);
+    if (!sc || !pc || !sc.provinces.length || !pc.provinces.length) return false;
+    return true;
+  }
+  /* 傀儡不能有条约：称臣那一刻把旧的清掉（同盟 / 互不侵犯 / 缔约冷却全清）。
+   * 不清的话"我和 A 是同盟，A 又是 B 的属国"会同时成立 —— 面板上两张卡各说各话。 */
+  function stripPacts(a, b) {
+    var k = warKey(a, b);
+    delete ALLIES[k];
+    delete NAPS[k];
+    delete DIPCD[cdKey(a, b, 'ally')];
+    delete DIPCD[cdKey(a, b, 'nap')];
+    delete DIPPROP[k];
+  }
+  /* 投降线（省数）：和 trySurrender / 国家卡上那一行**同一个算法**，
+   * 免得"卡上写 ≤4 省、实际 ≤3 省触发"。有 WARBASE 就按开战时的省数，
+   * 没有（还没打过的关系）就按现省数。 */
+  function surrenderLineOf(cid, other) {
+    cid = cid | 0;
+    var c = coOf(cid), base = c ? c.provinces.length : 0;
+    if (other) {
+      var wb = WARBASE[warKey(cid, other)];
+      if (wb) base = (warKey(cid, other).split('|')[0] | 0) === cid ? wb.a : wb.b;
+    }
+    var frac = isDecap(cid) ? AO.BATTLE.surrenderFracDecap : AO.BATTLE.surrenderFrac;
+    return Math.max(1, Math.ceil((base || 1) * frac));
+  }
+  function warsOfCid(cid) {
+    var n = 0, k;
+    cid = cid | 0;
+    for (k in WARSET) {
+      if (!WARSET[k]) continue;
+      var ab = k.split('|');
+      if (+ab[0] === cid || +ab[1] === cid) n++;
+    }
+    return n;
+  }
+  function menOfCid(cid) {
+    var list = armiesOf(cid | 0), sum = 0, i;
+    for (i = 0; i < list.length; i++) sum += list[i].men || 0;
+    return sum;
+  }
+
+  /* ---------------- 7.2 立傀儡／废傀儡 ---------------- */
+  /* 称臣：停战 + 清条约 + 立表 + REL 锁死。
+   * 走 makePeace 而不是"自己删 WARSET"：那是唯一会顺手解围城、解封锁、
+   * 把军队从"进攻"改成"驻防"的地方 —— 少这一步，称臣当天它的围城军还在你城下。 */
+  function makePuppet(suz, pup, opt) {
+    suz = suz | 0; pup = pup | 0;
+    opt = opt || {};
+    var D = AO.DIPLO.puppet;
+    if (!suz || !pup || suz === pup) return { ok: false, msg: '不能对自己称臣' };
+    if (countryDead(suz) || countryDead(pup)) return { ok: false, msg: '对方已经灭亡了' };
+    if (suzerainOf(pup)) {
+      return { ok: false, msg: nameOf(pup) + ' 已经奉表于 ' + nameOf(suzerainOf(pup)) };
+    }
+    if (!canTakeVassal(suz, pup)) {
+      return { ok: false, msg: vassalsOf(pup).length
+        ? nameOf(pup) + ' 自己还有属国，不能称臣'
+        : nameOf(suz) + ' 现在受不了表（它自己也在称臣）' };
+    }
+    if (atWar(suz, pup)) makePeace(suz, pup);
+    stripPacts(suz, pup);
+    var k = warKey(suz, pup);
+    PUPPET[k] = {
+      s: suz, p: pup,
+      since: turnNo,
+      /* 绝对回合号（和 TALKCD 同一种写法）：到这个回合之后才允许提「和平并入」 */
+      annexCd: turnNo + (opt.annexCd || D.annexCd || 60),
+      warT: -999
+    };
+    delete WSCORE[k];
+    delete TALKCD[k];
+    setRel(suz, pup, D.relLock);
+    fogInvalidate();
+    var txt = '🏳 ' + nameOf(pup) + ' 奉表称臣于 ' + nameOf(suz) +
+      '（岁贡两成 · 兵随宗主 · 不得自专外交）';
+    WARLOG.unshift({ turn: turnNo, cls: 'ok', text: txt });
+    if (PLAYER === pup) {
+      NOTES.push({ owner: PLAYER, cls: 'warn', text: txt + ' —— 你成了属国：外交被锁，兵随宗主，' +
+        '每 10 回合有一次机会揭竿而起（主角光环 +' + D.indepPlayer + ' 分）' });
+      toast('你被迫称臣于 ' + nameOf(suz) + '。内政照旧，但外交被锁、兵随宗主 —— 等机会独立。', 6000);
+    } else if (PLAYER === suz) {
+      NOTES.push({ owner: PLAYER, cls: 'ok', text: txt + ' —— 每回合上贡它的中央金入 ' +
+        Math.round(D.tribute * 100) + '%，' + (D.annexCd | 0) + ' 回合后可和平并入' });
+    } else {
+      worldNews(txt.replace('🏳 ', ''), 'ok', { parties: [pup, suz], kind: 'puppet' });
+    }
+    return { ok: true, msg: txt };
+  }
+  /* 废表（独立 / 并入前的一步）。REL 不在这里重置：独立要走 declareWar（它自己会打到 −100），
+   * 并入则整国都没了，关系值跟着 deadKey 一起清。 */
+  function dropPuppetRec(suz, pup) {
+    delete PUPPET[warKey(suz, pup)];
+  }
+
+  /* ---------------- 7.3 朝贡 ---------------- */
+  /* 每回合把傀儡**中央金收入**的两成划给宗主。
+   * 为什么按"本回合收入"而不是"库存"：按库存分的话，一个攒了 400 金的属国
+   * 会在称臣第一回合被一次抽走 80 金 —— 那不是岁贡，是抄家。按收入分是细水长流，
+   * 也让"傀儡中央见底就少付、不欠账"这条自然成立（收入高但花光了，就是付不出）。 */
+  function puppetTribute() {
+    var D = AO.DIPLO.puppet, out = { paid: 0, n: 0 }, k, r;
+    for (k in PUPPET) {
+      r = PUPPET[k];
+      if (!r) continue;
+      var s = r.s | 0, p = r.p | 0;
+      if (!s || !p || countryDead(s) || countryDead(p)) continue;
+      var FC = FLOWC[p] || ensureFlowC(p);
+      var inc = (FC.gain && FC.gain.gold) || 0;
+      if (!(inc > 0)) continue;
+      /* 攒整（和 TAXACC / IRONACC 同一套办法）：一个小国的中央金入常常只有
+       * 2~4 金/回合，直接 floor(2×0.2)=0 会让"朝贡"在整局里一次都不落袋，
+       * 玩家看到的是一条永远为 0 的账。攒着零头，攒够 1 金才真划过去 ——
+       * 长期平均仍然是两成，但每四五回合能看见一次钱。 */
+      r.acc = (r.acc || 0) + inc * (D.tribute || 0);
+      var want = Math.floor(r.acc);
+      if (want <= 0) continue;
+      r.acc -= want;
+      var cenP = ensureCentral(p), cenS = ensureCentral(s);
+      /* 中央见底 → 少付不欠：能付多少付多少，剩下的**不记欠账**（acc 已经扣掉）。
+       * 记欠账的话，一个破产的属国会攒出一笔永远还不上的天文数字。 */
+      var pay = Math.min(want, Math.floor(cenP.gold || 0));
+      if (pay <= 0) {
+        r.short = true;
+        continue;
+      }
+      r.short = false;
+      cenP.gold = (cenP.gold || 0) - pay;
+      cenS.gold = (cenS.gold || 0) + pay;
+      FC.loss.gold = (FC.loss.gold || 0) + pay;
+      FC.d.tribute = (FC.d.tribute || 0) + pay;
+      var FS = FLOWC[s] || ensureFlowC(s);
+      FS.gain.gold = (FS.gain.gold || 0) + pay;
+      FS.d.tribute = (FS.d.tribute || 0) + pay;
+      out.paid += pay; out.n++;
+    }
+    return out;
+  }
+
+  /* ---------------- 7.4 强制参战（单向 leash） ---------------- */
+  /* 宗主宣战 → 傀儡自动同宣。**单向**：傀儡被宣，宗主不参战 ——
+   * 这是"护主"和"卖命"的区别，也是玩家愿意当宗主的原因（属国挨打不用我流血）。
+   * 走的是"直接写 WARSET"而不是再调一次 declareWar：那边会做条约撕毁、纪要、
+   * 盟友跟牌提示，而傀儡这几样一个都不适用（它没有条约，也不该上报"宣战"）。 */
+  function leashOne(suz, v, foe) {
+    suz = suz | 0; v = v | 0; foe = foe | 0;
+    if (!suz || !v || !foe || v === foe) return false;
+    if (countryDead(v) || countryDead(foe) || atWar(v, foe)) return false;
+    var k = warKey(v, foe);
+    WARSET[k] = true;
+    WSCORE[k] = { a: 0, b: 0 };
+    delete TALKCD[k];
+    warBaseOf(v, foe);
+    setRel(v, foe, FOG.relWar);
+    var rec = PUPPET[warKey(suz, v)];
+    if (rec) rec.warT = turnNo;
+    var txt = '⚑ ' + nameOf(v) + ' 随宗主 ' + nameOf(suz) + ' 出征，讨伐 ' + nameOf(foe);
+    WARLOG.unshift({ turn: turnNo, cls: 'warn', text: txt });
+    if (PLAYER === v || PLAYER === foe || PLAYER === suz) {
+      NOTES.push({ owner: PLAYER, cls: 'warn', text: txt });
+    } else {
+      worldNews(txt.replace('⚑ ', ''), 'warn', { parties: [v, foe], kind: 'war' });
+    }
+    return true;
+  }
+  function leashVassals(suz, foe) {
+    var vs = vassalsOf(suz), n = 0, i;
+    for (i = 0; i < vs.length; i++) if (leashOne(suz, vs[i], foe)) n++;
+    return n;
+  }
+  /* 宗主停战 → 属国跟着停（它的仗本来就是被拖进来的） */
+  function endWarOneSide(x, y) {
+    x = x | 0; y = y | 0;
+    var k = warKey(x, y), pid;
+    if (!WARSET[k]) return false;
+    delete WARSET[k];
+    PEACECD[k] = turnNo + ((AO.AIWAR && AO.AIWAR.peaceCd) || 20);
+    setRel(x, y, FOG.relPeace);
+    for (pid in SIEGE) if (SIEGE[pid].by === x || SIEGE[pid].by === y) delete SIEGE[pid];
+    for (pid in BLOCKADE) if (BLOCKADE[pid] === x || BLOCKADE[pid] === y) delete BLOCKADE[pid];
+    var ids = armyIds(), i;
+    for (i = 0; i < ids.length; i++) {
+      var ar = ARMY[ids[i]];
+      if (!ar) continue;
+      if ((ar.owner === x || ar.owner === y) && ar.order &&
+          (ar.order.type === 'attack' || ar.order.type === 'siege')) {
+        ar.order = { type: 'defend', cid: ar.owner, pid: ar.pid, tactic: 'assault' };
+      }
+    }
+    return true;
+  }
+
+  /* ---------------- 7.5 独立（傀儡的挣扎） ---------------- */
+  /* 独立分：宗主陷 2+ 场战争 +30 / 军力 ≥ 宗主一半 +20 / 民心 < 35 +10；
+   * 玩家当傀儡恒 +15（主角光环 —— 玩家已经没什么可玩的了，给条出路）。
+   * 每 10 回合掷一次（按 cid 错开），过 40 分就揭竿而起：自动宣战宗主。
+   * 为什么不在过线之前给提示：一次就成的独立太廉价，而"沉默攒着"本身就是
+   * 悬念 —— 宗主看得见关系值 −80，看不见它哪天翻脸。 */
+  function puppetIndepRoll() {
+    var D = AO.DIPLO.puppet, fired = [], k, r;
+    var every = D.indepEvery || 10;
+    for (k in PUPPET) {
+      r = PUPPET[k];
+      if (!r) continue;
+      var s = r.s | 0, p = r.p | 0;
+      if (!s || !p || countryDead(s) || countryDead(p)) continue;
+      if ((turnNo + p) % every !== 0) continue;         // 各国错开，免得同回合集体造反
+      var sd = indepScoreOf(s, p);
+      if (sd.score < (D.indepNeed || 40)) continue;
+      var score = sd.score;
+      /* 揭竿而起：先删表（不然 declareWar 会被外交锁挡回来），再宣战 */
+      dropPuppetRec(s, p);
+      declareWar(p, s, { force: true });
+      var txt = '🔥 ' + nameOf(p) + ' 揭竿而起，脱离 ' + nameOf(s) + ' 的臣属' +
+        '（独立分 ' + score + ' —— 宗主 ' + warsOfCid(s) + ' 场战事）';
+      WARLOG.unshift({ turn: turnNo, cls: 'bad', text: txt });
+      if (PLAYER === p || PLAYER === s) NOTES.push({ owner: PLAYER, cls: 'warn', text: txt });
+      else worldNews(txt.replace('🔥 ', ''), 'bad', { parties: [p, s], kind: 'war' });
+      fired.push(p);
+    }
+    return fired;
+  }
+  /* 独立分（纯读，不掷点）：三项相加 + 玩家光环。
+   * 拎出来是为了测试能直接验"宗主陷战争时明显更易过""玩家 +15"，
+   * 而不用等 10 回合一次的掷点。 */
+  function indepScoreOf(suz, pup) {
+    var D = AO.DIPLO.puppet, out = { war: 0, army: 0, happy: 0, player: 0, score: 0 };
+    suz = suz | 0; pup = pup | 0;
+    if (warsOfCid(suz) >= (D.indepWars || 2)) out.war = D.indepWar;
+    var mp = menOfCid(pup), ms = menOfCid(suz);
+    if (mp > 0 && (ms <= 0 || mp >= ms * (D.indepArmyRatio || 0.5))) out.army = D.indepArmy;
+    if (countryHappy(coOf(pup)) < (D.indepHappyRef || 35)) out.happy = D.indepHappy;
+    if (PLAYER === pup) out.player = D.indepPlayer;
+    out.score = out.war + out.army + out.happy + out.player;
+    return out;
+  }
+
+  /* ---------------- 7.6 每回合的傀儡小节（结算尾） ---------------- */
+  function settlePuppets() {
+    var out = { tribute: 0, n: 0, indep: [] }, k, r, i;
+    if (!state.world) return out;
+    /* ① 清表：一方灭亡 / 省空了 → 关系作废。
+     * 不清理的话，灭亡国的 PUPPET 记录会永远躺在表里，面板上就是"奉表于 ?"。 */
+    for (k in PUPPET) {
+      r = PUPPET[k];
+      if (!r || countryDead(r.s) || countryDead(r.p)) { delete PUPPET[k]; continue; }
+      var sc = coOf(r.s), pc = coOf(r.p);
+      if (!sc || !pc || !sc.provinces.length || !pc.provinces.length) delete PUPPET[k];
+    }
+    /* ② 朝贡 */
+    var tr = puppetTribute();
+    out.tribute = tr.paid; out.n = tr.n;
+    /* ③ 兜底跟战：宗主这一回合打完后的敌国名单里，属国必须都在。
+     * 宣战路径（declareWar → leashVassals）已经跟过一遍，但读档、事件宣战、
+     * 属国自己被别人拖进来这几条路都不经过它 —— 这里补齐，代价是 O(属国 × 敌国)。 */
+    for (k in PUPPET) {
+      r = PUPPET[k];
+      if (!r) continue;
+      var foes = [];
+      for (var wk in WARSET) {
+        if (!WARSET[wk]) continue;
+        var ab = wk.split('|');
+        if (+ab[0] === (r.s | 0)) foes.push(+ab[1]);
+        else if (+ab[1] === (r.s | 0)) foes.push(+ab[0]);
+      }
+      for (i = 0; i < foes.length; i++) leashOne(r.s | 0, r.p | 0, foes[i]);
+    }
+    /* ④ 独立掷点 */
+    out.indep = puppetIndepRoll();
+    return out;
+  }
+
+  /* ---------------- 7.7 AI 接受"扶植傀儡"的评估 ---------------- */
+  /* 公式（任务书 ②）：接受分 = 领先分 − evalBase(50) + 性格 + (快顶不住了 ? +20)
+   * 和 aiPeaceEval 是两张表：那边算的是"停不停"，这边算的是"服不服"。
+   * 性格换了一套权重（军国 −20 宁死不屈 / 经营 +15 识时务）—— 军国宁可亡国也不称臣，
+   * 这不是"算错"，是这一型的定义。 */
+  function aiPuppetEval(cid, other) {
+    cid = cid | 0; other = other | 0;
+    var P = AO.DIPLO.puppet;
+    var mine = wsScoreOf(cid, other), theirs = wsScoreOf(other, cid);
+    var lead = theirs - mine;                        // 提出方（other）领先多少
+    var pw = personaWeightPuppetOf(cid);
+    var c = coOf(cid), n = c ? c.provinces.length : 0;
+    var line = surrenderLineOf(cid, other);
+    var near = (line > 0 && n <= Math.ceil(line * (P.nearLine || 1.2))) ? P.nearAdd : 0;
+    var score = lead - P.evalBase + pw + near;
+    var why = '';
+    if (countryDead(cid) || countryDead(other)) why = '对方已经灭亡';
+    else if (suzerainOf(other)) why = nameOf(other) + ' 自己也在称臣，受不了表';
+    else if (vassalsOf(cid).length) why = nameOf(cid) + ' 自己还有属国，不能称臣';
+    else if (suzerainOf(cid)) why = nameOf(cid) + ' 已经奉表于 ' + nameOf(suzerainOf(cid));
+    else if (score < 0) {
+      why = '领先 ' + lead + ' − ' + P.evalBase + ' + 性格 ' + (pw >= 0 ? '+' : '') + pw +
+        (near ? ' + 快顶不住了 ' + near : '') + ' = ' + score + ' < 0';
+    }
+    return {
+      cid: cid, kind: 'puppet', other: other, mine: mine, theirs: theirs, lead: lead,
+      persona: pw, near: near, line: line, left: n, score: score,
+      need: P.evalBase, accept: !why, why: why
+    };
+  }
+  /* 性格权重的第二张表（见 DIPLO.puppet.persona） */
+  function personaWeightPuppetOf(cid) {
+    var key = personaKeyOf(cid);
+    var m = (AO.DIPLO.puppet && AO.DIPLO.puppet.persona) || {};
+    return typeof m[key] === 'number' ? m[key] : 0;
+  }
+
+  /* ---------------- 7.8 并入（傀儡的终点） ---------------- */
+  /* 复用投降的全并流程，四处不同：
+   *   省 = 正式国土（INTEG/OCCUPY 直接删，产出 ×1.0）
+   *   官员留任（它本来就是你的地，官不用重新派）
+   *   军队解散 70% / 转编 30%
+   *   不写「灭亡」，写「归附」*/
+  function annexPuppet(suz, pup, mode) {
+    var P = AO.DIPLO.puppet, i;
+    var rec = puppetRec(suz, pup);
+    if (!rec) return { ok: false, msg: '它不是你的属国' };
+    var pc = coOf(pup);
+    var name = pc ? pc.name : nameOf(pup);
+    var merged = pc ? pc.provinces.slice() : [];
+    var sProvs = (coOf(suz) ? coOf(suz).provinces.slice() : []);
+    dropPuppetRec(suz, pup);
+    var r = annex(pup, suz, {
+      integrated: true, keepOfficials: true, armyKeep: P.armyKeep,
+      via: mode === 'force' ? '强并入' : '和平并入', puppet: mode
+    });
+    if (mode === 'force') {
+      /* 强并入的价（任务书 ④）：宗主全国民心 −8（随后自然回暖 —— 民心本来就
+       * 每回合往 target 靠 30%，所以"一回合"不用额外记账）+ 并入各省不安 +30。
+       * 快，但会让一个刚打完仗的国家立刻进入"消化不良"的状态。 */
+      for (i = 0; i < sProvs.length; i++) {
+        var hp = happyOf(sProvs[i]);
+        hp.v = AO.clamp(hp.v - P.forceHappy, 0, 100);
+      }
+      for (i = 0; i < merged.length; i++) {
+        var uo = unrestOf(merged[i]);
+        uo.v = AO.clamp(Math.max(uo.v, 0) + P.forceUnrest, 0, 100);
+      }
+      var ft = '⚔ ' + name + ' 被 ' + nameOf(suz) + ' 强行并入 —— 吞并恐慌：并入各省不安 +' +
+        P.forceUnrest + '，' + nameOf(suz) + ' 全国民心 −' + P.forceHappy;
+      WARLOG.unshift({ turn: turnNo, cls: 'warn', text: ft });
+      if (PLAYER === suz || PLAYER === pup) NOTES.push({ owner: PLAYER, cls: 'warn', text: ft });
+      else worldNews(ft.replace('⚔ ', ''), 'warn', { parties: [pup, suz], kind: 'annex' });
+    }
+    return { ok: true, msg: (mode === 'force' ? '强并入' : '和平并入') + '：' + name +
+      ' 并入 ' + nameOf(suz) + '（' + merged.length + ' 省，直接算正式国土）', annex: r, n: merged.length };
+  }
+  /* 和平并入的可用性（面板判一次、真点再判一次 —— 同一份判断） */
+  function puppetAnnexReady(suz, pup) {
+    var rec = puppetRec(suz, pup);
+    if (!rec) return { ok: false, why: '它不是你的属国' };
+    var left = Math.max(0, (rec.annexCd || 0) - turnNo);
+    if (left > 0) return { ok: false, left: left, why: '还要 ' + left + ' 回合（奉表未满 ' + AO.DIPLO.puppet.annexCd + '）' };
+    var P = AO.DIPLO.puppet;
+    var h = countryHappy(coOf(pup));
+    if (h < P.annexHappy) return { ok: false, happy: h, why: '它民心 ' + Math.round(h) + ' 不到 ' + P.annexHappy + '（人心不服）' };
+    var sinceWar = turnNo - ((rec.warT === undefined ? -999 : rec.warT));
+    if (sinceWar < P.annexPeace) {
+      return { ok: false, why: '它刚被卷进战事（' + sinceWar + ' 回合前），要静 ' + P.annexPeace + ' 回合才肯谈' };
+    }
+    return { ok: true };
+  }
+  function tryAnnexPuppet(suz, pup) {
+    var P = AO.DIPLO.puppet;
+    var rec = puppetRec(suz, pup);
+    if (!rec) return { ok: false, msg: '它不是你的属国' };
+    var rd = puppetAnnexReady(suz, pup);
+    if (!rd.ok) {
+      /* 条件不满足也重掷 30 回合：不然玩家每回合都能点一下，
+       * "过得好不好"就退化成"点多少次" */
+      if (rd.left === undefined) rec.annexCd = turnNo + P.annexRetry;
+      return { ok: false, msg: '和平并入被搁置：' + rd.why + '（' + P.annexRetry + ' 回合后可再提）', why: rd.why };
+    }
+    if (Math.random() >= P.annexAccept) {
+      rec.annexCd = turnNo + P.annexRetry;
+      var no = '🏳 ' + nameOf(pup) + ' 婉拒了 ' + nameOf(suz) + ' 的并入 —— ' +
+        '（' + P.annexRetry + ' 回合后可再提）';
+      NOTES.push({ owner: suz, cls: 'warn', text: no });
+      if (PLAYER !== suz) worldNews(no.replace('🏳 ', ''), 'warn', { parties: [pup, suz], kind: 'puppet' });
+      return { ok: false, msg: no, rejected: true };
+    }
+    return annexPuppet(suz, pup, 'peace');
+  }
+  function forceAnnexPuppet(suz, pup) {
+    var rec = puppetRec(suz, pup);
+    if (!rec) return { ok: false, msg: '它不是你的属国' };
+    return annexPuppet(suz, pup, 'force');
+  }
+
+  /* ---------------- 7.9 受降选择卡（玩家是胜方时） ----------------
+   * 和谈判桌共用同一个弹窗（同一套纸面语汇、同一套 CSS），所以这里只换内容。
+   * 为什么不是"自动选"：全吞和收租的取舍正是这一批想给玩家的那个决定 ——
+   * 一张立刻见钱的租约 vs 一块要慢慢消化的地。 */
+  function openSurrender(loser, winner) {
+    SURR.open = true; SURR.loser = loser | 0; SURR.winner = winner | 0;
+    TALK.open = true; TALK.to = loser | 0;      // 弹窗里的"对面"就是受降的这一方
+    renderSurrender();
+    var el = $('talkModal');
+    if (el) {
+      el.classList.add('on');
+      var card = el.querySelector('.evcard');
+      if (card) card.focus();
+    }
+    return { ok: true };
+  }
+  function closeSurrender() {
+    SURR.open = false; SURR.loser = 0; SURR.winner = 0;
+    TALK.open = false; TALK.to = 0;
+    var el = $('talkModal');
+    if (el) el.classList.remove('on');
+  }
+  function renderSurrender() {
+    var box = $('tkOpts');
+    if (!box) return;
+    var P = AO.DIPLO.puppet, loser = SURR.loser | 0, c = coOf(loser);
+    var n = c ? c.provinces.length : 0;
+    var mine = wsScoreOf(PLAYER, loser), theirs = wsScoreOf(loser, PLAYER);
+    var tot = Math.max(1, mine + theirs);
+    var integEst = Math.ceil((AO.INTEG.max || 100) / Math.max(1, AO.INTEG.base || 1));
+    $('tkTitle').textContent = '受降 · ' + (c ? c.name : '?');
+    $('tkWhere').textContent = '第 ' + turnNo + ' 回合 · 它只剩 ' + n + ' 省（投降线 ≤ ' +
+      surrenderLineOf(loser, PLAYER) + '）· 战争分 ' + mine + ' : ' + theirs;
+    var bar = $('tkBar');
+    if (bar) {
+      bar.innerHTML = '<i class="tkA" style="flex:' + (mine / tot) + '"></i>' +
+        '<i class="tkB" style="flex:' + (theirs / tot) + '"></i>';
+    }
+    $('tkText').textContent = '全吞：省全归你，但每一省都要从头整合（最慢约 ' + integEst +
+      ' 回合才回满产，期间产出只有四成）。扶植傀儡：省留在它手里，每回合上贡两成岁入，' +
+      '兵随你调 —— ' + (P.annexCd | 0) + ' 回合后还能和平并入（省直接算正式国土）。';
+    var gold = Math.floor((ensureCentral(loser).gold || 0));
+    var h = '';
+    h += '<button type="button" class="evopt" data-term="annex"><b>全吞 · 灭其国</b><em>' +
+      escHtml('省全归你，逐省整合（约 ' + integEst + ' 回合回满产）· 它的国库 ' + gold + ' 金也归你') +
+      '</em></button>';
+    h += '<button type="button" class="evopt" data-term="puppet"><b>扶植傀儡 · 收租</b><em>' +
+      escHtml('它保留 ' + n + ' 省，每回合上贡两成岁入，兵随你调 —— 立刻见钱，国土以后再说') +
+      '</em></button>';
+    box.innerHTML = h;
+    var btns = box.querySelectorAll('button[data-term]');
+    for (var j = 0; j < btns.length; j++) {
+      btns[j].addEventListener('click', function () {
+        var r = surrenderChoose(this.getAttribute('data-term'));
+        if (r && r.msg) toast(r.msg, 3600);
+      });
+    }
+  }
+  function surrenderChoose(term) {
+    var loser = SURR.loser | 0, winner = SURR.winner | 0;
+    if (!SURR.open || !loser || !winner) return { ok: false, msg: '没有待决的受降' };
+    var c = coOf(loser), name = c ? c.name : nameOf(loser);
+    closeSurrender();
+    if (term === 'puppet') {
+      var r0 = makePuppet(winner, loser);
+      if (r0.ok) return r0;
+      /* 兜底：称不了臣（比如它已经有主）就按全吞处理 —— 这个国家已经名存实亡，
+       * 不能因为"表立不起来"就让它带着 0 个省永远活着。 */
+      toast(r0.msg + '　→ 按全吞处理', 3600);
+    }
+    var r = annex(loser, winner);
+    return { ok: true, msg: '💀 ' + name + ' 全境并入（' + (r && r.list ? r.list.length : 0) + ' 省）', annex: r };
+  }
+
+  AO.resPuppetOf = suzerainOf;
+  AO.resVassalsOf = vassalsOf;
+  AO.resPuppetRec = puppetRec;
+  AO.resPuppetRecOf = puppetRecOf;
+  AO.resMakePuppet = makePuppet;
+  AO.resSettlePuppets = settlePuppets;
+  AO.resPuppetTribute = puppetTribute;
+  AO.resAiPuppetEval = aiPuppetEval;
+  AO.resLeashVassals = leashVassals;
+  AO.resAnnexPuppet = annexPuppet;
+  AO.resTryAnnexPuppet = tryAnnexPuppet;
+  AO.resForceAnnexPuppet = forceAnnexPuppet;
+  AO.resPuppetAnnexReady = puppetAnnexReady;
+  AO.resIndepScore = indepScoreOf;
+  AO.resIndepRoll = puppetIndepRoll;
+  AO.resSurrenderBranch = surrenderBranch;
+  AO.resSurrender = SURR;
+  AO.resOpenSurrender = openSurrender;
+  AO.resSurrenderChoose = surrenderChoose;
+  AO.resSurrenderLine = surrenderLineOf;
+  /* 地图注记（14-labels.js）用：傀儡国名后面挂一个"（臣）"。
+   * 用函数而不是直接读表，是因为 14-labels 在 Node 自检里也会被单独加载 ——
+   * 那种场合没有 11-ui，读表会炸。 */
+  AO.puppetTagOf = function (cid) { return suzerainOf(cid) ? '（臣）' : ''; };
 
 
 
@@ -9978,6 +14490,9 @@
       msg = '测得' + name + ' ' + got + ' 省' + (deep ? '（含建筑与驻军约数）' : '');
       rec = { turn: turnNo, ok: true, text: msg };
       NOTES.push({ owner: PLAYER, cls: 'ok', text: '🕵 密探回报：' + msg });
+      /* v15：密探亲眼看过了 —— 之前关于这个国家的那条"风闻"当场更正。
+       * 放在这里而不是放在 revealCountry 里：那是"看得见"，这里才是"有人回报"。 */
+      newsProbeCorrect(cid);
     }
     (INTELMSG[PLAYER] || (INTELMSG[PLAYER] = Object.create(null)))[cid] = rec;
     fogInvalidate();
@@ -10083,6 +14598,8 @@
     var v = visCode(p.id);
     /* 城防行在迷雾下不显示（耐久是真实数据，旧情报里不该有） */
     hideWallRow();
+    /* 安定 / 整合 / 安抚同理：不安是"这一刻的真实状态"，旧情报里没有 */
+    hideUnrestRows();
     info.classList.add('on');
     if (v === VIS_UNKNOWN) {
       info.classList.add('fog-unknown');
@@ -10178,6 +14695,7 @@
     /* 明细块：国库 / 科技 / 治理 / 地形 / 信仰 / 邻国 —— 只对自己的国显示 */
     maskRow($('cEcon'), masked);
     maskRow($('cPop'), masked);
+    maskRow($('cPopCap'), masked);
     maskRow($('cArea'), masked);
     maskRow($('cCapital'), masked);
     maskBlock($('cBar'), masked);
@@ -10247,10 +14765,20 @@
     }
     var tip = $('gpIntelTip');
     if (tip) {
+      /* v15：把"世界消息要不要钱"说清楚 —— 这是玩家第一次真正为情报档掏钱的理由 */
+      var NW = newsCfg().delay || [[5, 8], [3, 4], [1, 1]];
+      var nwTxt = [];
+      for (i = 0; i < 3; i++) {
+        var rr = NW[i] || [1, 1];
+        nwTxt.push(FOG.cn[i] + ' ' + (rr[0] === rr[1] ? rr[0] : rr[0] + '~' + rr[1]));
+      }
       tip.innerHTML = '每回合开销 <b>' + FOG.cost[b] + ' 金</b>（国库扣）　·　反谍：抓到密探 ' +
         Math.round(FOG.exposeP[b] * 100) + '%　·　自动织网 ' +
         (FOG.autoEvery[b] ? ('每 ' + FOG.autoEvery[b] + ' 回合 ' + FOG.autoN[b] + ' 省' +
-          (FOG.deep[b] ? '（含建筑与驻军）' : '')) : '不织网');
+          (FOG.deep[b] ? '（含建筑与驻军）' : '')) : '不织网') +
+        '<br>世界大事按情报档延迟送达：' + nwTxt.join(' / ') + ' 回合' +
+        (b === 0 ? '（只听得见边境的事，且会传来走样的风闻）' :
+          b === 1 ? '（已知国家的事）' : '（已知国家的事 + 战况一行）');
     }
     var nEl = $('gpIntelN');
     if (nEl) nEl.textContent = mine ? ('· 定向探测 ' + FOG.probeCost + ' 金 / 冷却 ' + FOG.probeCd + ' 回合') : '';
@@ -10418,6 +14946,9 @@
       prop: DIPPROP, trade: TRADEACC, relAcc: RELACC,
       /* v10：停战冷却（AI 互战读它，不存的话读档后同一对邻居立刻又能开打） */
       peaceCd: PEACECD,
+      /* v13：傀儡表（不升版本号）。存的是"谁向谁称臣 + 什么时候能并"，
+       * 朝贡金额不存 —— 那是每回合现算的数，存了反而会跟收入变化打架。 */
+      puppet: PUPPET,
       rel: PLAYER ? null : REL
     };
     return out;
@@ -10434,8 +14965,13 @@
     for (k in RELACC) delete RELACC[k];
     for (k in RELHIT) delete RELHIT[k];
     for (k in PEACECD) delete PEACECD[k];
-    WNEWS.length = 0;
+    for (k in PUPPET) delete PUPPET[k];
+    /* 世界消息（v15）：队列 / 待更正 / 耳目圈都是"这一局"的 ——
+     * 清空之后由 newsLoad(d.NEWS) 灌回来（旧档没有那一块 → 空队起步）。 */
+    PNEWS.length = 0; RUMOURS.length = 0; newsFogTouch();
     TALK.open = false; TALK.to = 0;
+    /* 受降卡是弹窗状态，不进档：读档时那场仗还在，下一回合会重新弹一次 */
+    SURR.open = false; SURR.loser = 0; SURR.winner = 0;
     if (!d || typeof d !== 'object') return;
     /* 只认"世界里真有的国家 id"：手改过的档、或者读一份别的种子的档，
      * 会带进来一堆不存在的 cid —— 留着它们面板上就是"与 ? 结盟"。 */
@@ -10467,6 +15003,30 @@
     norm(d.cd, DIPCD, turnOf);
     norm(d.talkCd, TALKCD, turnOf);
     norm(d.peaceCd, PEACECD, turnOf);
+    /* 傀儡表（v13）：字段容错 —— 缺 since / annexCd / warT 一律补默认，
+     * 手改过的档也不会读出 annexCd=NaN（那会让"距可并入"变成 NaN 回合）。
+     * 另外剔掉"自己称臣于自己"这种脏记录。 */
+    norm(d.puppet, PUPPET, function (v) {
+      v = v || {};
+      var s = v.s | 0, p = v.p | 0;
+      if (!(s > 0) || !(p > 0) || s === p) return null;
+      var since = turnOf(v.since);
+      return {
+        s: s, p: p, since: since,
+        annexCd: Math.max(since, turnOf(v.annexCd) || (since + 60)),
+        warT: (typeof v.warT === 'number' && isFinite(v.warT)) ? Math.round(v.warT) : -999,
+        /* 朝贡的零头（攒整用）：0~1 之间的小数，缺了就当 0 */
+        acc: (typeof v.acc === 'number' && isFinite(v.acc)) ? AO.clamp(v.acc, 0, 1) : 0
+      };
+    });
+    for (k in PUPPET) if (!PUPPET[k]) delete PUPPET[k];
+    /* 一国只能当一家的属国：手改的档里出现两条 → 留较早的那条 */
+    var seenPup = Object.create(null);
+    for (k in PUPPET) {
+      var rp = PUPPET[k], pp = rp.p | 0;
+      if (seenPup[pp]) { delete PUPPET[k]; continue; }
+      seenPup[pp] = 1;
+    }
     norm(d.prop, DIPPROP, function (v) {
       v = v || {};
       return {
@@ -10519,6 +15079,44 @@
   AO.resLocalStorageOK = lsOK;
 
   /* silent=true：选国 / 退出游戏时顺手存一档，不弹"已存档"（那时正在弹别的提示） */
+  /* 不安表的**稀疏 + 瘦身**存档：
+   *   ① 只存真的闹过事的省（v 或 target ≥ 0.5）—— 0 是默认值，不该占档；
+   *   ② 只存 { v, target }，**丢掉 drivers** —— 那八项每回合都重算，
+   *      存下来纯属浪费（1100 省 × 150 字节 ≈ 160 KB，正好把
+   *      localStorage 的配额顶到边上：test/gov.js 写第二份存档就撞 QuotaExceeded）。
+   * 代价：读档后**第一次 settleUnrest 之前**，省卡的悬停明细是空的
+   * （显示"还没结算过"）。一回合就补上了，比存档写不进去划算得多。 */
+  function sparseUnrest() {
+    var out = Object.create(null);
+    for (var k in UNREST) {
+      var u = UNREST[k];
+      if (!u) continue;
+      if ((u.v || 0) < 0.5 && (u.target || 0) < 0.5) continue;
+      out[k] = { v: Math.round((u.v || 0) * 10) / 10, target: Math.round((u.target || 0) * 10) / 10 };
+    }
+    return out;
+  }
+
+  /* 物价的瘦身存档：只留"不是基准价"的条目（PRICES_CFG.base 1.0 + 无趋势）。
+   * 64 国 × 7 种 = 448 条，全存约 30 KB；把"没动过的"剔掉通常只剩几十条。
+   * 数值保留两位小数（cfg.round）—— 三位小数对玩家没意义，对存档配额有意义。 */
+  function sparsePrices() {
+    var C = AO.PRICES_CFG, r = Math.pow(10, C.round), out = Object.create(null);
+    for (var cid in PRICES) {
+      var row = PRICES[cid], o = Object.create(null), any = false;
+      for (var k in row) {
+        var it = row[k];
+        if (!it) continue;
+        var v = Math.round((it.v || 0) * r) / r, t = Math.round((it.target || 0) * r) / r;
+        if (v === C.base && t === C.base && !it.trend) continue;
+        o[k] = { v: v, target: t, trend: it.trend | 0 };
+        any = true;
+      }
+      if (any) out[cid] = o;
+    }
+    return out;
+  }
+
   function saveGame(silent) {
     if (!state.world) { if (!silent) toast('还没有世界可以存', 2200); return; }
     var payload = {
@@ -10544,6 +15142,9 @@
        * SMELT 只存**有炉或有工地**的省（sparseSmelt，1100 省里通常只有几十条）；
        * IRONACC 和 TAXACC 一个道理 —— 不存的话读档后每省的铁税零头归零。 */
       SMELT: sparseSmelt(), IRONACC: IRONACC,
+      /* 淘金场（v18 / A，**不升 SAVE_VER**）：和 SMELT 一个瘦身法（sparseWash），
+       * 旧档没有这个键 → 读进来是空表，等于"这一局还没人改建过"。 */
+      WASH: sparseWash(),
       /* 治理层（v2 新增）：官员池、在任、税率、民心 + 人口税零头。
        * TAXACC 也存 —— 不存的话读档后每省的小数零头归零，
        * 长期看只是慢一点点，但"存档前后税入不一样"会被玩家当成 bug。 */
@@ -10556,11 +15157,25 @@
        * 封锁 / 灭亡 / 战报 / 征兵队列 + 两个 id 计数器 + 玩家国。
        * 全部是"按 id 挂的普通对象"，JSON 原样进出；id 计数器必须存 ——
        * 不存的话读档后新征的军队会拿到已经用过的 id，两支军队会互相覆盖。 */
-      BARRACKS: BARRACKS, ARMORY: ARMORY, STABLE: STABLE, FOUNDRY: FOUNDRY,
-      SHIPYARD: SHIPYARD,
+      BARRACKS: BARRACKS, ARMORY: ARMORY, STABLE: STABLE, SHIPYARD: SHIPYARD,
+      /* 军工产线（v17，**不升 SAVE_VER**）：产线分配 / 装备库存 / 工匠池与派驻。
+       * MILLS 只存"有过分配或零头"的省（一间空坊不占档）；
+       * EQUIPS 只存有货的国；ARTISANS 只存有人的国 —— 三张表都按需落笔。 */
+      MILL: sparseMill(), MILLV: 19, ARSENAL: sparseArsenal(),
+      EQUIP: EQUIPS, ARTISAN: ARTISANS, ARTISAN_ID: ARTISAN_ID,
       ARMY: ARMY, GENERALS: GENERALS, ARMY_ID: ARMY_ID, GEN_ID: GEN_ID,
       PLAYER: PLAYER, WARSET: WARSET, WARBASE: WARBASE,
       OCCUPY: OCCUPY, SIEGE: SIEGE, BLOCKADE: BLOCKADE, DEAD: DEAD,
+      /* 不安 / 整合 / 匪患 / 安抚冷却 / 预警档（A、B 两批，**不升 SAVE_VER**）。
+       * 旧档没有这五块 → fill 之后是空表：不安 0、没有整合记录、没有匪患 ——
+       * 等于"这一局还没人闹过事"，和新开一局走同一条路，不写迁移函数。
+       * 唯一的例外是**旧档里已经有 OCCUPY 的省**：它们没有 INTEG，
+       * 读档后按"刚打下来"（×0.4）算，见产出那一处的兜底。 */
+      INTEG: INTEG, UNREST: sparseUnrest(), BANDIT: BANDIT, PACIFY: PACIFY, UNWARN: UNWARN,
+      /* 动态市场（v14，**不升 SAVE_VER**）：物价指数 / 事件冲击 / 卖货零头 / 出口闸。
+       * 旧档没有这四块 → fill 之后是空表：物价一律回基准 1.0（等价于"这一局还没
+       * 交易过"），出口闸 EXP1 空 → 本回合谁都能出口一笔，和"新开一局"同一条路。 */
+      PRICES: sparsePrices(), PRICESHOCK: PRICESHOCK, SELLACC: SELLACC, EXP1: EXP1,
       RECRUITQ: RECRUITQ, WARLOG: WARLOG,
       /* v4：事件系统 + 信仰（冷却表 / 一次性 / 产量 buff / 传教中 / 政策 /
        * 国教 / 挂起未选的事件）。全部按 id 挂的普通对象，JSON 原样进出；
@@ -10581,9 +15196,17 @@
        * **不升版本号**，老档缺这一块 → diploLoad(undefined) 全补默认，
        * 等于"这一局还没人签过条约"，和"新开一局"同一条路。 */
       DIPLO: diploSave(),
-      /* 维修档（19-repair.js）：每类建筑的优先档 / 停修名单 / 维修队。
-       * **不升版本号**，老档缺这一块 → repLoad(undefined) 全补默认。 */
-      REP: AO.repSave ? AO.repSave() : null
+      /* 维修档（19-repair.js）：每类建筑每个城的保留座数 / 停修名单。
+       * **不升版本号**，老档缺这一块 → repLoad(undefined) 全补默认（= 全开）。 */
+      REP: AO.repSave ? AO.repSave() : null,
+      /* 平衡分析（20-balance.js）：每回合的收支采样（一国最多 160 点，几十 KB）。
+       * **不升版本号** —— 老档缺这一块就从空曲线开始，走几回合又有线了。 */
+      BAL: AO.balSave ? AO.balSave() : null,
+      /* 世界消息（v15）：待送达队列 + 待更正的账 + bench 统计。
+       * **不升版本号** —— 老档缺这一块 → newsLoad(undefined) 空队起步，
+       * 和"新开一局"同一条路；存了它才能做到"存档前在路上的一条消息，
+       * 读档后还在路上，而且不会凭空变快"。 */
+      NEWS: newsSave()
     };
     var text;
     try { text = JSON.stringify(payload); }
@@ -10594,6 +15217,142 @@
     } catch (e) {
       if (!silent) toast('存档失败（这个环境禁用了 localStorage）', 3600);
     }
+  }
+
+  /* 产线分配表的稀疏版：只留"有分配 / 有零头 / 选过品种"的省。
+   * 1100 个省的空记录加起来也有几十 KB，而玩家真正摆过产线的通常只有十几省。
+   * 零头（prog / acc）也算信息 —— 攒到一半的一炉货不能读档就清零。 */
+  function sparseMill() {
+    var out = Object.create(null), M = AO.MILL, ow, k, i, has;
+    for (ow in MILLS) {
+      var m = MILLS[ow];
+      if (!m) continue;
+      has = false;
+      for (k in m.alloc) if ((m.alloc[k] | 0) > 0) has = true;
+      for (k in m.prog) if ((m.prog[k] || 0) > 0) has = true;
+      if (has) out[ow] = m;
+    }
+    return out;
+  }
+  /* 武库：只存有货的国（一张空表不进档） */
+  function sparseArsenal() {
+    var out = Object.create(null), ow;
+    for (ow in ARSENAL) {
+      var A = ARSENAL[ow];
+      if (!A) continue;
+      var has = false, k;
+      for (k in A.wpn) if (A.wpn[k] > 0) has = true;
+      for (k in A.mount) if (A.mount[k] > 0) has = true;
+      for (k in A.gun) if (A.gun[k] > 0) has = true;
+      for (k in A.ship) if (A.ship[k] > 0) has = true;
+      if (has) out[ow] = A;
+    }
+    return out;
+  }
+
+  /* 旧档迁移（v19，**不升 SAVE_VER**）：v17 的 MILLS 是 **pid 级**的，
+   * v19 起是 **owner 级**。折算规则（任务书第九节）：
+   *   · 按线合计：同国所有省的 alloc[线] 加起来（封顶到当时的池容量）
+   *   · prog 随线走：取同国最大值（同一国只有一条进度）
+   *   · 旧 st.order（单订单制）：那一坊没有任何分配时，按"全产能给原产线"折
+   * 另外 foundry.n 折进军械坊 1:1（铸炮厂整条删了，它的产能并进同一口锅）。 */
+  function millMigrateOld(d) {
+    if (!state.world) return 0;
+    var n = 0, old = d && d.MILL, pid, i, j, k, g;
+    /* foundry → armory 1:1 */
+    var fd = d && d.FOUNDRY;
+    if (fd) {
+      for (pid in fd) {
+        var f0 = fd[pid];
+        if (!f0 || !(f0.n > 0)) continue;
+        var a0 = ARMORY[pid];
+        if (!a0) a0 = ARMORY[pid] = newSchool();
+        a0.n = (a0.n | 0) + (f0.n | 0);
+        if (!n) n = 0;
+        n++;
+      }
+    }
+    if (!old) return n;
+    var per = Object.create(null);       // owner -> { alloc:{}, prog:{} }
+    for (pid in old) {
+      var mr = old[pid];
+      if (!mr || typeof mr !== 'object') continue;
+      var p = pOf(+pid);
+      if (!p || !p.owner) continue;
+      var ow = p.owner | 0;
+      var acc = per[ow] || (per[ow] = { alloc: {}, prog: {} });
+      for (k in AO.MILL.poolOf) {
+        g = AO.MILL.poolOf[k];
+        var src = mr[g] || mr[k] || null;
+        if (!src) continue;
+        var lines = AO.MILL.lines[g];
+        for (j = 0; j < lines.length; j++) {
+          var ln = lines[j], v = Math.max(0, src[ln] | 0);
+          if (v > 0) acc.alloc[ln] = (acc.alloc[ln] || 0) + v;
+        }
+        /* 旧线名 → 新线名：v17 的「兵刃」是一条线（wpn），v19 拆成四种类型；
+         * 旧档那一份统统算成「刀」（默认类型，AI 也是这么选的）。 */
+        var oldWpn = Math.max(0, src.wpn | 0);
+        if (oldWpn > 0) acc.alloc.dao = (acc.alloc.dao || 0) + oldWpn;
+      }
+      for (k in (mr.prog || {})) {
+        var pv = +(mr.prog[k] || 0);
+        if (!(pv > 0)) continue;
+        var short = k.split('.').pop();
+        if (short === 'wpn') short = 'dao';
+        if (!AO.MILL.kindOf[short]) continue;
+        acc.prog[short] = Math.max(acc.prog[short] || 0, pv);
+      }
+      /* 旧铸炮厂的线（fnd）并进军械池：炮线在 v19 是军械池里的四条线 */
+      if (mr.fnd) {
+        for (j = 0; j < AO.GUN_ORDER.length; j++) {
+          var gl = AO.GUN_ORDER[j], gv = Math.max(0, mr.fnd[gl] | 0);
+          if (gv > 0) acc.alloc[gl] = (acc.alloc[gl] || 0) + gv;
+        }
+      }
+      /* 单订单：这一坊没分配 → 全产能给原来那条线 */
+      for (i = 0; i < MILL_KINDS.length; i++) {
+        var kind = MILL_KINDS[i], st = UNIV[kind][pid];
+        if (!st || !st.order) continue;
+        var line0 = kind === 'armory' ? 'dao' : st.order;
+        if (!AO.MILL.kindOf[line0]) continue;
+        if (acc.alloc[line0] > 0) continue;
+        acc.alloc[line0] = Math.max(1, millCap(pid, kind));
+      }
+    }
+    for (var ow2 in per) {
+      var mm = millOf(+ow2), src2 = per[ow2];
+      for (k in src2.alloc) {
+        if (!AO.MILL.kindOf[k]) continue;
+        mm.alloc[k] = Math.max(0, src2.alloc[k] | 0);
+      }
+      for (k in src2.prog) {
+        if (!AO.MILL.kindOf[k]) continue;
+        mm.prog[k] = Math.min(lineWork(+ow2, k), src2.prog[k]);
+      }
+      /* 封顶到当时的池容量（按工作量从高到低扣） */
+      for (i = 0; i < MILL_POOLS.length; i++) {
+        var pool = MILL_POOLS[i], cap = poolCap(+ow2, pool), sum = 0;
+        var lines2 = AO.MILL.lines[pool];
+        for (j = 0; j < lines2.length; j++) sum += mm.alloc[lines2[j]] | 0;
+        while (sum > cap) {
+          var hi = -1, hiW = -1;
+          for (j = 0; j < lines2.length; j++) {
+            var l2 = lines2[j], a2 = mm.alloc[l2] | 0;
+            if (!a2) continue;
+            if (lineWork(+ow2, l2) > hiW) { hiW = lineWork(+ow2, l2); hi = j; }
+          }
+          if (hi < 0) break;
+          mm.alloc[lines2[hi]]--; sum--;
+        }
+      }
+      n++;
+    }
+    if (n && PLAYER) {
+      NOTES.push({ owner: PLAYER, cls: 'ok',
+        text: '军工产线已改制（全国口径）：' + n + ' 个国家的旧分配按线合计搬进了新表 —— 打开顶栏「产能」重新分配' });
+    }
+    return n;
   }
 
   /* 把存档里的状态灌回当前世界。世界已经按同一个 seed 重建好了，
@@ -10607,6 +15366,22 @@
     function wipe(o) { for (var k in o) delete o[k]; }
     function fill(dst, src) { wipe(dst); if (src) for (var k in src) dst[k] = src[k]; }
     fill(SIM, d.SIM);
+    /* 铁矿「深层休眠」迁移（v18 追加一补课，不升存档号）：
+     * cool 0 → 48 之后，旧档里那些 `gone: true` 的铁袋读进来就是"刚睡下"——
+     *   gone 清掉、cool 起 48、left 留 0（到点由产出循环把 left 回满）。
+     * 不在读档时直接补满 left：那等于凭空白送 48 回合的矿，是"回溯重算"。
+     * **金袋不动**：金矿 cool 仍是 0，gone 就是永久枯竭（淘金场那一条闭环）。 */
+    for (var simPid in SIM) {
+      var simBag = SIM[simPid];
+      if (!simBag || !simBag.iron || typeof simBag.iron !== 'object') continue;
+      var ironS = simBag.iron;
+      if (ironS.gone) {
+        ironS.gone = false;
+        ironS.cool = AO.RESOURCE_BY_KEY.iron.cool;
+        ironS.left = 0;
+      }
+      if (typeof ironS.cool !== 'number' || !isFinite(ironS.cool)) ironS.cool = 0;
+    }
     fill(SCHOOL, d.SCHOOL);
     fill(GRANARY, d.GRANARY);
     fill(UNIVERSITY, d.UNIVERSITY);
@@ -10646,13 +15421,47 @@
       if (typeof sr.iAcc !== 'number' || !isFinite(sr.iAcc)) sr.iAcc = 0;
       if (!sr.n && !sr.site) delete SMELT[spid];
     }
+    /* 淘金场（v18 / A，不升 SAVE_VER）：旧档没有 WASH → fill 之后是空表，
+     * 等于"这一局还没人改建过"。有的话逐条归一化（和 SMELT 同一套写法）。 */
+    fill(WASH, d.WASH);
+    for (var wpid2 in WASH) {
+      var wr2 = WASH[wpid2];
+      if (!wr2 || typeof wr2 !== 'object') { delete WASH[wpid2]; continue; }
+      wr2.n = AO.clamp(wr2.n | 0, 0, AO.WASH.maxPer);
+      wr2.site = Math.max(0, wr2.site | 0);
+      wr2.halted = !!wr2.halted;
+      if (!wr2.mAcc || typeof wr2.mAcc !== 'object') wr2.mAcc = { iron: 0, gold: 0 };
+      if (typeof wr2.mAcc.gold !== 'number' || !isFinite(wr2.mAcc.gold)) wr2.mAcc.gold = 0;
+      if (typeof wr2.mAcc.iron !== 'number' || !isFinite(wr2.mAcc.iron)) wr2.mAcc.iron = 0;
+      if (typeof wr2.iAcc !== 'number' || !isFinite(wr2.iAcc)) wr2.iAcc = 0;
+      if (typeof wr2.tAcc !== 'number' || !isFinite(wr2.tAcc)) wr2.tAcc = 0;
+      if (!wr2.n && !wr2.site) delete WASH[wpid2];
+    }
     /* 铁税零头：和 TAXACC 一样存回来，否则读档后"税入比存档前少一点"会被当成 bug */
-    fill(IRONACC, d.IRONACC);
-    for (var ipid in IRONACC) {
+    fill(IRONACC, d.IRONACC);    for (var ipid in IRONACC) {
       if (typeof IRONACC[ipid] !== 'number' || !isFinite(IRONACC[ipid])) IRONACC[ipid] = 0;
     }
     fill(CENTRAL, d.CENTRAL);
     fill(RESEARCH, d.RESEARCH);
+    /* 工艺链折算（v19）：兵器名节点全下树，已研的旧键折成对应的工艺 ——
+     * 高级覆盖低级、**不退点数**（那笔账已经花掉了，退回去等于白送科研点）。
+     * 映射表只有一份：AO.CRAFT.alias。 */
+    for (var row in RESEARCH) {
+      var Rd = RESEARCH[row];
+      if (!Rd || !Rd.done) continue;
+      for (var ok3 in AO.CRAFT.alias) {
+        if (!Rd.done[ok3]) continue;
+        Rd.done[AO.CRAFT.alias[ok3]] = true;
+        delete Rd.done[ok3];
+      }
+      /* 队列里挂着的旧键也一起折（不然队头永远研不成） */
+      if (Rd.queue) {
+        for (var qi3 = 0; qi3 < Rd.queue.length; qi3++) {
+          var qk3 = AO.CRAFT.alias[Rd.queue[qi3]];
+          if (qk3) Rd.queue[qi3] = qk3;
+        }
+      }
+    }
     fill(POP, d.POP);
     fill(TALENT, d.TALENT);
     fill(OFFICIAL, d.OFFICIAL);
@@ -10685,13 +15494,160 @@
     fill(BARRACKS, d.BARRACKS);
     fill(ARMORY, d.ARMORY);
     fill(STABLE, d.STABLE);
-    fill(FOUNDRY, d.FOUNDRY);
     fill(SHIPYARD, d.SHIPYARD);
+    /* 军工产线（v17）：旧档缺这三块 → 空表（= 还没摆过产线 / 还没打过装备 / 还没抽过匠人）。
+     * 读进来的记录要逐条归一化：手改过的档 / 别的版本的档可能带 NaN 或越界，
+     * 留着会让"产能 2 点"变成"产能 NaN 点"，然后整座坊静默停产。 */
+    /* 军工产线（v19：**owner 级**全国表）。MILLV 是"表结构版本"：
+     * 没有它（v17/v18 的档）→ 走 millMigrateOld 把 pid 级旧表按线合计搬过来；
+     * 有它 → 直接读，逐国归一化（手改过的档带 NaN / 越界也不炸）。 */
+    if (d.MILLV === 19) {
+      fill(MILLS, d.MILL);
+      for (var mow in MILLS) {
+        var mr1 = MILLS[mow];
+        if (!mr1 || typeof mr1 !== 'object') { delete MILLS[mow]; continue; }
+        var mfix = millOf(mow), Mk = AO.MILL, kk2, gg;
+        for (kk2 in mfix.alloc) {
+          var lv0 = +mr1.alloc[kk2];
+          mfix.alloc[kk2] = isFinite(lv0) && lv0 > 0 ? Math.min(99, Math.floor(lv0)) : 0;
+        }
+        for (kk2 in mfix.prog) {
+          var pv1 = +mr1.prog[kk2];
+          mfix.prog[kk2] = isFinite(pv1) && pv1 > 0 ? Math.min(99, pv1) : 0;
+        }
+        for (kk2 in (mr1.form || {})) {
+          if (AO.MILL.kindOf[kk2] !== 'blade') continue;
+          mfix.form[kk2] = AO.gearOf(AO.GEAR.forms, mr1.form[kk2]).key;
+        }
+        for (kk2 in (mr1.acc || {})) {
+          var av = +(mr1.acc[kk2] || 0);
+          mfix.acc[kk2] = isFinite(av) ? Math.max(0, Math.min(0.999, av)) : 0;
+        }
+        gg = null;
+      }
+    } else {
+      wipe(MILLS);
+      millMigrateOld(d);
+    }
+    /* 武库（v19）：旧档没有 ARSENAL → 空表（= 还没有成品），和"新开一局"同一条路 */
+    fill(ARSENAL, d.ARSENAL);
+    for (var aow2 in ARSENAL) {
+      var ar0 = ARSENAL[aow2];
+      if (!ar0 || typeof ar0 !== 'object') { delete ARSENAL[aow2]; continue; }
+      var afix = arsOf(aow2), kk3;
+      for (var gk in afix) {
+        for (kk3 in afix[gk]) {
+          var nv = +(ar0[gk] || {})[kk3];
+          if (!isFinite(nv) || nv <= 0) delete afix[gk][kk3];
+          else afix[gk][kk3] = Math.floor(nv);
+        }
+      }
+      /* v19 返工（任务书第九节）：武库里的旧键 '代|类型|形制|品质' 折算成
+       * '材质|类型|形制|品质'（ironwp/crossbow → 铁，matchlock…gw → 火器）。
+       * 折完撞键就**合并件数** —— 铁兵器与强弩·具装都并成"铁 · 刀/…"，不能丢。 */
+      if (afix.wpn) {
+        var wmerged = Object.create(null), wk;
+        for (wk in afix.wpn) {
+          var wp = wk.split('|'), wm = AO.matKeyOf(wp[0]);
+          var nk = [wm, wp[1] || 'dao', wp[2] || 'plain', wp[3] || 'plain'].join('|');
+          wmerged[nk] = (wmerged[nk] | 0) + (afix.wpn[wk] | 0);
+        }
+        afix.wpn = wmerged;
+      }
+    }
+    fill(EQUIPS, d.EQUIP);
+    for (var eoid in EQUIPS) {
+      var e0 = EQUIPS[eoid];
+      if (!e0 || typeof e0 !== 'object') { delete EQUIPS[eoid]; continue; }
+      equipOf(eoid);                    // 补槽、把非法数归零
+    }
+    fill(ARTISANS, d.ARTISAN);
+    for (var aoid in ARTISANS) {
+      var A0 = ARTISANS[aoid];
+      if (!A0 || typeof A0 !== 'object') { delete ARTISANS[aoid]; continue; }
+      var A1 = artisanPoolOf(aoid), i0;
+      A1.pool = (A0.pool || []).filter(function (x) { return x && typeof x === 'object'; });
+      A1.post = {};
+      for (i0 in (A0.post || {})) {
+        var pa = (A0.post || {})[i0];
+        if (!pa || typeof pa !== 'object') continue;
+        pa.lv = AO.clamp(pa.lv | 0, 0, AO.ARTISAN.lv.length - 1);
+        pa.pid = i0 | 0;
+        A1.post[i0 | 0] = pa;
+      }
+      for (i0 = 0; i0 < A1.pool.length; i0++) A1.pool[i0].lv = AO.clamp(A1.pool[i0].lv | 0, 0, AO.ARTISAN.lv.length - 1);
+    }
+    /* 匠人 id 计数器：接着存档最大值往后走（撞了"派/撤"会认错人） */
+    var maxArt = 0, ak3, ai3;
+    for (ak3 in ARTISANS) {
+      var A2 = ARTISANS[ak3];
+      if (!A2) continue;
+      for (ai3 = 0; ai3 < (A2.pool || []).length; ai3++) if (A2.pool[ai3] && A2.pool[ai3].id > maxArt) maxArt = A2.pool[ai3].id;
+      for (var apk in (A2.post || {})) if (A2.post[apk] && A2.post[apk].id > maxArt) maxArt = A2.post[apk].id;
+    }
+    ARTISAN_ID = Math.max(d.ARTISAN_ID || 1, maxArt + 1);
     fill(ARMY, d.ARMY);
+    /* v19 返工：军队身上的"代"折算成材质（weapon.tier 也要跟着改，
+     * 否则面板按旧键查不到材质，会退回"皮"）。 */
+    for (var aid2 in ARMY) {
+      var a2 = ARMY[aid2];
+      if (!a2 || a2.type === 'navy') continue;
+      var oldTier2 = a2.tier;
+      a2.tier = AO.matKeyOf(a2.tier);
+      if (a2.weapon) {
+        var wm2 = AO.matKeyOf(a2.weapon.tier);
+        var wty2 = a2.weapon.type || 'dao', wfo2 = a2.weapon.form || 'plain', wq2 = a2.weapon.q || 'plain';
+        a2.weapon = { key: [wm2, wty2, wfo2, wq2].join('|'),
+          tier: wm2, type: wty2, form: wfo2, q: wq2 };
+      } else if (a2.weapon === undefined && oldTier2) {
+        /* v18 及更早的档：军队只有 tier / arms，没有 weapon 槽 —— 按"已发对应队份"补上
+         * （arms:'art' 的补一门投石机）。新档的裸兵是 `weapon: null`，不会被这条碰到。 */
+        if (a2.arms === 'art') a2.gun = { key: 'catapult|plain', tier: 'catapult', q: 'plain' };
+        a2.weapon = { key: [a2.tier, 'dao', 'plain', 'plain'].join('|'),
+          tier: a2.tier, type: 'dao', form: 'plain', q: 'plain' };
+      }
+    }
     fill(GENERALS, d.GENERALS);
     fill(WARSET, d.WARSET);
     fill(WARBASE, d.WARBASE);
     fill(OCCUPY, d.OCCUPY);
+    /* 不安 / 整合 / 匪患 / 安抚冷却 / 预警档：旧档缺这五块 → 空表（见 save 里的说明）。
+     * 有个细节要补：旧档里 OCCUPY 有、INTEG 没有的省，直接补一条 v:0 ——
+     * 否则它在存档里"没有整合记录"，而产出那边按 0 算，两边看着是同一个数，
+     * 但省卡的「整合」行会整行消失（判据是 integOf 非空），玩家会以为坏了。 */
+    fill(INTEG, d.INTEG);
+    fill(UNREST, d.UNREST);
+    fill(BANDIT, d.BANDIT);
+    fill(PACIFY, d.PACIFY);
+    fill(UNWARN, d.UNWARN);
+    /* 动态市场（v14）：旧档缺这四块 → 空表（物价回基准、没有冲击、没有零头）。
+     * 读进来的价格要逐条归一化：手改过的档 / 别的版本的档可能带 NaN 或越界值，
+     * 留着会让价格板显示 "NaN" 并传染到所有买卖。 */
+    fill(PRICES, d.PRICES);
+    var PCFG = AO.PRICES_CFG;
+    for (var pcid in PRICES) {
+      var prow = PRICES[pcid];
+      if (!prow || typeof prow !== 'object') { delete PRICES[pcid]; continue; }
+      for (var pkey in prow) {
+        var pit = prow[pkey];
+        if (!pit || typeof pit !== 'object') { delete prow[pkey]; continue; }
+        pit.v = AO.clamp(isFinite(+pit.v) ? +pit.v : PCFG.base, PCFG.lo, PCFG.hi);
+        pit.target = AO.clamp(isFinite(+pit.target) ? +pit.target : PCFG.base, PCFG.lo, PCFG.hi);
+        pit.trend = pit.trend > 0 ? 1 : pit.trend < 0 ? -1 : 0;
+      }
+    }
+    fill(PRICESHOCK, d.PRICESHOCK);
+    fill(SELLACC, d.SELLACC);
+    fill(EXP1, d.EXP1);
+    for (var sak in SELLACC) {
+      if (!isFinite(+SELLACC[sak]) || +SELLACC[sak] < 0) SELLACC[sak] = 0;
+      else SELLACC[sak] = +SELLACC[sak];
+    }
+    for (var exk in EXP1) { if (!isFinite(+EXP1[exk])) delete EXP1[exk]; else EXP1[exk] = +EXP1[exk]; }
+    for (var ocp in OCCUPY) {
+      if (!INTEG[ocp]) INTEG[ocp] = { v: 0 };
+      unrestOf(ocp);
+    }
     fill(SIEGE, d.SIEGE);
     fill(BLOCKADE, d.BLOCKADE);
     fill(DEAD, d.DEAD);
@@ -10722,7 +15678,6 @@
       if (!BARRACKS[pid]) BARRACKS[pid] = newSchool();
       if (!ARMORY[pid]) ARMORY[pid] = newSchool();
       if (!STABLE[pid]) STABLE[pid] = newSchool();
-      if (!FOUNDRY[pid]) FOUNDRY[pid] = newSchool();
       if (!SHIPYARD[pid]) SHIPYARD[pid] = newSchool();
       /* 内政批：粮仓 / 大学 / 工厂。旧档没有这三张表 → 补 0 座（等同"还没盖过"） */
       if (!GRANARY[pid]) GRANARY[pid] = newSchool();
@@ -10767,9 +15722,18 @@
      * 而选了国的档里 REL 归 fogLoad 管（d.DIPLO.rel 是 null）。
      * 旧档没有 d.DIPLO → 全补默认（空条约表）。 */
     diploLoad(d.DIPLO);
+    /* 世界消息（v15）：排在迷雾与外交之后 —— PLAYER / turnNo / INTELB 都定完了，
+     * "在路上的一条消息还差几回合"才是拿这两个数算出来的。
+     * 旧档 d.NEWS 是 undefined → 空队起步（和"新开一局"同一条路）。 */
+    newsLoad(d.NEWS);
     /* 维修档（19-repair.js）：SIM / WALL 都灌完了才补 —— 它要按 pid 剔掉
      * 已经不存在的省。老档 d.REP 是 undefined → 全补默认。 */
     if (AO.repLoad) AO.repLoad(d.REP);
+    /* 平衡分析：曲线随档走（老档没有 d.BAL → 空曲线起步） */
+    if (AO.balLoad) AO.balLoad(d.BAL);
+    /* 军工产线（v17）：必须排在 RESEARCH / UNIV / PLAYER 都落定之后 ——
+     * 迁移要按"研到哪一档"判断产线开不开，也要按产能算出该迁多少点。
+     * 旧档的 st.order 在这一步被翻译成"全产能 → 原产线"（拍板③）。 */
     updateTurnLabel();
     state.infoId = 0;
     state.openKey = null;
@@ -10853,7 +15817,7 @@
    * 铺满一屏会把地图整个盖住，玩家选完还得重新找回刚才看的地方。
    * ============================================================= */
   function evtLockTurn(on) {
-    var ids = ['nextTurn', 'ttTurn', 'gpTurn'];
+    var ids = ['nextTurn', 'ttTurn', 'gpTurn', 'npTurn', 'rpTurn', 'chTurn'];
     for (var i = 0; i < ids.length; i++) {
       var b = $(ids[i]);
       if (b) b.disabled = !!on;
@@ -10947,7 +15911,290 @@
       /* 16-events.js 里用的是 unlockTurn(false) 这个写法（lockTurn 的反面）；
        * 两个都递进去 —— 事件层改名字也不会把回合按钮永久锁死。 */
       unlockTurn: function (on) { evtLockTurn(!!on); },
-      refresh: evtRefresh
+      refresh: evtRefresh,
+      /* v13（A3）：匪患事件改成看不安值之后，事件层要能读不安、改不安、
+       * 挂匪患标记、给招安的驻防军。四个都是薄壳 —— 真正的规则在 11-ui 里，
+       * 事件层只负责"什么时候调"（和 happyOf / official 同一套做法）。 */
+      unrestOf: unrestOf,
+      unwarnClear: function (pid) { delete UNWARN[pid | 0]; },
+      banditSet: function (pid) {
+        BANDIT[pid | 0] = { turn: turnNo, left: AO.UNREST.banditTurns };
+      },
+      garrisonAdd: function (pid, n) {
+        var p = pOf(pid);
+        if (!p || !p.owner) return 0;
+        var made = 0;
+        for (var i = 0; i < (n || 1); i++) {
+          var a = newArmy(p.owner, p.id, { type: 'army', men: AO.RECRUIT.menPerUnit });
+          syncArms(a);
+          a.order = { type: 'defend', cid: p.owner, pid: p.id, tactic: 'assault' };
+          made++;
+        }
+        return made;
+      }
+    });
+  }
+
+  /* =============================================================
+   * 十八b、产能 / 武库面板（v19）
+   *
+   * 两张都是**全国口径**的页（和「经营」同一套全屏纸面）：
+   *   产能 —— 三个池 + 20 条线，点数怎么分是这一局最核心的取舍
+   *   武库 —— 成品（队份）与发配；兵种是发出来的
+   * 面板只做两件事：读（lineStatus / arsRows）+ 写（setLineAlloc / issue*），
+   * 规则一律在下面那几个函数里，面板不自己算第二遍。
+   * ============================================================= */
+  var MPU = { open: false }, APU = { open: false };
+
+  /* 面板看哪个国：选了国就是自己；工坊模式跟着地图上选中的省走 */
+  function panelOwner() {
+    if (PLAYER) return PLAYER;
+    var sel = state.renderer && state.renderer.selected;
+    var p = sel ? pOf(sel) : null;
+    if (p && p.owner) return p.owner;
+    var w = state.world;
+    return (w && w.countries[0]) ? w.countries[0].id : 0;
+  }
+
+  function openMillPanel() {
+    MPU.open = true;
+    $('millPanel').classList.add('on');
+    renderMillPanel();
+  }
+  function closeMillPanel() {
+    MPU.open = false;
+    $('millPanel').classList.remove('on');
+  }
+  function openArsPanel() {
+    APU.open = true;
+    $('arsPanel').classList.add('on');
+    renderArsPanel();
+  }
+  function closeArsPanel() {
+    APU.open = false;
+    $('arsPanel').classList.remove('on');
+  }
+
+  /* 一条线的进度条（纯 inline，免得为它加一堆 CSS） */
+  function lineBarHtml(st) {
+    var pct = st.work ? Math.round((st.prog / st.work) * 100) : 0;
+    var col = st.wait ? '#a8523b' : st.done ? '#4a7a4a' : '#8a6d34';
+    return '<i style="display:inline-block;width:76px;height:6px;background:#e6ddc9;' +
+      'border-radius:3px;overflow:hidden;vertical-align:middle">' +
+      '<i style="display:block;height:6px;width:' + pct + '%;background:' + col + '"></i></i>';
+  }
+
+  function renderMillPanel() {
+    if (!MPU.open || !state.world) return;
+    var owner = panelOwner(), c = coOf(owner), M = AO.MILL;
+    if (!c) { $('mpBody').innerHTML = '<div class="l">还没有世界</div>'; return; }
+    $('mpWho').textContent = c.name + ' · 工艺：' + (AO.CRAFT.cn[AO.CRAFT.order[craftIdxOf(owner)]] || '皮革工艺');
+    var h = '', i, j;
+    var rep = millReport(owner);
+    /* 三池一览 */
+    h += '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">';
+    for (i = 0; i < rep.length; i++) {
+      var r = rep[i];
+      h += '<div style="flex:1;min-width:180px;border:1px solid #e0d6c1;border-radius:8px;' +
+        'padding:8px 10px;background:#fbf7ee">' +
+        '<b>' + M.poolCn[r.pool] + '池</b>　' + r.used + ' / <b>' + r.cap + '</b> 点' +
+        (r.used < r.cap ? '<span style="color:#8a6d34"> · 空转 ' + (r.cap - r.used) + ' 点</span>' : '') +
+        '<br><span style="font-size:11.5px;color:#8b8272">' +
+        (r.pool === 'arm' ? '军械坊 2 点/座' : r.pool === 'hor' ? '驯马场 1 点/座' : '造船厂 1 点/座') +
+        ' × 工厂 × 匠人</span></div>';
+    }
+    h += '</div>';
+
+    for (i = 0; i < rep.length; i++) {
+      var pool = rep[i];
+      if (!pool.cap && !pool.used) {
+        h += '<div class="l" style="color:#8b8272"><i>' + M.poolCn[pool.pool] + '</i> ' +
+          '本国还没有对应的厂（' + (pool.pool === 'arm' ? '军械坊' : pool.pool === 'hor' ? '驯马场' : '造船厂') +
+          '）—— 盖起来就有产能了</div>';
+        continue;
+      }
+      h += '<div style="margin:12px 0 6px;border-top:1px solid #e2d8c4;padding-top:8px">' +
+        '<b>' + M.poolCn[pool.pool] + '池</b>　' + pool.used + ' / ' + pool.cap + ' 点' +
+        '<span style="font-size:11.5px;color:#8b8272">　每线一单，一回合至多完成一单；分超过工作量就进不去</span></div>';
+      h += '<div class="sellbox" style="display:block">';
+      for (j = 0; j < pool.lines.length; j++) {
+        var st = pool.lines[j], line = st.line;
+        var full = st.alloc >= st.work;
+        var status = '';
+        if (st.wait) status = '<em style="color:#a8523b">等料（卡在 100%）</em>';
+        else if (full) status = '<em style="color:#4a7a4a">已满速 · 1 回合/单</em>';
+        else if (st.turns) status = '<em>' + st.turns + ' 回合/单</em>';
+        else status = '<em style="color:#8b8272">未分配</em>';
+        var formSel = '';
+        if (M.kindOf[line] === 'blade') {
+          var cur = millOf(owner).form[line] || 'plain';
+          formSel = '<select data-form="' + line + '" style="margin-left:6px">' +
+            AO.GEAR.forms.map(function (f) {
+              return '<option value="' + f.key + '"' + (f.key === cur ? ' selected' : '') + '>' +
+                f.cn + '</option>';
+            }).join('') + '</select>';
+        }
+        var lineName = M.lineCn[line], lineIcon = '';
+        if (M.kindOf[line] === 'blade') {
+          var cm = craftWeapon(owner);
+          lineName += '（' + cm.cn + '）';
+          lineIcon = '<img src="' + wpnIcon(line, cm.key) + '" style="width:18px;height:18px;vertical-align:-4px">';
+        }
+        h += '<div class="srow" style="display:flex;align-items:center;gap:8px;padding:3px 0">' +
+          '<span style="width:110px">' + lineIcon + escHtml(lineName) + '</span>' +
+          '<em style="width:96px;color:#8b8272">工作量 ' + st.work + ' 点</em>' +
+          '<button type="button" data-mline="' + line + '" data-mdelta="-1"' +
+          (st.alloc <= 0 ? ' disabled' : '') + '>−</button>' +
+          '<b style="width:26px;text-align:center">' + st.alloc + '</b>' +
+          '<button type="button" data-mline="' + line + '" data-mdelta="1"' +
+          (full ? ' disabled' : '') + '>＋</button>' +
+          lineBarHtml(st) + '　' + status + formSel + '</div>';
+      }
+      h += '</div>';
+    }
+    h += '<div class="l" style="margin-top:10px;color:#8b8272"><i>说明</i> ' +
+      '兵刃 / 装备 / 马 一单 = 1 队份（×1000）· 炮一单 = 1 门 · 舰一单 = 1 艘。' +
+      '兵刃的**材质**跟着工艺链走（研到哪一档就造哪一档），类型 / 形制在这里选，' +
+      '品质按单 roll（看全国最高那位匠人）。二十条线一律**没有解锁条件** —— ' +
+      '教育 0、没有匠人也能开炮线、养具装马、选锋锐。</div>';
+    $('mpBody').innerHTML = h;
+  }
+
+  function renderArsPanel() {
+    if (!APU.open || !state.world) return;
+    var owner = panelOwner(), c = coOf(owner);
+    if (!c) { $('apBody').innerHTML = '<div class="l">还没有世界</div>'; return; }
+    $('apWho').textContent = c.name;
+    var h = '', i, j;
+    var kinds = [['wpn', '兵刃', '队份'], ['mount', '马', '队份'], ['gun', '炮', '门'], ['ship', '舰', '艘']];
+    h += '<div style="margin:4px 0 8px"><b>库存</b>' +
+      '<span style="font-size:11.5px;color:#8b8272">　队份 = 武装一个千人队（×1000）</span></div>';
+    h += '<div class="sellbox" style="display:block">';
+    for (i = 0; i < kinds.length; i++) {
+      var rows = arsRows(owner, kinds[i][0]);
+      if (!rows.length) {
+        h += '<div class="srow" style="display:flex;gap:8px;padding:2px 0"><span style="width:64px">' +
+          kinds[i][1] + '</span><em style="color:#8b8272">空</em></div>';
+        continue;
+      }
+      for (j = 0; j < rows.length; j++) {
+        var r0 = rows[j];
+        h += '<div class="srow" style="display:flex;gap:8px;padding:2px 0;align-items:center">' +
+          '<span style="width:64px">' + kinds[i][1] + '</span>' +
+          (r0.icon ? '<img src="' + r0.icon + '" style="width:18px;height:18px">' : '') +
+          '<span style="flex:1;color:' + (r0.color || 'inherit') + '">' + escHtml(r0.cn) +
+          (r0.q ? '（' + AO.GEAR.qCn[r0.q] + '）' : '') + '</span>' +
+          '<b>×' + r0.n + ' ' + kinds[i][2] + '</b></div>';
+      }
+    }
+    /* 盔甲靴 */
+    var E = AO.EQUIP;
+    for (i = 0; i < E.slots.length; i++) {
+      var slot = E.slots[i], parts = [];
+      for (j = 0; j < E.q.length; j++) {
+        var n = equipOf(owner)[slot][E.q[j]] | 0;
+        if (n > 0) parts.push(E.qCn[E.q[j]] + ' ×' + n);
+      }
+      h += '<div class="srow" style="display:flex;gap:8px;padding:2px 0">' +
+        '<span style="width:64px">' + E.slotCn[slot] + '</span>' +
+        '<span style="flex:1">' + (parts.length ? parts.join(' · ') : '<em style="color:#8b8272">空</em>') +
+        '</span></div>';
+    }
+    h += '</div>';
+
+    /* 驻军清单 */
+    var list = armiesOf(owner).filter(function (a) { return a.type === 'army'; });
+    h += '<div style="margin:14px 0 6px;border-top:1px solid #e2d8c4;padding-top:8px"><b>驻军</b>' +
+      '<span style="font-size:11.5px;color:#8b8272">　' + list.length +
+      ' 支 · 换装即换兵种，换下的回库</span></div>';
+    if (!list.length) h += '<div class="l" style="color:#8b8272">本国还没有陆军（兵营里征一支）</div>';
+    var wOpts = arsRows(owner, 'wpn'), mOpts = arsRows(owner, 'mount'), gOpts = arsRows(owner, 'gun');
+    for (i = 0; i < list.length; i++) {
+      var a = list[i], p = pOf(a.pid);
+      var u = unitOf(a);
+      h += '<div class="srow" style="display:flex;align-items:center;gap:8px;padding:5px 0;' +
+        'border-bottom:1px dashed #e8dfcc;flex-wrap:wrap">' +
+        '<span style="width:120px">' + escHtml(p ? p.name : '?') + '</span>' +
+        '<span style="width:74px">' + unitKindCn(a) + ' · ' + a.men + ' 人</span>' +
+        '<span style="flex:1;min-width:180px' + (a.weapon ? '' : ';color:#a8523b') + '">' + escHtml(gearText(a)) +
+        '　<em style="color:#8b8272">攻 ' + u.atk.toFixed(2) + ' · 防 ' + u.def.toFixed(2) +
+        ' · 机动 ' + u.mov + '</em></span>' +
+        '<button type="button" data-fit="' + a.id + '">一键配齐</button>' +
+        '<select data-issue="wpn" data-army="' + a.id + '">' + selHtml(wOpts, a.weapon) + '</select>' +
+        '<select data-issue="mount" data-army="' + a.id + '">' + selHtml(mOpts, a.mount) + '</select>' +
+        '<select data-issue="gun" data-army="' + a.id + '">' + selHtml(gOpts, a.gun) + '</select>' +
+        '</div>';
+    }
+    h += '<div class="l" style="margin-top:10px;color:#8b8272"><i>说明</i> ' +
+      '招的都是步兵；发一份马 = 骑兵、发一门炮 = 炮兵（炮也吃攻城值）。' +
+      '盔甲靴三槽走「一键配齐」取库存最优。</div>';
+    $('apBody').innerHTML = h;
+
+    function selHtml(opts, cur) {
+      var out = '<option value="">卸下</option>';
+      for (var k = 0; k < opts.length; k++) {
+        var o = opts[k];
+        out += '<option value="' + escHtml(o.key) + '"' +
+          (cur && cur.key === o.key ? ' selected' : '') + '>' +
+          escHtml(o.cn + (o.q ? '（' + AO.GEAR.qCn[o.q] + '）' : '') + '×' + o.n) + '</option>';
+      }
+      return out;
+    }
+  }
+
+  function millPanelActions() {
+    var mp = $('millPanel'), ap = $('arsPanel');
+    if (!mp || !ap) return;
+    $('millBtn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (MPU.open) closeMillPanel(); else { closeArsPanel(); openMillPanel(); }
+    });
+    $('arsBtn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (APU.open) closeArsPanel(); else { closeMillPanel(); openArsPanel(); }
+    });
+    $('mpClose').addEventListener('click', closeMillPanel);
+    $('apClose').addEventListener('click', closeArsPanel);
+    mp.addEventListener('click', function (e) {
+      if (e.target === mp) return closeMillPanel();
+      var b = e.target.closest('button[data-mline]');
+      if (!b) return;
+      var owner = panelOwner();
+      if (!canAct(owner)) return toast(lockTitle(), 2600);
+      var r = bumpLine(owner, b.getAttribute('data-mline'), +b.getAttribute('data-mdelta'));
+      if (!r.ok) toast(r.msg, 2400);
+      renderMillPanel();
+    });
+    mp.addEventListener('change', function (e) {
+      var sel = e.target.closest('select[data-form]');
+      if (!sel) return;
+      var owner = panelOwner();
+      if (!canAct(owner)) return;
+      setLineForm(owner, sel.getAttribute('data-form'), sel.value);
+      renderMillPanel();
+    });
+    ap.addEventListener('click', function (e) {
+      if (e.target === ap) return closeArsPanel();
+      var b = e.target.closest('button[data-fit]');
+      if (!b) return;
+      var owner = panelOwner();
+      if (!canAct(owner)) return toast(lockTitle(), 2600);
+      var a = ARMY[+b.getAttribute('data-fit')];
+      var r = armyFitAll(a);
+      toast(r.msg, 3000);
+      renderArsPanel();
+    });
+    ap.addEventListener('change', function (e) {
+      var sel = e.target.closest('select[data-issue]');
+      if (!sel) return;
+      var owner = panelOwner();
+      if (!canAct(owner)) return;
+      var a = ARMY[+sel.getAttribute('data-army')];
+      if (!a) return;
+      var kind = sel.getAttribute('data-issue'), key = sel.value || '';
+      var r = kind === 'wpn' ? issueWeapon(a, key) : kind === 'mount' ? issueMount(a, key) : issueGun(a, key);
+      if (!r.ok) toast(r.msg, 2600);
+      renderArsPanel();
     });
   }
 
@@ -10961,6 +16208,9 @@
     return state.world ? state.world.provinces[(x | 0) - 1] : null;
   }
   AO.resDebug = {
+    talentOf: talentOf, researchOf: researchOf,
+    /* 维护单价（逐座、逐类，可复算） */
+    maintDue: maintDue,
     buildOne: buildOne,
     buildSchool: buildSchool,
     buildMarket: buildMarket,
@@ -10969,7 +16219,10 @@
     startResearch: startResearch,
     sprintSite: sprintSite,
     sprintResearch: sprintResearch,
-    sell: function (x, key) { return sellResource(asProv(x), key); },
+    sell: function (x, key, silent) { return sellResource(asProv(x), key, silent); },
+    /* v18 / B2：以物易物（任何两种资源互换）。test/lifeline.js 的 B2 段从这里进 */
+    exchange: function (x, give, get, silent) { return exchangeResource(asProv(x), give, get, silent); },
+    xchgOut: xchgOut,
     buy: function (x, key) { return buyResource(asProv(x), key); },
     settlePop: settlePop,
     settleHappy: settleHappy,
@@ -11035,7 +16288,12 @@
     country: coOf,
     milPoolOf: milPoolOf,
     turn: function () { return turnNo; },
-    setTurn: function (n) { turnNo = n; updateTurnLabel(); },
+    /* 改回合号（测试 / bench 想直接跳到某一年时用），顺手请求一次重绘 ——
+     * 年表与回合标签都从它派生，不重绘的话画面会停在上一格。 */
+    setTurn: function (n) {
+      turnNo = n; updateTurnLabel();
+      if (state.renderer) state.renderer.requestDraw();
+    },
 
     /* ---- 战争层（v3）：test/war.js 和 bench 策略 E 都只从这里进 ---- */
     choosePlayer: choosePlayer,
@@ -11052,7 +16310,54 @@
     recruit: recruit,
     recruitInfo: recruitInfo,
     buildFactory: buildFactory,
-    setShopOrder: setShopOrder,
+    setLineAlloc: setLineAlloc, bumpLine: bumpLine, setLineForm: setLineForm,
+    openMillPanel: openMillPanel, closeMillPanel: closeMillPanel,
+    openArsPanel: openArsPanel, closeArsPanel: closeArsPanel, craftMulOf: craftMulOf,
+    lineStatus: lineStatus, millReport: millReport, poolCap: poolCap,
+    arsOf: arsOf, arsAdd: arsAdd, arsTake: arsTake, arsTotal: arsTotal,
+    arsRows: arsRows, arsBestWeapon: arsBestWeapon,
+    unitOf: unitOf, unitKindOf: unitKindOf, unitKindCn: unitKindCn, gearText: gearText,
+    issueWeapon: issueWeapon, issueMount: issueMount, issueGun: issueGun,
+    armyFitAll: armyFitAll, gearRecycle: gearRecycle, syncArms: syncArms,
+    /* ---- 军工产线（v17）：test/mill.js 与 bench 策略 N 只从这里进 ----
+     * 三张表直接暴露（读），动作走函数（写）—— 和治理层同一个口径。 */
+    mill: MILLS,
+    millOf: millOf,
+    millCap: millCap,
+    provCapRaw: provCapRaw, poolCapRaw: poolCapRaw, lineWork: lineWork,
+    allocSum: allocSum, orderCost: orderCost, makeOrder: makeOrder,
+    setMillLine: bumpLine,
+
+    millMigrateOld: millMigrateOld, arsBest: arsBest, sparseArsenal: sparseArsenal,
+    millPt: function (line) { return millPtOf(line); },
+    hasTech: hasTech,
+    equip: EQUIPS,
+    equipOf: equipOf,
+    equipStockOf: equipStockOf,
+    equipTotal: equipTotal,
+    equipArmy: equipArmy,
+    equipAutoFit: equipAutoFit,
+    equipClear: equipClear,
+    equipMulOf: equipMulOf,
+    equipRecycle: equipRecycle,
+    matOf: matOf,
+    rollQuality: rollQuality,
+    qualityOf: function (owner, pid) { return rollQuality(owner, pid); },
+    artisan: ARTISANS,
+    artisanPoolOf: artisanPoolOf,
+    artisanOf: artisanOf,
+    artisanLv: artisanLv,
+    artisanBonus: artisanBonus,
+    artisanSpot: artisanSpot,
+    examArtisan: examArtisan,
+    postArtisan: postArtisan,
+    unpostArtisan: unpostArtisan,
+    settleIndustry: settleIndustry,
+    bestWeapon: bestWeapon, craftWeapon: craftWeapon,
+    mills: MILLS, arsenal: ARSENAL, artisansOf: artisanPoolOf, millsOf: millOf,
+    bestArtisanLv: bestArtisanLv, rollQuality: rollQuality, artisanBonus: artisanBonus,
+    postArtisan: postArtisan, unpostArtisan: unpostArtisan, examArtisan: examArtisan,
+    unlockedItems: unlockedItems,
     examGeneral: examGeneral,
     assignGeneral: assignGeneral,
     setOrder: setArmyOrder,
@@ -11067,6 +16372,26 @@
     isLocked: function (owner) { return !canAct(owner); },
     battle: AO.BATTLE,
     occupyMap: OCCUPY,
+    /* ---- 不安 / 整合 / 叛乱（A、B 两批）：test/unrest.js 与 bench 策略 I/J 只从这里进 ----
+     * 三张表直接暴露（读），四个动作走函数（写）。叛乱三选一单独给出来，
+     * 是为了能对 1000 次掷骰验概率（60/30/10，驻军时 80/15/5）。 */
+    unrest: AO.UNREST,
+    integ: AO.INTEG,
+    integMap: INTEG,
+    unrestMap: UNREST,
+    banditMap: BANDIT,
+    pacifyMap: PACIFY,
+    unrestOf: unrestOf,
+    integOf: integOf,
+    hasGarrison: hasGarrison,
+    settleUnrest: settleUnrest,
+    settleInteg: settleInteg,
+    settleRevolt: settleRevolt,
+    rollRevolt: rollRevoltKind,
+    pacify: pacify,
+    pacifyInfo: pacifyInfo,
+    integProdMul: function (v) { return AO.INTEG.prodMul(v); },
+    warnPlayerProv: warnPlayerProv,
     siegeMap: SIEGE,
     blockadeMap: BLOCKADE,
     deadMap: DEAD,
@@ -11090,7 +16415,7 @@
     fight: fight,
 
     /* ---- 维护与维修（19-repair.js）：test/repair.js 只从这里进 ----
-     * rep 给出纯规则（档位/价格/行为），live/draw/counts 给出内部状态，
+     * rep 给出纯规则（保留座数/价格/行为），live/draw/counts 给出内部状态，
      * 两者分开是为了测试能一条条对着"规则"验，而不是验一堆 DOM。 */
     rep: function () { return AO.rep; },
     repLive: repLive,
@@ -11098,6 +16423,17 @@
     repUI: function () { return AO.repUI; },
     repCount: function (owner, kind, pid) { return kindCount(owner, kind, pid); },
     repOwner: function () { return repOwner(); },
+    /* 保留座数的"算出来是什么"：测试要验"停了 N 座，维护费和产量是不是真的按 N 算"。
+     * activeTiers / activeN 是结算和面板共用的那一份裁剪逻辑，所以只能验它。 */
+    activeTiers: activeTiers,
+    activeN: activeN,
+    keepOff: keepOff,
+    maintPair: maintPair,
+    /* ---- 平衡分析（20-balance.js）：test/balance.js 只从这里进 ---- */
+    balUI: function () { return AO.balUI; },
+    balStep: function () { if (AO.balStep) AO.balStep(); },
+    balSave: function () { return AO.balSave ? AO.balSave() : null; },
+    balLoad: function (d) { if (AO.balLoad) AO.balLoad(d); },
     flush: function () { flushNotes(); },
     notesList: function () { return NOTES.slice(); },
 
@@ -11110,12 +16446,23 @@
     smeltPer: function (pop) { return AO.SMELT.perAt(pop || 0); },
     smeltCheck: function (pid) {
       var p = pOf(pid | 0), st = smeltOf(pid | 0);
-      return AO.SMELT.check(p, {
-        bag: SIM[pid | 0], smeltN: st ? st.n : 0, site: st ? st.site : 0,
-        edu: p ? (talentOf(p.owner).total || 0) : 0
-      });
+      return AO.SMELT.check(p, { bag: SIM[pid | 0], smeltN: st ? st.n : 0, site: st ? st.site : 0 });
     },
     ironAcc: IRONACC,
+    /* ---- 淘金场（v18 / A）：test/lifeline.js 只从这里进 ---- */
+    wash: WASH,
+    washOf: washOf,
+    buildWash: buildWash,
+    settleWash: settleWash,
+    finishWash: finishWash,
+    washPer: function (pop) { return AO.WASH.perAt(pop || 0); },
+    washCheck: function (pid) {
+      var p = pOf(pid | 0), st = washOf(pid | 0);
+      return AO.WASH.check(p, { bag: SIM[pid | 0], washN: st ? st.n : 0, site: st ? st.site : 0 });
+    },
+    /* 省库上解（v18 / D）：定点验"省库 150 → 中央 +17、省库 133" */
+    settleRemit: settleRemit,
+    remitStat: REMIT,
     popOf: function (pid) { return (POP[pid | 0] && POP[pid | 0].v) || 0; },
     goldOf: function (pid) { return (SIM[pid | 0] && SIM[pid | 0].gold) ? SIM[pid | 0].gold.stock : 0; },
     setGold: function (pid, v) { if (SIM[pid | 0] && SIM[pid | 0].gold) SIM[pid | 0].gold.stock = v; },
@@ -11150,13 +16497,68 @@
     foreignSources: foreignSources,
     buyForeign: buyForeign,
     addTradeRel: addTradeRel,
+    /* v14：动态市场（test/prices.js 与 bench 策略 L 只从这里进）
+     * 价格读写 / 需求 / 结算 / 冲击 / 出口 / 中央买（AI 比价用）/ 商队 */
+    prices: PRICES,
+    priceShock: PRICESHOCK,
+    priceOf: priceV,
+    priceTrend: priceTrend,
+    priceNudge: priceNudge,
+    priceTarget: priceTarget,
+    priceNum: priceNum,
+    settlePrices: settlePrices,
+    needOf: needOf,
+    countryStock: countryStock,
+    sellGold: sellGold,
+    buyGold: buyGold,
+    fBuyGold: fBuyGold,
+    expGold: expGold,
+    buyWorld: function (p, key) { return buyWorld(p, key, true); },
+    exportSources: exportSources,
+    exportForeign: exportForeign,
+    aiExport: function (p, key, cid) { return exportForeign(p, key, cid, true); },
+    caravan: caravanDeal,
+    sellAcc: SELLACC,
+    expTurn: EXP1,
+    pricesCfg: function () { return AO.PRICES_CFG; },
     diploSave: diploSave,
     diploLoad: diploLoad,
     nameOf: nameOf,
-    /* v10：AI 互战要读的三样 —— AI 的已探集 / 停战冷却 / 世界纪要 */
+    /* v13：傀儡与朝贡（test/puppet.js 与 bench 策略 K 只从这里进） */
+    puppetMap: PUPPET,
+    suzerainOf: suzerainOf,
+    vassalsOf: vassalsOf,
+    puppetRec: puppetRec,
+    puppetRecOf: puppetRecOf,
+    makePuppet: makePuppet,
+    dropPuppetRec: dropPuppetRec,
+    settlePuppets: settlePuppets,
+    puppetTribute: puppetTribute,
+    aiPuppetEval: aiPuppetEval,
+    leashVassals: leashVassals,
+    annexPuppet: annexPuppet,
+    tryAnnexPuppet: tryAnnexPuppet,
+    forceAnnexPuppet: forceAnnexPuppet,
+    puppetAnnexReady: puppetAnnexReady,
+    indepScore: indepScoreOf,
+    indepRoll: puppetIndepRoll,
+    surrenderBranch: surrenderBranch,
+    surrenderLine: surrenderLineOf,
+    surrenderState: SURR,
+    openSurrender: openSurrender,
+    surrenderChoose: surrenderChoose,
+    coOf: coOf,
+    countryHappyOf: function (cid) { return countryHappy(coOf(cid | 0)); },
+    menOf: menOfCid,
+    warsOf: warsOfCid,
+    /* v10：AI 互战要读的三样 —— AI 的已探集 / 停战冷却 / 世界消息
+     * （v15 起 worldNewsQueue 是**待送达**队列：evtTurn/delay 都在条目里） */
     fogAiKnow: AIKNOW,
     peaceCd: PEACECD,
-    worldNewsQueue: WNEWS,
+    worldNewsQueue: PNEWS,
+    newsQueue: PNEWS,
+    newsRumours: RUMOURS,
+    newsStat: function () { return NSTAT; },
     worldNews: worldNews,
     flushWorldNews: flushWorldNews,
     applyPeace: applyPeaceDeal,
@@ -11242,6 +16644,26 @@
   function setPanel(open) {
     doc.body.classList.toggle('panel-collapsed', !open);
     try { localStorage.setItem('sj.panelOpen', open ? '1' : '0'); } catch (e) { /* file:// 下可能被禁 */ }
+    if (open) narrowSingleSurface('panel');
+  }
+
+  /* ---------------- 窄屏：同一时刻只留一张浮层 ----------------
+   * 窄屏（<= 760px，见 index.html 末尾的 @media）下左栏是铺满整屏的抽屉，
+   * 纪要和省卡是底部整幅 sheet —— 同时开着就是互相盖住，玩家看到的是
+   * "消息被面板挡住"。z-index 只能决定谁在上面，挡住的还是挡住了，
+   * 所以这里做互斥：**刚打开的那张留下，另一张收起来**（只动显隐，不动数据）。
+   *
+   * 桌面上它们各占一个角，不需要这条规矩 —— 一收反而让人以为点了没反应。 */
+  function isNarrowUI() { return (window.innerWidth || 999) <= 760; }
+
+  function narrowSingleSurface(who) {
+    if (!isNarrowUI()) return;
+    if (who === 'panel') {
+      var np = $('notesPanel');
+      if (np && np.classList.contains('on')) openNotes(false);
+    } else if (who === 'notes') {
+      if (!doc.body.classList.contains('panel-collapsed')) setPanel(false);
+    }
   }
 
   /* ---------------- 事件绑定 ---------------- */
@@ -11303,6 +16725,79 @@
           var pp = state.world.provinces[state.renderer.selected - 1];
           if (pp) renderInfoLists(pp);       // 展开时补一次内容
         }
+      });
+    }
+    /* ---- 界面收敛（v16）的四组交互 ---- */
+    /* ① 省卡「测绘详情」开关：整行可点，键盘也能按 */
+    var db = $('detBar');
+    if (db) {
+      var detHit = function (e) { if (e) e.preventDefault(); toggleDetail(); };
+      db.addEventListener('click', detHit);
+      db.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') detHit(e);
+      });
+    }
+    /* ② 建筑四组：点组头 = 收起 / 展开（各记各的，不联动） */
+    var gsecs = document.querySelectorAll('#info .gsec');
+    for (var gi = 0; gi < gsecs.length; gi++) {
+      gsecs[gi].addEventListener('click', function () {
+        var k = this.getAttribute('data-grp');
+        if (!k) return;
+        lsSet(LS.grp + k, grpOpen(k) ? '0' : '1');
+        applyGroups();
+      });
+    }
+    /* ③ 国家卡三个页签：只切类名，内容由各 renderXXX 写好了 */
+    var ctabs = $('cTabs') ? $('cTabs').querySelectorAll('.itab') : [];
+    for (var ci = 0; ci < ctabs.length; ci++) {
+      ctabs[ci].addEventListener('click', function () {
+        lsSet(LS.countryTab, this.getAttribute('data-ctab') || 'ov');
+        applyCountryTab();
+      });
+    }
+    /* ④ ☰ 菜单：点钮开合，点外面 / ESC 关。菜单项自己照旧走原来的绑定 ——
+     * 它们只是搬了容器，click 监听在下面那几段里挂，一行都不用改。 */
+    var mb = $('menuBtn');
+    if (mb) mb.addEventListener('click', function (e) {
+      e.stopPropagation();
+      openMenu();
+    });
+    document.addEventListener('click', function (e) {
+      var pop = $('menuPop');
+      if (!pop || !pop.classList.contains('on')) return;
+      if (e.target && e.target.closest && e.target.closest('#menuWrap')) return;
+      openMenu(false);
+    });
+    /* 点了菜单里的任何一项都收起（readers 不必各自记得关） */
+    var mp = $('menuPop');
+    if (mp) mp.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('button')) openMenu(false);
+    });
+    /* ⑤ 纪要：入口（菜单 + 点提示条）+ 三档过滤 */
+    var nb = $('notesBtn');
+    if (nb) nb.addEventListener('click', function () { openNotes(); });
+    var ncl = $('npClose');
+    if (ncl) ncl.addEventListener('click', function () { openNotes(false); });
+    /* 纪要卡里也有一颗「下一回合」：卡片挡不住右上角那颗主线钮，
+     * 但手已经在这张卡上读新闻了，非要把视线挪到角上再点一次没道理。
+     * 走完 nextTurn 会把这张卡重画（新攒的提示 / 邸报都进来）。 */
+    var ntn = $('npTurn');
+    if (ntn) ntn.addEventListener('click', nextTurn);
+    var npTabs = $('npTabs') ? $('npTabs').querySelectorAll('button[data-nf]') : [];
+    for (var ni = 0; ni < npTabs.length; ni++) {
+      npTabs[ni].addEventListener('click', function () {
+        lsSet(LS.notesTab, this.getAttribute('data-nf') || 'all');
+        renderNotes();
+      });
+    }
+    /* 提示条那一行本身就是"最新一条纪要"：点它就看全的 */
+    var bm = $('bldMsg');
+    if (bm) {
+      bm.style.cursor = 'pointer';
+      bm.title = '点一下看全部纪要（全部 / 我的 / 世界）';
+      bm.addEventListener('click', function () {
+        if (!this.textContent) return;
+        openNotes(true);
       });
     }
     $('nextTurn').addEventListener('click', nextTurn);
@@ -11388,6 +16883,15 @@
     $('cClose').addEventListener('click', clearCountry);
     $('panelToggle').addEventListener('click', function () { setPanel(false); });
     $('panelOpen').addEventListener('click', function () { setPanel(true); });
+    /* 窄屏互斥还有个"事后"的入口：手机上转屏 / 拖窗口跨过断点时，
+     * 两张浮层可能已经同时开着了 —— 这时让纪要留下（它是玩家刚点开的那张），
+     * 左栏收回去，别让它们叠着糊成一片。 */
+    window.addEventListener('resize', function () {
+      if (!isNarrowUI()) return;
+      var np = $('notesPanel');
+      if (np && np.classList.contains('on') &&
+          !doc.body.classList.contains('panel-collapsed')) setPanel(false);
+    });
     // 省份卡里的「归属」直接点开国家资料
     $('iOwner').addEventListener('click', function () {
       var id = state.renderer && state.renderer.selected;
@@ -11406,6 +16910,11 @@
        * 两个 overlay 同时开在实现上不会发生（各有各的入口），
        * 但顺序写死更保险：先退后开的那个。 */
       if (e.key === 'Escape') {
+        /* 先收抽屉：☰ 菜单 / 纪要卡（它们是最轻的一层，开着时 ESC 只关它们） */
+        var pop0 = $('menuPop');
+        if (pop0 && pop0.classList.contains('on')) { openMenu(false); return; }
+        var np0 = $('notesPanel');
+        if (np0 && np0.classList.contains('on')) { openNotes(false); return; }
         var pk = $('pickPanel');
         if (pk && pk.classList.contains('on')) { closePickPanel(); return; }
         if (AO.chronoIsOpen && AO.chronoIsOpen()) { AO.chronoClose(); return; }
@@ -11423,6 +16932,52 @@
         e.preventDefault();
         nextTurn();
       }
+    });
+    bindTouchTips();
+  }
+
+  /* =============================================================
+   * 触摸提示（v17）：手机没有 hover，可全游戏几百处说明都写在 title 里
+   *
+   * 「鼠标悬浮才有提示」在手机上等于没有。做法是**长按 450ms**：
+   * 把当前元素那句 title 原样塞进 toast（z=70，压在所有全屏面板之上），
+   * 松手时吞掉补发的那一次 click —— 想"看一眼说明"不该顺手把事也办了。
+   *
+   * 轻点、滑动、滚动一律不打扰：手指移动超过 10px 就取消，
+   * 所以翻列表、拖动地图都不会误触发。
+   * 桌面（hover:hover）不装这套，鼠标悬浮照旧。
+   * ============================================================= */
+  function bindTouchTips() {
+    if (!root.matchMedia || !root.matchMedia('(hover: none)').matches) return;
+    var timer = 0, sx = 0, sy = 0, swallow = false;
+    function stop() { if (timer) { clearTimeout(timer); timer = 0; } }
+    root.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) { stop(); return; }
+      var el = e.target && e.target.closest ? e.target.closest('[title]') : null;
+      if (!el) { stop(); return; }
+      var txt = el.getAttribute('title');
+      if (!txt) { stop(); return; }
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+      stop();
+      timer = setTimeout(function () {
+        timer = 0;
+        swallow = true;
+        toast(txt, 4600);
+        try { if (root.navigator && root.navigator.vibrate) root.navigator.vibrate(10); } catch (err) { }
+      }, 450);
+    }, { passive: true });
+    root.addEventListener('touchmove', function (e) {
+      if (!timer) return;
+      var t = e.touches[0];
+      if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) stop();
+    }, { passive: true });
+    root.addEventListener('touchcancel', function () { stop(); swallow = false; });
+    root.addEventListener('touchend', function (e) {
+      stop();
+      if (!swallow) return;
+      swallow = false;
+      e.preventDefault();          // 吞掉长按之后补的那一次 click
     });
   }
 
@@ -11456,13 +17011,20 @@
   /* =============================================================
    * 十七、维修面板（js/19-repair.js 的界面）
    *
-   * 逻辑全在 19-repair.js：谁先付（优先档）、多少钱（维修价）、
-   * 维修队挑哪几处。这里只做三件事：画、绑、把点击翻译成一次 rep 调用。
+   * 逻辑全在 19-repair.js：保留几座（KEEP）、多少钱（维修价）。
+   * 这里只做三件事：画、绑、把点击翻译成一次 rep 调用。
    *
-   * 为什么挂在右上角顶栏下面而不是全屏：调优先级是**回合中的高频小操作**
-   * （"这回合先把农场保下来"），铺满一屏会让人找不到刚才看的那块地。
+   * 面板的主轴是**"这一类这一省留几座在跑"**：
+   *   一行 = 一类建筑（已建 / 在跑），点行首的 ▾ 展开就是这一类的**分城明细**，
+   *   每个城市一个「− 数字 +」，想停几座就减几座。资源建筑能精确到座；
+   *   学校/市场/兵营这类产出是离散的，只有「开 / 停」两态（见 settleTurn ①）。
+   *
+   * 为什么挂在右上角顶栏下面而不是全屏：调这个数是**回合中的高频小操作**
+   * （"这回合先把渔港保下来、铁矿停一半"），铺满一屏会让人找不到刚才看的那块地。
    * ============================================================= */
-  var REPU = { open: false, scope: 'prov' };
+  /* 面板状态：open + 维修栏的「本省/全国」+ 展开到哪几类。
+   * 左栏（平衡）不需要状态：它每回合都整块重画，只有"看多少回合"记在 20-balance 里。 */
+  var REPU = { open: false, scope: 'prov', exp: Object.create(null) };
 
   /* 面板上看的是哪个国家：选了国就是自己，工坊模式（PLAYER=0）看当前选中的省 */
   function repOwner() {
@@ -11473,29 +17035,75 @@
     return (state.renderer && state.renderer.selectedCountry) || 1;
   }
 
-  /* 这一类在这个国家/这个省里有几座、几处失修 */
+  /* 这一类在这个国家/这个省里有几座、在跑几座、几处失修、几处主动停。
+   * sites 只收"真的失修"的（欠费停产），主动停的不算 —— 那是玩家的决定，
+   * 不该在顶栏亮红点催他。 */
   function kindCount(owner, kind, onlyPid) {
     var w = state.world;
-    if (!w) return { all: 0, bad: 0, sites: [] };
+    if (!w) return { all: 0, keep: 0, bad: 0, off: 0, sites: [] };
     var c = coOf(owner);
     var list = onlyPid ? [onlyPid] : (c ? c.provinces : []);
-    var all = 0, bad = 0, sites = [];
+    var all = 0, keep = 0, bad = 0, off = 0, sites = [];
     for (var i = 0; i < list.length; i++) {
       var lv = repLive(list[i], kind);
       if (!lv) continue;
       var n = lv.built | 0;
       if (n > 0) all += n;
+      keep += lv.active | 0;
+      if (lv.off) { if (n > 0) off++; continue; }
       if (lv.halted && (lv.built || lv.n)) { bad++; sites.push(list[i]); }
     }
-    return { all: all, bad: bad, sites: sites };
+    return { all: all, keep: keep, bad: bad, off: off, sites: sites };
+  }
+
+  /* 这一类这一省：满额维护 vs 现在（按保留座数）的维护。
+   * 面板上"停掉 X 座能省多少"就用它算 —— 数字必须和结算扣的是同一份，
+   * 否则玩家按面板上的数省钱，结果国库掉得更多，就再也不信这个面板了。 */
+  function maintPair(pid, kind, owner) {
+    var zero = { iron: 0, gold: 0 };
+    var s = SIM[pid] && SIM[pid][kind];
+    if (s && AO.RESOURCE_BY_KEY[kind]) {
+      var def = AO.RESOURCE_BY_KEY[kind];
+      return { all: maintDue(s, def, owner), now: maintDue(s, def, owner, pid, kind) };
+    }
+    var st = UNIV[kind] && UNIV[kind][pid];
+    if (st) {
+      var ud = univDef(kind), n = st.n | 0;
+      var all = { iron: (ud.maint.iron || 0) * n, gold: (ud.maint.gold || 0) * n };
+      return { all: all, now: keepOff(pid, kind) ? zero : all };
+    }
+    if (kind === 'wall') {
+      var w = WALL[pid];
+      if (!w || !(w.lv > 0)) return { all: zero, now: zero };
+      var wm = wallMaintDue(w, owner);
+      return { all: wm, now: keepOff(pid, 'wall') ? zero : wm };
+    }
+    return { all: zero, now: zero };
+  }
+
+  /* 一类建筑在这个国家（或这个省）里的分城明细：只收"真的盖了"的城。
+   * 按座数降序 —— 玩家最想停的永远是那几座最大的。
+   * 1100 个省时这里每个国家只有几十个城，逐类重算一遍也就几毫秒。 */
+  function cityRows(owner, kind, onlyPid) {
+    var c = coOf(owner), out = [];
+    if (!state.world || !c) return out;
+    var list = onlyPid ? [onlyPid] : c.provinces;
+    for (var i = 0; i < list.length; i++) {
+      var pid = list[i], lv = repLive(pid, kind);
+      if (!lv || !(lv.built > 0)) continue;
+      var pp = pOf(pid);
+      out.push({
+        pid: pid, name: pp ? pp.name : ('#' + pid), color: pp ? pp.ownerColor : '#999',
+        built: lv.built | 0, active: lv.active | 0, off: !!lv.off, halted: !!lv.halted
+      });
+    }
+    out.sort(function (a, b) { return b.built - a.built || a.pid - b.pid; });
+    return out;
   }
 
   /* 一处失修的状态说明（清单里"为什么停着"那一列）：
-   * 优先级比"有没有点停修"更能解释问题，所以先判它。 */
+   * 停修比"欠费"更能解释问题，所以先判它。 */
   function badWhy(owner, pid, kind) {
-    var pr = AO.rep.prio(owner, kind);
-    if (pr === 'p0') return { txt: '停缴', cls: 'mute' };
-    if (pr === 'p3') return { txt: '低档缺料', cls: 'mute' };
     if (AO.rep.stopped(pid, kind)) return { txt: '停修', cls: 'mute' };
     return { txt: '欠费', cls: '' };
   }
@@ -11524,18 +17132,30 @@
     for (var i = 0; i < ks.length; i++) n += kindCount(owner, ks[i]).bad;
     b.textContent = n > 99 ? '99+' : n;
     b.classList.toggle('on', n > 0);
-    $('repBtn').title = '维修：' + (n > 0 ? n + ' 处失修 · ' : '') +
-      '给每类建筑定维护优先档（高/中/低/停），选维修队，逐个「修」/「停修」';
+    $('repBtn').title = '经营：' + (n > 0 ? n + ' 处失修 · ' : '') +
+      '维修（按城决定每类建筑留几座在跑）+ 平衡（收支折线图与外推）';
   }
 
   function renderRepPanel() {
     if (!REPU.open || !state.world || !AO.rep) return;
-    var R = AO.rep, owner = repOwner(), w = state.world, c = coOf(owner);
+    var R = AO.rep, owner = repOwner(), c = coOf(owner);
+    /* 记住滚动位置：这张表每点一下都整块重画，不记住的话
+     * 玩家滚到第 12 个城点一下「−」，列表会跳回顶部 —— 每次都从头找。 */
+    var listEl = $('rpPrioList'), bodyEl = $('rpBody');
+    var keepTop = listEl ? listEl.scrollTop : 0;
+    var keepBody = bodyEl ? bodyEl.scrollTop : 0;
     var selPid = state.renderer ? state.renderer.selected : 0;
     var only = (REPU.scope === 'prov' && selPid && pOf(selPid) && pOf(selPid).owner === owner) ? selPid : 0;
-    $('rpWho').textContent = (c ? c.name : '—') + (only ? ' · ' + pOf(only).name : ' · 全国');
+    $('rpWho').textContent = (c ? c.name : '—') + (only ? ' · ' + pOf(only).name : '');
+    /* 高亮跟着**实际生效的范围**走：切到「本省」但地图上没选中省时，
+     * 面板其实在按全国算 —— 这时候还亮着「本省」就是在骗人。 */
+    var scopeOn = (REPU.scope === 'prov' && !only) ? 'all' : REPU.scope;
     var sc = $('rpScope').querySelectorAll('button');
-    for (var si = 0; si < sc.length; si++) sc[si].classList.toggle('on', sc[si].getAttribute('data-scope') === REPU.scope);
+    for (var si = 0; si < sc.length; si++) sc[si].classList.toggle('on', sc[si].getAttribute('data-scope') === scopeOn);
+
+    /* 左栏（平衡）先画：它读的是同一份数据，先画完再看右栏的改动，
+     * 玩家减一座渔港的**下一次**重画里，左边的线就已经跟着变了。 */
+    if (AO.balUI) AO.balUI.render();
 
     /* ---- 国库条 ---- */
     var cen = ensureCentral(owner);
@@ -11545,48 +17165,43 @@
       '<span class="' + (res > 0 ? 'ok' : 'warn') + '">本回合可拨维护 <b>' + Math.round(res) + '</b></span>' +
       (only ? '<span>本省 · 铁 <b>' + Math.floor((SIM[only] && SIM[only].iron) ? SIM[only].iron.stock : 0) +
         '</b> · 金 <b>' + Math.floor((SIM[only] && SIM[only].gold) ? SIM[only].gold.stock : 0) + '</b></span>' : '');
-    $('rpTreasury').title = '高/中档的维护可以从中央拨；低/停档只吃本省库存。\n' +
-      '「本回合可拨」= 结算开始时按上回合实付批的一笔钱（见 js/19-repair.js 中央配给）。';
+    $('rpTreasury').title = '维护先扣本省库存，不够的部分由中央的维护拨款补（拨款花完就停产）。\n' +
+      '「本回合可拨维护」= 结算开始时按上回合实付批的一笔钱（见 js/19-repair.js 中央配给）。\n' +
+      '想让铁金花得慢一点：把某一类某个城的「保留座数」减下来。';
 
-    /* ---- ① 优先档表 ---- */
-    var ks = R.kinds(), h = '', i, totalBad = 0;
+    /* ---- ① 保留座数表 ---- */
+    var ks = R.kinds(), h = '', i, totalBad = 0, totalAll = 0, totalKeep = 0, anyCut = false;
     for (i = 0; i < ks.length; i++) {
-      var k = ks[i], st = kindCount(owner, k, only), pr = R.prio(owner, k);
-      totalBad += st.bad;
-      h += '<div class="rprow" data-kind="' + k + '">' +
+      var k = ks[i], st = kindCount(owner, k, only);
+      totalBad += st.bad; totalAll += st.all; totalKeep += st.keep;
+      if (st.all && st.keep < st.all) anyCut = true;
+      var open = !!REPU.exp[k];
+      h += '<div class="rprow' + (st.all ? '' : ' empty') + (open ? ' open' : '') +
+          (st.all && st.keep < st.all ? ' cut' : '') + '" data-kind="' + k + '">' +
         '<span class="rn" title="' + escHtml(kindTip(k)) + '"><i class="i" style="background:' + kindColor(k) + '"></i>' +
           escHtml(R.kindCn(k)) + (R.food[k] ? '<span class="tg" title="断它就是断口粮：民心与人口一起掉">口粮</span>' : '') +
+          /* ✓够用 / ▲过量：平衡栏干跑完顺手算的（AO.balUI.mark），两边同一份数 */
+          (AO.balUI && AO.balUI.mark ? AO.balUI.mark(k) : '') +
         '</span>' +
-        '<span class="nc">' + st.all + '</span>' +
-        '<span class="nc' + (st.bad ? ' bad' : '') + '">' + (st.bad || '—') + '</span>' +
-        '<div class="segs">' +
-          AO.REP.prio.map(function (d) {
-            return '<button type="button" data-p="' + d.key + '"' + (d.key === pr ? ' class="on"' : '') +
-              ' title="' + escHtml(d.cn + '：' + d.desc) + '">' + d.cn + '</button>';
-          }).join('') +
-        '</div></div>';
+        '<span class="nc">' + (st.all || '—') + '</span>' +
+        '<span class="nc kp">' + (st.all ? st.keep + '/' + st.all : '—') + '</span>' +
+        '<button type="button" class="rx" data-act="exp" title="展开：每个城留几座在跑">' +
+          (open ? '▴' : '▾') + '</button>' +
+        '</div>';
+      if (open) h += cityBlock(owner, k, only);
     }
     $('rpPrioList').innerHTML = h;
-    $('rpPrioN').textContent = '· ' + ks.length + ' 类' + (totalBad ? ' · ' + totalBad + ' 处失修' : '');
+    $('rpPrioN').textContent = '· 在跑 ' + totalKeep + ' / ' + totalAll + ' 座' +
+      (totalBad ? ' · ' + totalBad + ' 处失修' : '');
 
-    /* ---- ② 维修队 ---- */
-    var crew = R.crew(owner), ch = '';
-    AO.REP.crewKeys.forEach(function (kk) {
-      var d = AO.REP.crew[kk];
-      ch += '<button type="button" data-crew="' + kk + '"' + (kk === crew ? ' class="on"' : '') +
-        ' title="' + escHtml(d.desc) + '">' + d.cn + '</button>';
-    });
-    $('rpCrew').innerHTML = ch;
-    $('rpCrewTip').textContent = '· ' + AO.REP.crew[crew].desc;
-
-    /* ---- ③ 失修清单 ---- */
+    /* ---- ② 失修清单（主动停的不算失修，所以这里过滤掉 lv.off） ---- */
     var rows = [];
     var provList = only ? [only] : (c ? c.provinces : []);
     for (i = 0; i < provList.length; i++) {
       var pid = provList[i];
       for (var kj = 0; kj < ks.length; kj++) {
         var kk2 = ks[kj], lv = repLive(pid, kk2);
-        if (!lv || !lv.halted || !(lv.built || lv.n)) continue;
+        if (!lv || !lv.halted || lv.off || !(lv.built || lv.n)) continue;
         var cost = R.cost(pid, kk2);
         var why = badWhy(owner, pid, kk2);
         var pp = pOf(pid);
@@ -11594,7 +17209,7 @@
           why: why, cost: cost, total: cost ? (cost.iron + cost.gold) : 0 });
       }
     }
-    /* 便宜的排前面（和维修队的挑法一致）：玩家一眼看到的就是"最该先修的" */
+    /* 便宜的排前面：玩家一眼看到的就是"最该先修的" */
     rows.sort(function (a, b) { return a.total - b.total || a.pid - b.pid; });
     var hb = '';
     for (i = 0; i < rows.length; i++) {
@@ -11604,9 +17219,7 @@
           escHtml(r.name) + '</span>' +
         '<span class="pk">' + escHtml(R.kindCn(r.kind)) + '</span>' +
         '<span class="pc ' + r.why.cls + '" title="' + escHtml(r.why.txt +
-          '：' + (r.why.txt === '停缴' ? '优先档在「停」，完全没有在缴费' :
-                  r.why.txt === '低档缺料' ? '优先档在「低」，中央的钱不批给它' :
-                  r.why.txt === '停修' ? '你点了「停修」，它不再自动缴费' : '铁/金没凑齐，这回合没交上')) + '">' +
+          '：' + (r.why.txt === '停修' ? '你点了「停修」，它不再自动缴费' : '铁/金没凑齐，这回合没交上')) + '">' +
           escHtml(r.why.txt) + '</span>' +
         '<span class="pc' + (r.total ? '' : ' mute') + '">' + (r.cost ? R.costText(r.cost) : '—') + '</span>' +
         '<button type="button" class="go" data-act="fix" title="立刻修好：' +
@@ -11614,10 +17227,65 @@
         '<button type="button" class="stop" data-act="stop" title="停修 / 恢复">停</button>' +
         '</div>';
     }
-    $('rpBadList').innerHTML = hb || '<div class="rpEmpty">没有失修的 —— 这一类都在正常缴费。' +
-      '<br>要是嫌铁金花得太快，把不重要的类别调到「低」或「停」，省下的钱留给口粮和军备。</div>';
+    $('rpBadList').innerHTML = hb || '<div class="rpEmpty">没有失修的 —— 该缴的维护都缴上了。' +
+      (anyCut ? '' : '<br>要是嫌铁金花得太快，点上面任一行的 ▾，把那个城的「保留座数」减下来：' +
+        '停掉的座不缴维护、也不产出。') + '</div>';
     $('rpBadN').textContent = rows.length ? '· ' + rows.length + ' 处' : '· 0 处';
+
+    /* 把滚动位置放回去（见函数开头） */
+    if (listEl) listEl.scrollTop = keepTop;
+    if (bodyEl) bodyEl.scrollTop = keepBody;
   }
+
+  /* 一类的**分城明细**：每个有这类建筑的城一行。
+   * 资源建筑给「− 数字 +」（能精确到座）；学校/市场/兵营这类产出是离散的，
+   * 只有「开 / 停」两态 —— 留半所学校没有意义，硬做成滑块只会骗人。
+   * 底部小计写清两件事：在跑几座、停掉那些每回合省下多少铁金（数字和结算同源）。 */
+  function cityBlock(owner, kind, only) {
+    var rows = cityRows(owner, kind, only);
+    if (!rows.length) return '<div class="rpcity"><div class="rpcnone">这一类还没有建成的城</div></div>';
+    var def = AO.RESOURCE_BY_KEY[kind];
+    var h = '<div class="rpcity" data-kind="' + kind + '">';
+    var sIron = 0, sGold = 0, lost = 0, act = 0, all = 0, i;
+    for (i = 0; i < rows.length; i++) {
+      var r = rows[i], mp = maintPair(r.pid, kind, owner);
+      act += r.active; all += r.built;
+      sIron += Math.max(0, (mp.all.iron || 0) - (mp.now.iron || 0));
+      sGold += Math.max(0, (mp.all.gold || 0) - (mp.now.gold || 0));
+      if (def) {
+        var s0 = SIM[r.pid] && SIM[r.pid][kind];
+        if (s0) lost += simPerTurn(s0, def) - simPerTurn(s0, def, r.pid, kind);
+      }
+      h += '<div class="rpc" data-pid="' + r.pid + '">' +
+        '<span class="pn" title="' + escHtml(r.name) + '"><i style="background:' + r.color + '"></i>' +
+          escHtml(r.name) + '</span>' +
+        '<span class="nn">' + r.built + ' 座</span>';
+      /* 只有一座的城（大多数省就是这样）没有"留几座"的余地：开或停。
+       * 硬给它画一个两边都是灰的步进器，只会让整张表看起来全是废按钮。 */
+      if (!def || r.built <= 1) {
+        var on = r.active > 0;
+        h += '<button type="button" class="sw' + (on ? ' on' : '') + '" data-act="onoff" ' +
+          'title="' + (on ? '停掉：不缴维护、不产出（座数不掉，随时开回来）' : '开回来：恢复缴维护与产出') + '">' +
+          (on ? '开' : '停') + '</button>';
+      } else {
+        h += '<span class="stp">' +
+          '<button type="button" data-d="-1" title="少留一座"' + (r.active <= 0 ? ' disabled' : '') + '>−</button>' +
+          '<b>' + r.active + '</b>' +
+          '<button type="button" data-d="1" title="多留一座"' + (r.active >= r.built ? ' disabled' : '') + '>+</button>' +
+          '</span>' +
+          '<button type="button" class="q" data-q="0" title="这个城全停">停</button>' +
+          '<button type="button" class="q" data-q="1" title="这个城全开">全</button>';
+      }
+      h += '</div>';
+    }
+    h += '<div class="rpcsum">在跑 <b>' + act + '</b> / ' + all + ' 座' +
+      (def && lost > 0 ? ' · 少产 <b>' + fmt1(lost) + '</b> ' + (def.prod || '') : '') +
+      (sIron + sGold > 0.05 ? ' · 省 <b>' + fmt1(sIron) + '</b> 铁 <b>' + fmt1(sGold) + '</b> 金／回合' : '') +
+      '</div></div>';
+    return h;
+  }
+  /* 一位小数：维护费本来就是 0.2 一级的零头，取整会让"省了多少"看不出差别 */
+  function fmt1(v) { return (Math.round((v || 0) * 10) / 10).toString(); }
 
   /* 类别的一行说明（悬停）：为什么要单独拆出来 —— 面板上每行只有四个字的名字 */
   function kindTip(k) {
@@ -11647,7 +17315,12 @@
     if (!panel) return;
 
     $('repBtn').addEventListener('click', function (e) { e.stopPropagation(); toggleRepPanel(); });
+    millPanelActions();
     $('rpClose').addEventListener('click', closeRepPanel);
+    /* 维修卡里同样挂一颗（和纪要一致）：调完优先级顺手就能结算，
+     * 不用伸手去右上角 —— nextTurn 会顺手重画失修清单和徽标。 */
+    var rtn = $('rpTurn');
+    if (rtn) rtn.addEventListener('click', nextTurn);
     $('rpScope').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-scope]');
       if (!b) return;
@@ -11655,33 +17328,67 @@
       renderRepPanel();
     });
 
-    /* 优先档：点一下就生效（不需要确认）—— 它是"心意"，不是"交易"，
-     * 而且随时能改回来。作用范围跟随上面的「本省 / 全国」开关。 */
+    /* 保留座数：**点一下就生效**（不需要确认）—— 它随时能改回来，
+     * 而且改完立刻能看见"在跑 6/14 · 省 3.2 铁"。
+     * 三个动作共用一个入口：展开分城 / 加减一座 / 全开全停。 */
     $('rpPrioList').addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-p]');
+      var b = e.target.closest('button');
       if (!b) return;
-      var row = b.closest('.rprow');
-      if (!row) return;
-      var kind = row.getAttribute('data-kind'), p = b.getAttribute('data-p');
       var owner = repOwner();
       if (!canAct(owner)) return toast(lockTitle(), 2600);
-      /* 工坊模式（PLAYER=0）下"全国"是唯一合理的解释：没有"我的国" */
-      AO.rep.setPrio(owner, kind, p);
-      var d = AO.REP.prio.filter(function (x) { return x.key === p; })[0];
-      toast(AO.rep.kindCn(kind) + ' → 优先档「' + (d ? d.cn : p) + '」' +
-        (p === 'p0' ? '（不再自动缴费，要维持就手动「修」）' : ''), 2200);
-      renderRepPanel();
-      refreshRepBadge();
+
+      /* ① 展开 / 收起分城明细 */
+      if (b.getAttribute('data-act') === 'exp') {
+        var row0 = b.closest('.rprow');
+        if (!row0) return;
+        var k0 = row0.getAttribute('data-kind');
+        if (REPU.exp[k0]) delete REPU.exp[k0]; else REPU.exp[k0] = 1;
+        renderRepPanel();
+        return;
+      }
+
+      var city = b.closest('.rpc');
+      if (!city) return;
+      var pid = +city.getAttribute('data-pid');
+      var box = city.closest('.rpcity');
+      var kind = box ? box.getAttribute('data-kind') : null;
+      if (!kind || !pOf(pid)) return;
+      var lv = repLive(pid, kind);
+      if (!lv) return;
+      var built = lv.built | 0;
+
+      /* ② 通用设施：开 / 停 */
+      if (b.getAttribute('data-act') === 'onoff') {
+        var off = keepOff(pid, kind);
+        AO.rep.setKeep(pid, kind, off ? null : 0);
+        toast(AO.rep.kindCn(kind) + (off ? ' 恢复（照常缴维护、出产）' : ' 已停（不缴维护、不产出，座数不掉）'), 2200);
+        repAfterEdit(owner);
+        return;
+      }
+
+      /* ③ 资源建筑：− / + 一座，或整城全开全停 */
+      var q = b.getAttribute('data-q');
+      if (q !== null) {
+        AO.rep.setKeep(pid, kind, q === '1' ? null : 0);
+        repAfterEdit(owner);
+        return;
+      }
+      var d = +(b.getAttribute('data-d') || 0);
+      if (!d) return;
+      var cur = lv.active | 0;
+      var next = Math.max(0, Math.min(built, cur + d));
+      /* 留满 = 直接清掉这一格（"全开"要跟着以后新盖的房子一起走） */
+      AO.rep.setKeep(pid, kind, next >= built ? null : next);
+      repAfterEdit(owner);
     });
 
-    $('rpCrew').addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-crew]');
-      if (!b) return;
-      var owner = repOwner();
-      if (!canAct(owner)) return toast(lockTitle(), 2600);
-      AO.rep.crewSet(owner, b.getAttribute('data-crew'));
+    /* 改完保留座数之后统一收尾：重画面板 + 重算顶栏红点。
+     * 平衡页的预测是"按当前设置外推"，改了座数就得立刻重算 ——
+     * 所以 renderRepPanel 在平衡页签下会转手让 20-balance 重画（见那里的分派）。 */
+    function repAfterEdit(owner) {
       renderRepPanel();
-    });
+      refreshRepBadge();
+    }
 
     /* 失修行：修 / 停 */
     $('rpBadList').addEventListener('click', function (e) {
@@ -11718,8 +17425,12 @@
       e.stopPropagation();
     }, true);
   }
+  /* repUI 是这一层对外的把手（测试 / 20-balance 都用它）：
+   *   isOpen() —— 全屏「经营」页开着没有。20-balance 用它决定要不要重画，
+   *              这样"什么时候画图"只有一处判断，不会两边各记一份状态。 */
   AO.repUI = { open: openRepPanel, close: closeRepPanel, toggle: toggleRepPanel,
-    render: renderRepPanel, badge: refreshRepBadge, state: REPU };
+    render: renderRepPanel, badge: refreshRepBadge, state: REPU,
+    isOpen: function () { return !!REPU.open; } };
 
   /* 维修层（js/19-repair.js）拿内部件：它只管"谁先付、修哪个、多少钱"，
    * 真正的库存表和建筑状态还留在这个闭包里 —— 所以只能把读写的把手递出去。
@@ -11744,12 +17455,69 @@
     repBuildActions();                 // 面板的点击都绑在这里（DOM 早就有了）
   }
 
+  /* 平衡分析（20-balance.js）拿内部件。
+   * 它要的东西很少：一张世界、一份流水、一份口粮数、一份保留座数 ——
+   * 都是"读"，一个"写"都不给：分析面板不该能改模拟。 */
+  function balBoot() {
+    if (!AO.balAttach) return;
+    AO.balAttach({
+      world: function () { return state.world; },
+      player: function () { return PLAYER; },
+      viewOwner: repOwner,
+      flow: FLOW, flowc: FLOWC, pop: POP,
+      central: ensureCentral,
+      rep: AO.rep,
+      live: repLive,
+      turn: function () { return turnNo; },
+      /* ---- 干跑预测（DESIGN-FORECAST）递的只读件：预测要逐回合重演结算的
+       * 产出/维护算路，闭包里的战争标记和整合度表拿不到就只能抄公式 ——
+       * 抄出来的数一旦和结算分叉，那张图就再也没人信。所以一律走钩子。 */
+      sim: SIM,
+      wall: function (pid) { return WALL[pid | 0] || null; },
+      /* 战争态门（围城全归零 / 封锁断渔 / 匪乱断产一回合）：照 settleTurn ③
+       * 的判断写。匪乱那条看的是"下一次结算的 turnNo−1"，也就是当前的 turnNo。 */
+      prodGate: function (pid, key) {
+        pid = pid | 0;
+        if (SIEGE[pid]) return 0;
+        if (key === 'fish' && BLOCKADE[pid]) return 0;
+        var b = BANDIT[pid];
+        if (b && b.turn === turnNo) return 0;
+        return 1;
+      },
+      /* 产量乘数：官员词条 × 占领整合度 × 事件（渔汛/大旱），与 ③ 段同一链 */
+      prodMulOf: function (pid, key, owner) {
+        var pmod = PMOD(pid | 0, owner);
+        var mul = (pmod.prodMul && pmod.prodMul[key]) || 1;
+        if (OCCUPY[pid | 0]) {
+          var itg = INTEG[pid | 0];
+          mul *= AO.INTEG.prodMul(itg ? itg.v : 0);
+        }
+        if (AO.evtProdMul) mul *= AO.evtProdMul(pid | 0, key);
+        return mul;
+      },
+      /* 通用设施的单座维护（repLive 只给合计，干跑要按座数重算） */
+      univMaint: function (kind) { return univDef(kind).maint; },
+      /* 「去看看」：选中那省 + 打开省卡（和测试用的 showInfo 同一条路） */
+      gotoProv: function (pid) {
+        pid = pid | 0;
+        if (!pid || !pOf(pid)) return;
+        if (state.renderer) state.renderer.select(pid);
+        showInfo(pid);
+      }
+    });
+  }
+
   function boot() {
     bind();
+    /* 抽屉的初始位（v16）：这四个只读 localStorage，跨刷新记得住玩家上次怎么摆的 */
+    applyDetail();
+    applyGroups();
+    applyCountryTab();
     updateTurnLabel();
     evtBoot();                         // 事件层拿内部件（必须在第一次 generate 之前）
     chronoBoot();                      // 编年史层拿内部件（同上）
     repBoot();                         // 维修层拿内部件（同上）
+    balBoot();                         // 平衡分析拿内部件（同上，只读）
     var savedOpen = null;
     try { savedOpen = localStorage.getItem('sj.panelOpen'); } catch (e) { /* 忽略 */ }
     setPanel(savedOpen === '1');       // 没记录过 → 默认收起

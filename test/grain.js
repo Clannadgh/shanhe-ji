@@ -241,84 +241,60 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     talent.afterExam.ok && talent.afterExam.pts === talent.before.pts - 10 &&
     talent.afterExam.total === talent.before.total,
     'pts ' + talent.before.pts + '→' + talent.afterExam.pts + ' · total ' + talent.before.total + '→' + talent.afterExam.total);
-  ck('累计教育 35：跨第二档「火炮」',
-    talent.after35.total === 35 && talent.after35.tier === 1 &&
-    talent.after35.notes.some(t => /火炮/.test(t)),
+  /* v19：教育档只剩两档（15 工厂 / 60 大学）—— 铸炮厂删了，"35 火炮"那道门槛随之消失 */
+  ck('累计教育 35：不跨档（35 火炮那道门槛已随铸炮厂删除）',
+    talent.after35.total === 35 && talent.after35.tier === 0 &&
+    !talent.after35.notes.some(t => /火炮/.test(t)),
     'total 35 · tier ' + talent.after35.tier);
-  ck('累计教育 60：跨第三档「大学」（35→65 只报一次）',
-    talent.after65.tier === 2 && talent.after65.notes.filter(t => /大学/.test(t)).length === 1,
+  ck('累计教育 60：跨第二档「大学」（35→65 只报一次）',
+    talent.after65.tier === 1 && talent.after65.notes.filter(t => /大学/.test(t)).length === 1,
     'total ' + talent.after65.total + ' · tier ' + talent.after65.tier);
   ck('连抽两次之后 total 仍是 65（只加不减）',
     talent.totalEnd === 65, 'total ' + talent.totalEnd);
 
-  /* ---------------- 6) 铸炮厂门槛 35 + 工厂 15 ---------------- */
+  /* ---------------- 6) 铸炮厂已删 + 工厂 15 门槛 ---------------- */
   const gate = await page.evaluate((a) => {
     const AO = window.AO, D = AO.resDebug, pid = a.pid, owner = a.owner;
     const bag = AO.resSim[pid];
     bag.iron.built = 1; bag.iron.tiers[1] = 1;
     const prov = window.__world.provinces[pid - 1];
     const T = AO.resTalent[owner];
-    const check = (edu) => AO.FACTORY.check('foundry', prov, { bag: bag, edu: edu });
-    const at20 = check(20), at35 = check(35);
     const fac20 = AO.FACTORY.check('factory', prov, { bag: bag, edu: 20 });
     const fac10 = AO.FACTORY.check('factory', prov, { bag: bag, edu: 10 });
-
-    /* 真点一次「＋」：20 点时应该被挡住并给出一句人话 */
+    /* 铸炮厂：定义 / 建厂 / 教育档三处都不该再存在 */
+    const noFoundry = !AO.FACTORY.foundry;
+    T.total = 10; T.tier = 0;
+    D.buildFactory(prov, 'foundry');                 // 老脚本这样调：现在应该是空转不报错
+    const msg10 = (document.getElementById('bldMsg') || {}).textContent || '';
     T.total = 20; T.tier = 0;
-    D.buildFactory(prov, 'foundry');
-    const msg20 = (document.getElementById('bldMsg') || {}).textContent || '';
-    T.total = 35; T.tier = 1;
-    const ck35 = AO.FACTORY.check('foundry', prov, { bag: bag, edu: 35 });
-    return { at20: at20.ok, why20: at20.why, at35: at35.ok, fac20: fac20.ok, fac10: fac10.ok,
-             fac10Why: fac10.why, msg20: msg20, ck35: ck35.ok, needCn: AO.FACTORY.foundry.needCn };
+    return { noFoundry: noFoundry, fac20: fac20.ok, fac10: fac10.ok, fac10Why: fac10.why,
+      msg10: msg10, tiers: AO.TIER.map(t => t.at).join(',') };
   }, S);
-  ck('铸炮厂 talentNeed = 35（20 点建不了、35 点能建）',
-    gate.needCn.indexOf('35') >= 0 && gate.at20 === false && gate.at35 === true,
-    gate.why20);
-  ck('20 点时点 ＋ 被挡住，提示写「累计教育」',
-    /累计教育/.test(gate.msg20) && !gate.at20,
-    (gate.msg20 || '').slice(0, 60));
+  ck('铸炮厂整条删掉（定义 / 建厂 / 教育档都没了）',
+    gate.noFoundry && gate.tiers === '15,60' && !gate.msg10,
+    'TIER=' + gate.tiers + ' · buildFactory 静默=' + !gate.msg10);
   ck('工厂要累计教育 15（10 点不行、20 点行）',
     gate.fac10 === false && gate.fac20 === true,
     gate.fac10Why);
 
-  /* ---------------- 7) 工厂 ×2 + 大学加成 ---------------- */
+  /* ---------------- 7) 工厂 ×2（v19：乘的是产能点数）+ 大学加成 ---------------- */
   const prod = await page.evaluate((a) => {
     const AO = window.AO, D = AO.resDebug, pid = a.pid, owner = a.owner;
     const bag = AO.resSim[pid];
-    /* 军械坊一座、订单=皮甲（初始军械，配方 畜牧 1 → 出 2 件） */
-    AO.resMil.armory[pid] = { n: 1, site: 0, halted: false, mAcc: { iron: 0, gold: 0 }, order: 'leather' };
+    AO.resMil.armory[pid] = { n: 1, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
     AO.resFactory[pid] = { n: 0, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
-    bag.horse.stock = 40; bag.iron.stock = 60; bag.gold.stock = 60;
-
-    D.settleTurn();
-    const one = (D.flow[pid].gain || {}).leather || 0;
-
-    /* 加一座工厂 → 同样的料，产出翻倍 */
+    bag.iron.stock = 60; bag.gold.stock = 60;
+    const one = D.millCap(pid, 'armory');            // 1 座 × 2 点 = 2
     AO.resFactory[pid] = { n: 1, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
-    bag.horse.stock = 40; bag.iron.stock = 60; bag.gold.stock = 60;
-    D.settleTurn();
-    const two = (D.flow[pid].gain || {}).leather || 0;
-
-    /* 工厂停产 → 回到 ×1（停产由维护结算决定，这里直接读同一份乘数函数；
-     * 再把工厂拆掉跑一回合，确认真实产出也回落） */
+    const two = D.millCap(pid, 'armory');            // ×2 = 4
     const mulHalted = (() => {
       AO.resFactory[pid].halted = true;
       const v = D.armProdMul(pid);
       AO.resFactory[pid].halted = false;
       return v;
     })();
-    const mulNone = (() => {
-      const keep = AO.resFactory[pid];
-      AO.resFactory[pid] = { n: 0, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
-      const v = D.armProdMul(pid);
-      AO.resFactory[pid] = keep;
-      return v;
-    })();
     AO.resFactory[pid] = { n: 0, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
-    bag.horse.stock = 40; bag.iron.stock = 60; bag.gold.stock = 60;
-    D.settleTurn();
-    const halted = (D.flow[pid].gain || {}).leather || 0;
+    const back = D.millCap(pid, 'armory');
 
     /* 大学：每座 +6 科研点、+2 人才点（走国家结算） */
     AO.resUniversity[pid] = { n: 1, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
@@ -326,14 +302,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const sci0 = R.pts, tal0 = T.total;
     D.settleTurn();
     const dSci = R.pts - sci0, dTal = T.total - tal0;
-    return { one, two, halted, mulHalted, mulNone, dSci, dTal, uniN: AO.resUniversity[pid].n };
+    return { one, two, mulHalted, back, dSci, dTal, uniN: AO.resUniversity[pid].n };
   }, S);
-  ck('工厂省：军械坊产量 ×2（2 件 → 4 件，料不变）',
-    prod.one === 2 && prod.two === 4,
-    prod.one + ' 件 → 有工厂 ' + prod.two + ' 件');
-  ck('工厂停产 / 没工厂 → 乘数回到 ×1，实际产出也回落',
-    prod.mulHalted === 1 && prod.mulNone === 1 && prod.halted === 2,
-    '停产 ×' + prod.mulHalted + ' · 无厂 ×' + prod.mulNone + ' · 产出 ' + prod.halted + ' 件');
+  ck('工厂省：本省产能 2 → 4 点（料不变，多的是产能）',
+    prod.one === 2 && prod.two === 4, prod.one + ' 点 → 有工厂 ' + prod.two + ' 点');
+  ck('工厂停产 / 没工厂 → 乘数回到 ×1',
+    prod.mulHalted === 1 && prod.back === 2,
+    '停产 ×' + prod.mulHalted + ' · 无厂 ' + prod.back + ' 点');
   ck('大学进国家结算：本回合科研点 +6、累计教育 +2',
     prod.dSci >= 6 && prod.dTal >= 2,
     '科研 +' + prod.dSci + ' · 教育 +' + prod.dTal);
@@ -350,11 +325,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     D.closeGov();
     return { txt, tip };
   }, S);
-  ck('治理面板国家区有「教育 22/35 · 下一档：火炮」',
-    /教育\s*22\/35/.test(govRow.txt) && /下一档：火炮/.test(govRow.txt),
+  ck('治理面板国家区有「教育 22/60 · 下一档：大学」',
+    /教育\s*22\/60/.test(govRow.txt) && /下一档：大学/.test(govRow.txt),
     govRow.txt);
-  ck('教育行的悬停列出三档（15 工厂 / 35 火炮 / 60 大学）',
-    /15 工厂/.test(govRow.tip) && /35 火炮/.test(govRow.tip) && /60 大学/.test(govRow.tip),
+  ck('教育行的悬停列出两档（15 工厂 / 60 大学；35 火炮已随铸炮厂删除）',
+    /15 工厂/.test(govRow.tip) && /60 大学/.test(govRow.tip) && !/35 火炮/.test(govRow.tip),
     (govRow.tip || '').split('\n').slice(2).join(' | ').slice(0, 80));
 
   /* ---------------- 9) 存档：加字段往返 ---------------- */
