@@ -411,10 +411,10 @@
           if (take >= AO.TAX.min && K.stock >= pr.taxN) K.stock -= pr.taxN;
           if (K.left <= 0) {
             if ((K.def.cool || 0) > 0) K.cool = K.def.cool;
-            else {
-              K.gone = true;
-              if (key === 'iron' || key === 'gold') mineOut.push({ key: key, pid: pr.pid, name: pr.name, turn: t });
-            }
+            else K.gone = true;
+            /* 采空就报，**不管之后会不会回满**：预测要提醒的是"这一脉什么时候断"。
+             * 铁 v18 起改 48 回合休眠，但那 48 回合里产量确实是 0 —— 不报等于骗人。 */
+            if (key === 'iron' || key === 'gold') mineOut.push({ key: key, pid: pr.pid, name: pr.name, turn: t });
           }
         }
 
@@ -833,7 +833,8 @@
       var n = 0;
       for (i = 0; i < fc.mineOut.length; i++) if (fc.mineOut[i].key === k) n++;
       out += note(cn[k] + ' ' + n + ' 处将在 ' + fc.P + ' 回合内采空（最早第 ' +
-        (V.turn() + byKey[k].turn) + ' 回合，' + esc(byKey[k].name) + '）—— 之后那一格产量归零。');
+        (V.turn() + byKey[k].turn) + ' 回合，' + esc(byKey[k].name) + '）—— 之后那一格产量归零' +
+        (k === 'iron' ? '（深层休眠 48 回合后回满）' : '') + '。');
     }
     if (fc.haltedNow) {
       out += note(fc.haltedNow + ' 处欠费停产按"继续停产"推演；把铁金补上会自动复工，线会比这个好。');

@@ -210,6 +210,8 @@ ARSENAL[owner] = { wpn:{'材质|类型|形制|品质': 份}, mount:{'品种|品�
 回归：`check` / `tech` / `war`（92 项，② 与 ⑥ 轰击的旧断言跟着改了）/ `mill`（41 项）/
 `craft`（78 项）/ `econ` / `ai-war`(57) / `ai` / `smelt` / `grain` / `fog`(58) / `chrono`(46) /
 `evt`(37) / `repair`(56) / `resources` / `interact` / `lv2-icons`(38) 全绿。
+`bench-econ` 策略 H 五条判定仍全 ✔（军国 0.41 vs 经营 0.00 · warBias 16 vs 0 · badTarget 0 ·
+150 回合灭国 14/110 · 0 档风闻率 14.8%）；策略 I / J / L 也全 ✔。
 
 截图：`shots/v19-mill.png`（产能面板）、`shots/v19-arsenal.png`（武库面板）、
 `shots/v19-wpn-matrix.png`（兵器矩阵 5×4）、`shots/v19-techtree-view.png`（科技树首屏）。
