@@ -99,6 +99,10 @@
     for (var ak in TAXACC) delete TAXACC[ak];
     /* 上解统计是"这一局"的（bench 读它看这条规则有没有在动） */
     REMIT.n = 0; REMIT.gold = 0;
+    /* 买铁续命的统计同理（v18.4）：换世界必须清零，否则上一局的数字会挂在
+     * 新世界的 bench 上 —— 也正是"这条规则有没有在动"的证据链。 */
+    SELFSTAT.n = 0; SELFSTAT.gold = 0; SELFSTAT.iron = 0;
+    SELFBUY = Object.create(null); SELFBUY_TURN = -1;
     /* v12：宰相也是"这一局"的 —— 不清的话新世界的 1 号国直接继承上一局的宰相 */
     for (var ck in CHANCELLOR) delete CHANCELLOR[ck];
     GOV_ID = 1;
@@ -1777,7 +1781,7 @@
        * 付得起 → 当回合照常出产；付不起 → 这一类当回合起产量 0，凑齐了自动复工。
        * 枯竭的不收维护（矿脉都没了，没什么可养的），否则那些省会永远失血。
        * 维护只按**在跑的座数**收（玩家在右上「维修」里按城调保留几座）。 */
-      var haltedNow = [];
+      var haltedNow = [];      // { t: 名字, obj: 状态袋, fresh: 这一回合刚停, iron: 铁需求 }
       for (key in bag) {
         s = bag[key];
         def = AO.RESOURCE_BY_KEY[key];
@@ -1788,8 +1792,12 @@
          * 别的资源的冷静期照旧收（3~9 回合的短休耕，是"地还在，只是歇一季"）。 */
         if (key === 'iron' && s.cool > 0) { s.halted = false; continue; }
         was = s.halted;
-        s.halted = !payMaint(pid, owner, maintDue(s, def, owner, pid, key), s.mAcc, key);
-        if (s.halted && !was) haltedNow.push(def.build);
+        var rDue = maintDue(s, def, owner, pid, key);
+        s.halted = !payMaint(pid, owner, rDue, s.mAcc, key);
+        if (s.halted) {
+          haltedNow.push({ t: def.build, cls: 'res', obj: s, fresh: !was,
+            iron: rDue.iron || 0, def: def, key: key });
+        }
       }
       /* 学校 / 市场 / 建造坊…：同一种形状，一遍循环处理完。
        * 通用设施的产出是**离散**的（学校产科研点、兵营征兵、工厂开一条产线），
@@ -1805,11 +1813,17 @@
         var uoff = keepOff(pid, uk);
         if (!(ust.n > 0)) ust.halted = false;
         else if (uoff) ust.halted = true;              // 玩家停的：不缴费、不产出
-        else ust.halted = !payMaint(pid, owner, {
-          iron: (udef.maint.iron || 0) * ust.n,
-          gold: (udef.maint.gold || 0) * ust.n
-        }, ust.mAcc, uk);
-        if (ust.halted && !wasU && !uoff) haltedNow.push(udef.cn);
+        else {
+          var uDue = {
+            iron: (udef.maint.iron || 0) * ust.n,
+            gold: (udef.maint.gold || 0) * ust.n
+          };
+          ust.halted = !payMaint(pid, owner, uDue, ust.mAcc, uk);
+          if (ust.halted && !uoff) {
+            haltedNow.push({ t: udef.cn, cls: 'uni', obj: ust, fresh: !wasU,
+              iron: uDue.iron, def: udef, key: uk });
+          }
+        }
       }
       /* 城墙维护（铁 + 金）：和资源建筑同一套 payMaint —— 付不起就 halted，
        * 区别是墙"停产"的表现是**年久失修**（耐久每回合 −5），不是产量归零。
@@ -1820,16 +1834,64 @@
         /* 城墙也是"开/停"二态：停了就不缴维护，耐久原地不动（不烂，但也不修） */
         if (keepOff(pid, 'wall')) wst.halted = true;
         else {
-          wst.halted = !payMaint(pid, owner, wallMaintDue(wst, owner), wst.mAcc, 'wall');
-          if (wst.halted && !wasW) haltedNow.push('城墙');
+          var wDue = wallMaintDue(wst, owner);
+          wst.halted = !payMaint(pid, owner, wDue, wst.mAcc, 'wall');
+          if (wst.halted) {
+            haltedNow.push({ t: '城墙', cls: 'wall', obj: wst, fresh: !wasW, iron: wDue.iron || 0 });
+          }
         }
       } else if (wst) {
         wst.halted = false;
       }
-      /* 一个省一回合只报一条：七类建筑一起停的时候，逐条报会刷屏 */
-      if (haltedNow.length && (pid | 0) === selPid) {
+
+      /* ①-c 缺铁自救（v18.4）：这一回合**真有**建筑因为没铁停下来了，才去世界市场
+       * 按缺口买几单位铁，然后当场补缴（payMaint 只会再要"还差的那部分"—— acc 已经扣过）。
+       *
+       * 为什么是"事后 + 按缺口零买"，而不是"事前按阈值预买一手"：
+       * 预买的铁常常被这一回合的建造吃掉（AI 就在同省开工，铁从省库出），下回合
+       * 又是 0，于是每回合买、每回合停 —— 探针实测：整手预买 100 回合买掉 2660 铁
+       * （4668 金），停产仍有 151；按缺口零买把同一批停产的钱降到四分之一。
+       * 四道闸（AO.GOV.selfBuy）都在 selfBuyIron 里，这里只管"什么时候叫它、叫多少"。 */
+      if (haltedNow.length) {
+        var needU = 0, hi;
+        for (hi = 0; hi < haltedNow.length; hi++) {
+          var he = haltedNow[hi];
+          if (!he.obj.halted || !(he.iron > 0)) continue;
+          /* acc.iron 里剩的就是"这一回合还欠几单位铁"（第一次缴费没付成，acc 没减）。
+           * 不能拿"这一回合的需求"当缺口：停的是**金**那一段时，铁的需求早付清了，
+           * 再买铁就是白花金（探针里那批省库金不足 5 的省全是这种）。 */
+          var macc = (he.obj.mAcc && he.obj.mAcc.iron) || 0;
+          needU += Math.floor(macc + 1e-9);
+        }
+        if (needU > 0 && selfBuyIron(pid, owner, CUR.F, needU) > 0) {
+          /* 补缴：按现在的 acc 余额重算一遍需求，付得起就复工。
+           * 只能补"铁"那部分缺口 —— 金的缺口买铁治不了，别假装治了。 */
+          for (hi = 0; hi < haltedNow.length; hi++) {
+            var hn = haltedNow[hi];
+            if (!hn.obj.halted) continue;
+            if (hn.cls === 'wall') {
+              hn.obj.halted = !payMaint(pid, owner, wallMaintDue(hn.obj, owner), hn.obj.mAcc, 'wall');
+            } else if (hn.cls === 'res') {
+              hn.obj.halted = !payMaint(pid, owner,
+                maintDue(hn.obj, hn.def, owner, pid, hn.key), hn.obj.mAcc, hn.key);
+            } else {
+              hn.obj.halted = !payMaint(pid, owner, {
+                iron: (hn.def.maint.iron || 0) * hn.obj.n,
+                gold: (hn.def.maint.gold || 0) * hn.obj.n
+              }, hn.obj.mAcc, hn.key);
+            }
+          }
+        }
+      }
+      /* 一个省一回合只报一条：七类建筑一起停的时候，逐条报会刷屏。
+       * 只报**这一回合刚停**且补缴后仍然停着的（不然纪要会说一句假话）。 */
+      var haltLabels = [];
+      for (var hl = 0; hl < haltedNow.length; hl++) {
+        if (haltedNow[hl].obj.halted && haltedNow[hl].fresh) haltLabels.push(haltedNow[hl].t);
+      }
+      if (haltLabels.length && (pid | 0) === selPid) {
         NOTES.push({ owner: owner, pid: pid | 0,
-          text: haltedNow.join('、') + ' 维护欠费，停产中（铁/金见底 —— 右上「维修」里调优先档或点「修」）', cls: 'warn' });
+          text: haltLabels.join('、') + ' 维护欠费，停产中（铁/金见底 —— 右上「维修」里调优先档或点「修」）', cls: 'warn' });
       }
       /* ①b 中央拨款位次（19-repair 的 repStep：批"这一回合能动的维护钱"）。
        * 拨款额度按上回合实付估，必须每个省轮到之前都批着。 */
@@ -4026,6 +4088,106 @@
   function buyResource(p, key) { return buyWorld(p, key, false); }
   AO.resBuy = buyResource;
   AO.resBuyWorld = function (p, key) { return buyWorld(p, key, true); };
+
+  /* ---------------- 省库买铁付维护（v18.4） ----------------
+   * 上解把金搬出去了，可维护吃的是**铁** —— 于是"有金没铁"的省照样停产。
+   * 这一条把世界市场那条口子接到维护上：这一回合**真有**建筑因为没铁停下来，
+   * 省库就自己去买几单位铁补上，然后当场补缴。
+   *
+   * 价格和玩家点「买货」同源（`buyGold` 那一把尺子），只是**按单位零买**：
+   *   单位价 = ceil(lot.gold / lot.n × PI)   （≈ 整手价的 1/5，进位取整、无批发价）
+   * 为什么零买而不是整手（5 单位）：维护一回合只缺 0.2~1 铁，整手买进来
+   * 四分之三躺在省库里，下一回合被建造吃掉，然后再买 —— 探针实测：整手预买
+   * 100 回合买掉 2660 铁（4668 金），停产只从 192 降到 151；改成"缺几单位买
+   * 几单位"之后，同一批停产只花 1/4 的金。**金是这局的稀缺资源**（上解、俸禄、
+   * 建造都排在它后面），能少花就少花。
+   *
+   * 四道闸（AO.GOV.selfBuy）：
+   *   at          省库铁 < 它才买（铁还够的时候不许囤）
+   *   keepGold    省库付完还得剩这么多金（不把开工钱花在买铁上）
+   *   lotsPerTurn 每国每回合至多几"手"（1 手 = 5 单位）—— 换算成单位配额
+   *   usePool     省库不够时，从**中央拨款**里补（和 payMaint 同一条两段付款）
+   *   封锁 / 满仓 / 没金：买不了就不买（和 buyWorld 同一条）
+   *
+   * 它和 buyWorld 走**同一条账**：金沉没进世界市场、货从虚空来、受上限约束，
+   * 只是发起人从"玩家点按钮"换成"结算时的自救"。所以不会出现两个价，
+   * AI 也不能偷偷便宜进货。
+   * 返回值：这一笔花了几金（0 = 没买）。测试靠它定点验。 */
+  var SELFBUY = Object.create(null);   // owner -> 本回合已买几单位
+  var SELFBUY_TURN = -1;
+  /* 只读统计（bench / 测试回答"这条规则有没有在动"）：
+   * 光看某一回合的库存变化会被"这一回合刚好没缺"骗过去。 */
+  var SELFSTAT = { n: 0, gold: 0, iron: 0, pool: 0 };
+  function selfBuyStat() { return SELFSTAT; }
+  AO.resSelfBuyStat = selfBuyStat;
+  /* 一单位铁多少钱（面板 / 测试 / 结算三处共用这一个函数，别各算一份） */
+  function selfBuyUnit(owner) {
+    var lot = AO.GOV.buyLot(), n = lot.n || 1;
+    var p = Math.ceil(lot.gold / n * priceV(owner | 0, 'iron') - 1e-9);
+    return p > 0 ? p : 1;
+  }
+  AO.resSelfBuyUnit = selfBuyUnit;
+  /* 买 want 单位（可以做不满：配额 / 现金 / 仓位哪一项不够就少买几单位） */
+  function selfBuyIron(pid, owner, F, want) {
+    var S = AO.GOV && AO.GOV.selfBuy;
+    owner = owner | 0;
+    if (!S || !owner) return 0;
+    want = Math.floor(want === undefined ? 1 : want);
+    if (!(want > 0)) return 0;
+    var bag = SIM[pid | 0], s = bag && bag.iron, g = bag && bag.gold;
+    if (!s || !g) return 0;                       // 没有铁袋的省（理论上不存在）
+    var at = S.at === undefined ? 2 : S.at;
+    if ((s.stock || 0) >= at) return 0;           // 还够用：不囤铁
+    if (BLOCKADE[pid | 0]) return 0;              // 被封锁的省买不了货（和 buyWorld 同一条）
+    if (SELFBUY_TURN !== turnNo) { SELFBUY_TURN = turnNo; SELFBUY = Object.create(null); }
+    var lot = AO.GOV.buyLot();
+    var qmax = Math.floor((S.lotsPerTurn === undefined ? 1 : S.lotsPerTurn) * (lot.n || 5));
+    var left = qmax - (SELFBUY[owner] || 0);
+    if (left <= 0) return 0;                      // 本国的配额用完了
+    if (want > left) want = left;
+    var room = Math.floor(capOf(pid | 0, 'iron') - (s.stock || 0));
+    if (want > room) want = room;                 // 满仓：买了也白买
+    if (want <= 0) return 0;
+    var up = selfBuyUnit(owner), keep = S.keepGold === undefined ? 6 : S.keepGold;
+    /* 两段付款（和 payMaint 同一条家法）：**省库先掏**，不够的从中央拨款里划。
+     * 为什么必须给中央这一段：维护本来就是"省库 → 中央拨款"两段付的，买铁
+     * 却只认省库的话，正好把最需要续命的那批穷省挡在门外（探针：停产省里
+     * 90% 的省库金不足 5，它们连一单位铁都买不起）。中央的钱本来也是这个国的钱。 */
+    var mine = Math.floor(((g.stock || 0) - keep) / up);
+    if (mine < 0) mine = 0;
+    if (mine > want) mine = want;
+    var cenN = 0, cenPay = 0;
+    if (mine < want && S.usePool !== false) {
+      var R = AO.rep, cen = ensureCentral(owner);
+      var poolLeft = (R && R.reserve) ? R.reserve() : 0;
+      cenN = Math.min(want - mine, Math.floor((cen.gold || 0) / up),
+        Math.floor(poolLeft / up));
+      if (cenN > 0) {
+        cenPay = cenN * up;
+        if (R && R.takePool) R.takePool(cenPay);
+        cen.gold = (cen.gold || 0) - cenPay;
+        if (R && R.noteSpent) R.noteSpent(owner, cenPay);
+      }
+    }
+    var units = mine + cenN;
+    if (units <= 0) return 0;
+    var price = units * up;
+    var own = mine * up;
+    if (own > 0) g.stock -= own;                  // 金沉没：付给世界市场，谁都不记进项
+    var got = gainStock(pid | 0, 'iron', units, F);
+    if (F) {
+      if (own > 0) F.loss.gold = (F.loss.gold || 0) + own;
+      F.gain.iron = (F.gain.iron || 0) + got;
+      F.d.buyIron = (F.d.buyIron || 0) + price;   // 省卡收支：「买铁 −N 金」
+      F.d.buyIronN = (F.d.buyIronN || 0) + got;   //                「买铁 +N 铁」
+      /* 中央垫的那一份单列 —— 省库库存没少那么多，混在一起账就对不上了 */
+      if (cenPay > 0) F.d.buyIronC = (F.d.buyIronC || 0) + cenPay;
+    }
+    SELFBUY[owner] = (SELFBUY[owner] || 0) + got;
+    SELFSTAT.gold += price; SELFSTAT.iron += got; SELFSTAT.n++;
+    SELFSTAT.pool += cenPay;
+    return price;
+  }
 
   /* ---------------- 兑换（以物易物，v18 / B2） ----------------
    * 市场的第三条腿：卖货是"资源 → 金"，买货是"金 → 资源"，
@@ -6569,6 +6731,11 @@
     /* 省库上解（v18 / D）：省库 → 中央。单列一行 —— 不然玩家只会看到
      * "省库金少了 17"，找不到是谁搬走的。 */
     if (F.d.remit) parts.push('上解 −' + F.d.remit + ' 金（省库 → 中央）');
+    /* 买铁续命（v18.4）：金出省库、铁进省库。它是"花金买铁"，
+     * 和上解方向相反，所以单独一行 —— 两笔都记在省库账上，混起来会看不懂。 */
+    if (F.d.buyIron) parts.push('买铁 −' + F.d.buyIron + ' 金（世界市场 · 维护缺铁' +
+      (F.d.buyIronC ? '，其中中央垫 ' + F.d.buyIronC : '') + '）');
+    if (F.d.buyIronN) parts.push('买铁 +' + F.d.buyIronN + ' 铁（世界市场进货）');
     /* 兑换（v18 / B2）：以物易物，一进一出。d.xchg 里正数是"付出"、负数是"换回" */
     if (F.d.xchg) {
       var xs = [];
@@ -16492,6 +16659,10 @@
     settleRemit: settleRemit,
     remitStat: REMIT,
     remitAcc: REMITACC,
+    /* 省库买铁付维护（v18.4）：定点验"铁见底 + 金够 → 买几单位" */
+    selfBuyIron: selfBuyIron,
+    selfBuyUnit: selfBuyUnit,
+    selfBuyStat: SELFSTAT,
     popOf: function (pid) { return (POP[pid | 0] && POP[pid | 0].v) || 0; },
     goldOf: function (pid) { return (SIM[pid | 0] && SIM[pid | 0].gold) ? SIM[pid | 0].gold.stock : 0; },
     setGold: function (pid, v) { if (SIM[pid | 0] && SIM[pid | 0].gold) SIM[pid | 0].gold.stock = v; },

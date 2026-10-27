@@ -14,6 +14,8 @@
  *   H   改建快速通道（v18.1b）：熔旧坊/淘金场从 buildOrder 里摘出来，
  *       改走 aiConvert（不占建造格，每国每回合至多 1 座，先铁后金）
  *   I   存钱本能（v18.3）：goldReserve 15 + 中央金 < 10 时整条建造跳过
+ *   J   省库买铁付维护（v18.4）：维护缺铁 → 世界市场按缺口零买，金沉没；
+ *       每国每回合 ≤1 手、付完留 keepGold、封锁 / 满仓 / 没钱不买
  *
  * 每一节都对着任务书那一条验收写，断言尽量落在"规则层"（check / settle /
  * 表本身）而不是像素上；只有"钮亮不亮、title 写什么"这类必须走 DOM。
@@ -1146,6 +1148,134 @@ function add(list) { for (const c of list) out.push(c); }
     cen.gold = 200;
     const r2 = AI.build(c.id, AI.personaOf(c.id));
     ok('I 中央 200 金：闸松开，照常开工', r2 === true, 'build=' + r2);
+    return o;
+  }));
+
+  /* =============================================================
+   * J 省库买铁付维护（v18.4）—— 让上解搬回的金第一次能变成铁
+   *
+   * 停产省的瓶颈是铁（见 DESIGN-LIFELINE §十四）：金搬得再多也换不来铁。
+   * 这条规则把世界市场那条口子接到**维护**上：铁见底、省库还有金 →
+   * 自己去买一手（5 铁），金沉没。三道闸在 GOV.selfBuy 里。
+   * ============================================================= */
+  add(await page.evaluate(() => {
+    const D = window.AO.resDebug, A = window.AO, o = [];
+    const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
+    const T = window.__T, w = D.world(), G = A.GOV;
+    const cid = T.cid, cen = D.ensureCentral(cid);
+    const pid = T.provs.find(id => A.resSim[id] && A.resSim[id].iron);
+    const pid2 = T.provs.find(id => id !== pid && A.resSim[id] && A.resSim[id].iron);
+    const lot = G.buyLot();
+
+    ok('J 规则在 GOV 定义区（at 2 / keepGold 6 / 每国每回合 1 手）',
+      !!G.selfBuy && G.selfBuy.at === 2 && G.selfBuy.keepGold === 6 &&
+      G.selfBuy.lotsPerTurn === 1, JSON.stringify(G.selfBuy));
+
+    /* 配额绑在 turnNo 上：拨一个"干净"的回合号，免得被前面几节用掉 */
+    const freshTurn = () => D.setTurn(D.turn() + 1);
+    const setIron = (id, v) => { A.resSim[id].iron.stock = v; };
+    /* 前几条只验"省库自己出钱"那一段：临时关掉中央拨款那一段，
+     * 否则拨款里剩的钱会把"金不够就不买"这条断言搅掉（拨款额度是全局状态）。 */
+    const poolOff = () => { G.selfBuy.usePool = false; };
+    const poolOn = () => { G.selfBuy.usePool = true; };
+    poolOff();
+
+    /* ① 铁还够（= at）→ 不囤铁 */
+    freshTurn();
+    setIron(pid, G.selfBuy.at);
+    D.setGold(pid, 100);
+    const g0 = D.goldOf(pid);
+    ok('J 铁 = at(2)：不买（这是续命，不是囤铁）',
+      D.selfBuyIron(pid, cid, D.flow[pid], 3) === 0 && D.goldOf(pid) === g0,
+      '省库金 ' + g0 + ' → ' + D.goldOf(pid) + '，铁 ' + A.resSim[pid].iron.stock);
+
+    /* ② 铁见底 + 金够 → 按缺口买 3 单位：金出省库、铁进省库、中央一分不动 */
+    freshTurn();
+    setIron(pid, 0);
+    D.setGold(pid, 100);
+    cen.gold = 0;
+    const up = D.selfBuyUnit(cid);
+    const F = D.flow[pid];
+    const b0 = { iron: D.stockOf(pid, 'iron'), n: A.resSelfBuyStat().n };
+    const paid = D.selfBuyIron(pid, cid, F, 3);
+    ok('J 铁 0 + 金 100 → 买 3 单位（单价 ' + up + ' 金，共 ' + up * 3 + ' 金）',
+      paid === up * 3 && D.stockOf(pid, 'iron') === b0.iron + 3 &&
+      D.goldOf(pid) === 100 - up * 3,
+      '付费 ' + paid + ' · 铁 ' + b0.iron + ' → ' + D.stockOf(pid, 'iron') +
+      ' · 金 ' + D.goldOf(pid));
+    ok('J 金沉没：中央不涨（货来自世界市场，不是国库）',
+      (cen.gold || 0) === 0, '中央金=' + cen.gold);
+    ok('J 流水两格：d.buyIron（金）/ d.buyIronN（铁）',
+      !!F && F.d.buyIron === paid && F.d.buyIronN === 3,
+      F ? 'd.buyIron=' + F.d.buyIron + ' d.buyIronN=' + F.d.buyIronN : '没流水');
+
+    /* ③ 配额：每国每回合至多 1 手 = lot.n 单位。买满之后再多也不卖 */
+    freshTurn();
+    setIron(pid, 0); setIron(pid2, 0);
+    D.setGold(pid, 300); D.setGold(pid2, 300);
+    const q1 = D.selfBuyIron(pid, cid, D.flow[pid], lot.n);
+    const q2 = D.selfBuyIron(pid2, cid, D.flow[pid2], lot.n);
+    ok('J 每国每回合至多 ' + lot.n + ' 单位（一手）—— 第一笔成、第二笔不动',
+      q1 === up * lot.n && q2 === 0 && D.stockOf(pid2, 'iron') === 0,
+      '两笔 ' + q1 + ' / ' + q2 + '，第二省铁=' + D.stockOf(pid2, 'iron'));
+    freshTurn();
+    setIron(pid2, 0);
+    const q3 = D.selfBuyIron(pid2, cid, D.flow[pid2], 2);
+    ok('J 换一回合：配额恢复，第二省也买得到', q3 === up * 2 && D.stockOf(pid2, 'iron') === 2,
+      '付费 ' + q3 + '，铁=' + D.stockOf(pid2, 'iron'));
+
+    /* ④ 金不够：只买得起几单位就买几单位（不赊账、也不把开工钱花光） */
+    freshTurn();
+    setIron(pid, 0);
+    D.setGold(pid, up * 2 + G.selfBuy.keepGold - 1);
+    const gPoor = D.goldOf(pid);
+    const p4 = D.selfBuyIron(pid, cid, D.flow[pid], 3);
+    ok('J 金只够 1 单位的余量 → 少买（不赊账、留住开工钱）',
+      p4 === up && D.stockOf(pid, 'iron') === 1 && D.goldOf(pid) === gPoor - up,
+      '省库金 ' + gPoor + ' → ' + D.goldOf(pid) + '（单价 ' + up + ' + 留 ' +
+      G.selfBuy.keepGold + '），铁=' + D.stockOf(pid, 'iron'));
+
+    /* ⑤ 被封锁的省买不了货（和 buyWorld 同一条闸） */
+    freshTurn();
+    setIron(pid, 0);
+    D.setGold(pid, 200);
+    A.resWar.blockade[pid] = cid;
+    const p5 = D.selfBuyIron(pid, cid, D.flow[pid], 2);
+    delete A.resWar.blockade[pid];
+    ok('J 封锁省：买不了（和玩家点「买货」同一条闸）', p5 === 0 && D.stockOf(pid, 'iron') === 0,
+      '付费 ' + p5);
+
+    /* ⑥ 省库一分钱没有时，中央拨款垫付（两段付款的第二段）——
+     *    这才是"穷省也能续命"的那一半：停产省里九成省库金不足 5。 */
+    poolOn();
+    freshTurn();
+    setIron(pid, 0);
+    D.setGold(pid, 0);
+    cen.gold = 60;
+    A.rep.turnStart(cid);                       // 批这一回合的拨款（按上回合实付估）
+    const pool0 = A.rep.reserve(), cen0 = cen.gold;
+    const F7 = D.flow[pid];
+    const p7 = D.selfBuyIron(pid, cid, F7, 3);
+    ok('J 省库 0 金 + 中央有金 → 拨款垫付买铁（省库不动、中央出钱）',
+      p7 > 0 && D.goldOf(pid) === 0 && (cen.gold || 0) < cen0 &&
+      !!F7 && F7.d.buyIronC === p7,
+      '付费 ' + p7 + ' · 中央金 ' + cen0 + ' → ' + cen.gold + ' · 拨款 ' + pool0 +
+      ' → ' + A.rep.reserve());
+    poolOff();
+
+    /* ⑦ 上解把金搬走之后，省里仍然付得起"续命钱"——
+     *    把两条规则放在一起跑一遍：省库 60 金 → 上解 → 剩下的钱够不够买铁。 */
+    freshTurn();
+    setIron(pid, 0);
+    D.setGold(pid, 60);
+    D.remitAcc[pid] = 0;
+    cen.gold = 0;
+    D.settleRemit(pid, cid);
+    const afterRemit = D.goldOf(pid);
+    const p6 = D.selfBuyIron(pid, cid, D.flow[pid], 2);
+    ok('J 上解与买铁同场：60 金 → 上解后还剩 ' + afterRemit + '，仍买得起铁',
+      afterRemit >= up * 2 + G.selfBuy.keepGold && p6 === up * 2,
+      '上解后省库 ' + afterRemit + ' · 付 ' + p6 + ' · 铁 ' + D.stockOf(pid, 'iron'));
     return o;
   }));
 
