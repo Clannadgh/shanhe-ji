@@ -80,6 +80,7 @@
     /* 淘金场（v18）：同理 —— 不清的话上一局的淘金场会挂到新世界同号省的金矿行上 */
     for (var wsk in WASH) delete WASH[wsk];
     for (var iak in IRONACC) delete IRONACC[iak];
+    for (var rak in REMITACC) delete REMITACC[rak];
     for (var pk in POP) delete POP[pk];
     for (var hk in SCHOOL) delete SCHOOL[hk];
     for (var mk in MARKET) delete MARKET[mk];
@@ -446,6 +447,11 @@
    * { n: 搬过几笔, gold: 一共搬了多少金 }。bench 与 test 用它回答
    * "这条规则到底有没有在动" —— 只看某一回合的流水会被"这一回合没到线"骗过去。 */
   var REMIT = { n: 0, gold: 0 };
+  /* 上解零头（v18.3 累进之后才需要）：10% / 25% 两段乘出来的都是小数，
+   * 一个 33 金的省一回合只有 0.3 金 —— 直接 floor 就永远是 0，"涓流常开"
+   * 变成"涓流不存在"。所以和 TAXACC / IRONACC 同一个办法：攒够 1 才落袋，
+   * 零头留在表里。**进档**（和 IRONACC 一样，不存的话读档后那点零头归零）。 */
+  var REMITACC = Object.create(null);
   var GOV_ID = 1;                     // 官员 id 计数器（存档里存的是 id，不重排）
 
   /* ---------------- 官员的"人味"（v11：资历 / 怨气） ----------------
@@ -2156,15 +2162,21 @@
     /* ⑤ 省库上解（v18 / D）：人口税只进省库、中央只出不进 —— 这一笔把散在
      * 省里的金聚回中央。放在**最末**（俸禄、偷金都算完之后）：
      * 上解的是"这个省真的剩下来的钱"，不是它收上来还没花的那一笔。
-     * 规则在 AO.GOV.remit（floor 80 / rate 25%），玩家与 AI 同一条。 */
+     * 规则在 AO.GOV.remit（30 免 / 30~80 抽 10% / >80 抽 25% / 每省每回合 ≤3），
+     * 玩家与 AI 同一条。 */
     settleRemit(pid, owner);
     return gain;
   }
   AO.resSettleTax = settleTax;
 
-  /* 省库上解：省库金超过 floor 的部分搬 rate 给中央。
-   * **超出 ≥4 才动**（至少搬 1 金）—— 否则一个刚过线的小省会每回合搬 0.3 金，
-   * 流水上多一条永远 0 的记录，读起来像 bug。
+  /* 省库上解（v18 / D，v18.3 改累进）：省库金按三段抽成搬给中央。
+   *   ≤ free(30)            免 —— 省里的家底，下一刻就要付维护费
+   *   free ~ low 的部分     lowRate(10%)
+   *   > low(80) 的部分      highRate(25%)
+   * 每省每回合至多 cap(3) 金。**先抽成再封顶**（不是先封顶再抽）：
+   * 封顶是"别把大省抽干"，不是"大省只按 3 金算税率"。
+   * 小数走 REMITACC 攒整 —— 33 金的省一回合只有 0.3 金，floor 掉就永远搬不出，
+   * 10% 那一段会静悄悄地不存在（这正是 v18 那条 80 死线的老毛病）。
    * 只走金不走铁：铁的家在矿脉和熔旧坊，这条别扩散。
    * 单独成函数是为了测试能定点验（settleTax 里还混着人口税与俸禄）。 */
   function settleRemit(pid, owner) {
@@ -2173,12 +2185,20 @@
     var bag = SIM[pid | 0];
     var g = bag && bag.gold;
     if (!g) return 0;
-    var floor = R.floor === undefined ? 80 : R.floor;
-    var excess = (g.stock || 0) - floor;
-    if (excess < 4) return 0;
-    var move = Math.max(1, Math.floor(excess * (R.rate === undefined ? 0.25 : R.rate) + 1e-9));
-    if (move > g.stock) move = Math.floor(g.stock);
+    var free = R.free === undefined ? 30 : R.free;
+    var low = R.low === undefined ? 80 : R.low;
+    var r1 = R.lowRate === undefined ? 0.10 : R.lowRate;
+    var r2 = R.highRate === undefined ? 0.25 : R.highRate;
+    var cap = R.cap === undefined ? 3 : R.cap;
+    var stock = g.stock || 0;
+    if (stock <= free) return 0;         // 没到起征点：零头留着，别清（攒整跨回合）
+    var amt = (Math.min(stock, low) - free) * r1 + Math.max(0, stock - low) * r2;
+    if (amt > cap) amt = cap;
+    REMITACC[pid | 0] = (REMITACC[pid | 0] || 0) + amt;
+    var move = Math.floor(REMITACC[pid | 0] + 1e-9);
+    if (move > stock) move = Math.floor(stock);   // 不留负数：理论上到不了，防手改档
     if (move <= 0) return 0;
+    REMITACC[pid | 0] -= move;
     g.stock -= move;
     var cen = ensureCentral(owner | 0);
     cen.gold = (cen.gold || 0) + move;
@@ -15142,6 +15162,9 @@
        * SMELT 只存**有炉或有工地**的省（sparseSmelt，1100 省里通常只有几十条）；
        * IRONACC 和 TAXACC 一个道理 —— 不存的话读档后每省的铁税零头归零。 */
       SMELT: sparseSmelt(), IRONACC: IRONACC,
+      /* 上解零头（v18.3，**不升 SAVE_VER**）：pid → 小数，只有累进那两段
+       * 乘出零头的省才有值；旧档缺这个键 → 空表，零头从 0 起。 */
+      REMITACC: REMITACC,
       /* 淘金场（v18 / A，**不升 SAVE_VER**）：和 SMELT 一个瘦身法（sparseWash），
        * 旧档没有这个键 → 读进来是空表，等于"这一局还没人改建过"。 */
       WASH: sparseWash(),
@@ -15440,6 +15463,11 @@
     /* 铁税零头：和 TAXACC 一样存回来，否则读档后"税入比存档前少一点"会被当成 bug */
     fill(IRONACC, d.IRONACC);    for (var ipid in IRONACC) {
       if (typeof IRONACC[ipid] !== 'number' || !isFinite(IRONACC[ipid])) IRONACC[ipid] = 0;
+    }
+    /* 上解零头（v18.3）：同一套 —— 缺键就是空表，读档后从 0 攒起 */
+    fill(REMITACC, d.REMITACC);  for (var rmpid in REMITACC) {
+      var rmv = +REMITACC[rmpid];
+      REMITACC[rmpid] = (isFinite(rmv) && rmv > 0) ? rmv : 0;
     }
     fill(CENTRAL, d.CENTRAL);
     fill(RESEARCH, d.RESEARCH);
@@ -16460,9 +16488,10 @@
       var p = pOf(pid | 0), st = washOf(pid | 0);
       return AO.WASH.check(p, { bag: SIM[pid | 0], washN: st ? st.n : 0, site: st ? st.site : 0 });
     },
-    /* 省库上解（v18 / D）：定点验"省库 150 → 中央 +17、省库 133" */
+    /* 省库上解（v18.3）：定点验"50 → 搬 2、150 → 搬 3（cap）、35 两回合攒 1" */
     settleRemit: settleRemit,
     remitStat: REMIT,
+    remitAcc: REMITACC,
     popOf: function (pid) { return (POP[pid | 0] && POP[pid | 0].v) || 0; },
     goldOf: function (pid) { return (SIM[pid | 0] && SIM[pid | 0].gold) ? SIM[pid | 0].gold.stock : 0; },
     setGold: function (pid, v) { if (SIM[pid | 0] && SIM[pid | 0].gold) SIM[pid | 0].gold.stock = v; },

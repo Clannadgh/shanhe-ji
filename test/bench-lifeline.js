@@ -275,27 +275,32 @@ const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
   console.log('耗时：改前 ' + (base.ms / 1000).toFixed(1) + 's · v18 ' + (now.ms / 1000).toFixed(1) + 's');
   console.log('');
 
-  /* ---------------- 拍板线（占位；跑出改前基线后可以再定死） ---------------- */
+  /* ---------------- 拍板线 ----------------
+   * v18.3 起 ② 从"较改前减半"改成**绝对线 140**：改前基线会随开关一起变，
+   * 用比值判会让"两边一起烂"也算达标（250 → 216 是 ×0.86，但离"能活"很远）。
+   * ③ 是新加的：中央金中位 > 0 —— 占比那条只看"有没有"，这条看"够不够用"。 */
   const ratio = now.s100.goldPosOrig / Math.max(1, now.s100.aliveOrig);
   const ratioBase = base.s100.goldPosOrig / Math.max(1, base.s100.aliveOrig);
   const haltCut = base.s100.halt ? now.s100.halt / base.s100.halt : 1;
-  console.log('判定（占位线）：');
+  const goldMed100 = med(now.s100.golds);
+  console.log('判定：');
   console.log('　① T100 中央金 > 0 的开局国占比 ≥ 70% —— ' + pct(now.s100.goldPosOrig, now.s100.aliveOrig) +
     '（改前 ' + pct(base.s100.goldPosOrig, base.s100.aliveOrig) + '）　' + (ratio >= 0.70 ? '✔' : '✘'));
-  console.log('　② 停产省数较改前减半 —— ' + base.s100.halt + ' → ' + now.s100.halt +
-    '（×' + haltCut.toFixed(2) + '）　' + (haltCut <= 0.5 ? '✔' : '✘'));
-  console.log('　③ gone 矿不再无解（熔旧坊 + 淘金场有落地）—— 炉 ' + now.s100.smelt +
+  console.log('　② 停产省 ≤ 140 —— ' + now.s100.halt + '（改前 ' + base.s100.halt +
+    '，×' + haltCut.toFixed(2) + '）　' + (now.s100.halt <= 140 ? '✔' : '✘'));
+  console.log('　③ T100 中央金中位 > 0 —— ' + f1(goldMed100) + '　' + (goldMed100 > 0 ? '✔' : '✘'));
+  console.log('　④ gone 矿不再无解（熔旧坊 + 淘金场有落地）—— 炉 ' + now.s100.smelt +
     ' 省 / 场 ' + now.s100.wash + ' 省　' + ((now.s100.smelt + now.s100.wash) > 0 ? '✔' : '✘'));
-  console.log('　④ 世界没被打崩（存活开局国 ≥ 2/3）—— ' + now.s100.aliveOrig + '/' + CTRY + '　' +
+  console.log('　⑤ 世界没被打崩（存活开局国 ≥ 2/3）—— ' + now.s100.aliveOrig + '/' + CTRY + '　' +
     (now.s100.aliveOrig >= Math.ceil(CTRY * 2 / 3) ? '✔' : '✘'));
-  console.log('　⑤ 中央金 > 0 的占比确实变好（改前 → 改后 至少翻倍）—— ' +
+  console.log('　⑥ 中央金 > 0 的占比确实变好（改前 → 改后 至少翻倍）—— ' +
     pct(ratioBase, 1) + ' → ' + pct(ratio, 1) + '　' + (ratio >= ratioBase * 2 ? '✔' : '✘'));
   /* v18 追加一补课：铁矿从"采空即永久枯竭"改成"深层休眠 48 回合"。
    * 150 回合后**全国铁库存（中央 + 所有省库）的中位**还 > 0，就说明这个世界
    * 没有被铁荒锁死。为什么用"一国合计"而不是"逐省中位"：维护每回合都在吃铁，
    * 一半的省常年是 0，逐省中位永远是 0，测不出托底。
    * 改前基线那一侧把 iron.cool 关回 0（采空即死），所以"改前趋零"是可比的。 */
-  console.log('　⑥ T150 全国铁库存中位 > 0（铁缓再生给无矿国保底）—— 改前 ' +
+  console.log('　⑦ T150 全国铁库存中位 > 0（铁缓再生给无矿国保底）—— 改前 ' +
     f1(med(base.s150.ctryIron)) + ' → v18 ' + f1(med(s150.ctryIron)) + '　' +
     (med(s150.ctryIron) > 0 ? '✔' : '✘'));
   console.log('');

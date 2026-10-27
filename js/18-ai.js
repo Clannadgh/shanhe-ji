@@ -368,6 +368,7 @@
    * 不占建造格、每国每回合独立结算 1 座（见 govTick 那一节）。
    *
    * 三条硬门（顺序就是"先别把自己搞垮"的顺序）：
+   *   ⓪ 中央金 ≥ buildGate(10) —— 存量闸，低于它就整回合不盖（v18.3：只攒钱）；
    *   ① 中央金 ≥ cost.gold + goldReserve —— 建造是先扣中央再扣省，不加这道闸，
    *      一回合两座就能把国库抽干（36 国 × 每回合都抽，几回合就集体停产）；
    *   ② 这块地这一种**只建一座**（n = 0 且没有工地）—— 全国分散不扎堆，
@@ -648,6 +649,12 @@
     var provs = provsOf(cid);
     if (!provs.length) return false;
     var cen = D.ensureCentral(cid);
+    /* 存钱闸（v18.3）：中央金 < buildGate(10) → 本回合**一条建造都不试**。
+     * 为什么要一道不看成本的闸：下面每项的门槛是 cost.gold + goldReserve(15)，
+     * 便宜的建筑（学校 6 金 = 21）照样能过 —— 于是国库在 20 上下反复被打穿，
+     * 永远攒不到能付一轮维护的钱。这道闸只管存量：穷的时候就只攒钱，
+     * 攒过 10 自动恢复（不是永久停摆，也不是"穷国不许盖房"）。 */
+    if ((cen.gold || 0) < (E.buildGate === undefined ? 10 : E.buildGate)) return false;
     var war = atWarWithSomeone(cid) > 0;
     var order = buildOrderOf(cid, persona, war);
     /* 缺矿反应（v18 / E）：排在人格建造表**之前** —— 饿着肚子的时候

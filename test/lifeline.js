@@ -6,13 +6,14 @@
  *   A   淘金场：金的熔旧坊（枯竭金矿的再就业），逐条镜像 SMELT
  *   B   AI 会卖货：市场 5:1 对 AI 开门（含铁、有安全线、每国 ≤2 手）
  *   C   产线库存闸：装备/兵刃攒够了就停线，和平期不再白烧铁
- *   D   省库上解：省库金 > 80 的部分 25% 上解中央
+ *   D   省库上解：三段累进（≤30 免 / 30~80 抽 10% / >80 抽 25%，每省每回合 ≤3）
  *   E   AI 缺了会开矿：对稀缺有反应（at / left / 中央金三道闸）
  *   F   税也收铁（v18 追加二）：人口铁税从涓流提为常脉，与金税同单位
  *   G   市场一座 · 国库不是商店（v18 追加三）：每省 maxPer 1；
  *       买货改走世界市场（供给无限、金沉没、不扣中央），buyCentral 退役
  *   H   改建快速通道（v18.1b）：熔旧坊/淘金场从 buildOrder 里摘出来，
  *       改走 aiConvert（不占建造格，每国每回合至多 1 座，先铁后金）
+ *   I   存钱本能（v18.3）：goldReserve 15 + 中央金 < 10 时整条建造跳过
  *
  * 每一节都对着任务书那一条验收写，断言尽量落在"规则层"（check / settle /
  * 表本身）而不是像素上；只有"钮亮不亮、title 写什么"这类必须走 DOM。
@@ -541,43 +542,58 @@ function add(list) { for (const c of list) out.push(c); }
     const pid = T.m, owner = w.provinces[pid - 1].owner;
     const cen = D.ensureCentral(owner);
 
-    ok('D 规则在 GOV 定义区（floor 80 / rate 25%）',
-      A.GOV.remit && A.GOV.remit.floor === 80 && A.GOV.remit.rate === 0.25,
+    ok('D 规则在 GOV 定义区（30 免 / 30~80 抽 10% / >80 抽 25% / 每省 ≤3）',
+      A.GOV.remit && A.GOV.remit.free === 30 && A.GOV.remit.low === 80 &&
+      A.GOV.remit.lowRate === 0.10 && A.GOV.remit.highRate === 0.25 &&
+      A.GOV.remit.cap === 3,
       JSON.stringify(A.GOV.remit));
 
-    /* ① 省库 150 → 中央 +17、省库 133 */
+    /* 每条断言都从"确定状态"出发：金设成指定值 + 上解零头清零
+     * （零头是跨回合的，不清的话上一条的 0.5 会漏进来把这一条算多 1）。 */
+    const set = (v) => { D.setGold(pid, v); D.remitAcc[pid] = 0; };
+
+    /* ① ≤ 30 免：那是省里的家底（买料 / 垫俸禄 / 开工钱） */
     cen.gold = 0;
-    D.setGold(pid, 150);
+    set(30);
+    const m1 = D.settleRemit(pid, owner);
+    ok('D 省库 30（到起征点但不超）→ 不动', m1 === 0 && D.goldOf(pid) === 30,
+      'moved=' + m1 + ' 省库=' + D.goldOf(pid));
+
+    /* ② 30~80 段抽 10%：50 → (50−30)×0.10 = 2 */
+    cen.gold = 0;
+    set(50);
+    const m2 = D.settleRemit(pid, owner);
+    ok('D 省库 50 → 上解 2（(50−30)×10%）', m2 === 2 && D.goldOf(pid) === 48 &&
+      (cen.gold || 0) === 2, 'moved=' + m2 + ' 省库=' + D.goldOf(pid) + ' 中央=' + cen.gold);
+
+    /* ③ 150：50×0.10 + 70×0.25 = 22.5，但每省每回合封顶 3 */
+    cen.gold = 0;
+    set(150);
     /* 流水是**按回合累计**的：前面几节走过回合，这一省可能已经有上解记录。
      * 所以断言看的是"这一笔"的增量，不是绝对值。 */
     const F = D.flow[pid];
     const r0 = (F && F.d.remit) || 0;
     const moved = D.settleRemit(pid, owner);
-    ok('D 省库 150 → 上解 17', moved === 17, 'moved=' + moved);
-    ok('D 省库剩 133', D.goldOf(pid) === 133, '省库=' + D.goldOf(pid));
-    ok('D 中央 +17', (cen.gold || 0) === 17, '中央=' + cen.gold);
+    ok('D 省库 150 → 上解 3（22.5 被 cap 夹住，防大省抽干）',
+      moved === 3 && D.goldOf(pid) === 147, 'moved=' + moved + ' 省库=' + D.goldOf(pid));
+    ok('D 中央 +3', (cen.gold || 0) === 3, '中央=' + cen.gold);
 
-    /* ② 流水里看得见（省侧 d.remit） */
-    ok('D 流水 d.remit 记了这一笔', !!F && (F.d.remit - r0) === 17,
+    /* ④ 流水里看得见（省侧 d.remit） */
+    ok('D 流水 d.remit 记了这一笔', !!F && (F.d.remit - r0) === 3,
       F ? 'd.remit ' + r0 + ' → ' + F.d.remit : '没流水');
 
-    /* ③ 低于 84 不动（超出 < 4 不搬） */
+    /* ⑤ 攒整：35 → 0.5 金/回合，两回合才落 1 金（floor 不许把它抹平） */
     cen.gold = 0;
-    D.setGold(pid, 83);
-    const moved2 = D.settleRemit(pid, owner);
-    ok('D 省库 83 → 不动', moved2 === 0 && D.goldOf(pid) === 83 && (cen.gold || 0) === 0,
-      'moved=' + moved2 + ' 省库=' + D.goldOf(pid) + ' 中央=' + cen.gold);
+    set(35);
+    const m5a = D.settleRemit(pid, owner);
+    const m5b = D.settleRemit(pid, owner);
+    ok('D 省库 35：第一回合 0 金、第二回合 1 金（0.5 攒整）',
+      m5a === 0 && m5b === 1 && D.goldOf(pid) === 34 && (cen.gold || 0) === 1,
+      'moved=' + m5a + ',' + m5b + ' 省库=' + D.goldOf(pid) + ' 中央=' + cen.gold);
 
-    /* ④ 刚过线：84 → 搬 1 金（至少搬 1，不搬 0.25） */
-    cen.gold = 0;
-    D.setGold(pid, 84);
-    const moved3 = D.settleRemit(pid, owner);
-    ok('D 省库 84 → 搬 1 金（至少 1）', moved3 === 1 && D.goldOf(pid) === 83,
-      'moved=' + moved3 + ' 省库=' + D.goldOf(pid));
-
-    /* ⑤ 只走金不走铁：铁库存原样 */
+    /* ⑥ 只走金不走铁：铁库存原样 */
     const iron0 = D.stockOf(pid, 'iron');
-    cen.gold = 0; D.setGold(pid, 150);
+    cen.gold = 0; set(150);
     D.settleRemit(pid, owner);
     ok('D 只搬金：铁库存不动', D.stockOf(pid, 'iron') === iron0,
       '铁 ' + iron0 + ' → ' + D.stockOf(pid, 'iron'));
@@ -1089,6 +1105,47 @@ function add(list) { for (const c of list) out.push(c); }
     ok('H 60 回合：建造格没被改建吃掉（学校 / 市场照涨）',
       (after.sch + after.mkt) > (t0.sch + t0.mkt),
       '学校 ' + t0.sch + '→' + after.sch + ' · 市场 ' + t0.mkt + '→' + after.mkt);
+    return o;
+  }));
+
+  /* =============================================================
+   * I AI 存钱本能（v18.3）—— 有钱就花的国家，中央永远见底
+   *
+   * 两道：goldReserve 5 → 15（建完还得剩一轮维护费）、buildGate 10（中央金 < 10
+   * 时整条建造都不试）。要验的是"挡住但不永久停"：9 金一动不动、给到 200 又能盖。
+   * ============================================================= */
+  add(await page.evaluate(() => {
+    const D = window.AO.resDebug, A = window.AO, AI = A.aiDebug, o = [];
+    const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
+    const w = D.world();
+    const c = w.countries.filter(x => x && !D.deadMap[x.id] && x.provinces.length >= 3)[0];
+    if (!c) { ok('I 找得到一个够大的国', false, '没有'); return o; }
+
+    ok('I 常数在定义区（goldReserve 15 / buildGate 10）',
+      A.AIECON.goldReserve === 15 && A.AIECON.buildGate === 10,
+      'goldReserve=' + A.AIECON.goldReserve + ' buildGate=' + A.AIECON.buildGate);
+
+    /* 停战 + 给足料：战时民用建造全停，不停战测的是战争白名单，不是这道闸 */
+    AI.warsOf(c.id).forEach(foe => { if (D.atWar(c.id, foe)) D.makePeace(c.id, foe); });
+    const cen = D.ensureCentral(c.id);
+    cen.timber = 3000; cen.grain = 3000; cen.iron = 3000;
+    /* 清掉现成的学校 / 熔旧坊：让建造表第一项一定可盖，否则
+     * "200 金也盖不出来"会被误判成"闸没松开" */
+    for (const id of c.provinces) {
+      if (A.resSchool[id]) A.resSchool[id].n = 0;
+      delete A.resSmelt[id];
+    }
+
+    /* ① 中央 9 金（< buildGate）：整条建造不动，一分钱都不花 */
+    cen.gold = 9;
+    const r1 = AI.build(c.id, AI.personaOf(c.id));
+    ok('I 中央 9 金（< 10）：本回合建造整条跳过', r1 === false && cen.gold === 9,
+      'build=' + r1 + ' 中央金=' + cen.gold);
+
+    /* ② 给到 200 金：闸松开，照常开工（不是永久停摆） */
+    cen.gold = 200;
+    const r2 = AI.build(c.id, AI.personaOf(c.id));
+    ok('I 中央 200 金：闸松开，照常开工', r2 === true, 'build=' + r2);
     return o;
   }));
 

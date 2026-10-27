@@ -533,12 +533,18 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
     afterCancel.gold === beforeCancel.gold,
     '队列 [' + afterCancel.q.join(',') + ']，科研点/金都没动');
 
-  /* 中央造空 → 队头停摆并提示 */
+  /* 中央造空 → 队头停摆并提示
+   * v18.3 跟改：省库上解改成三段累进之后，"把中央金清零"不再等于"一整回合
+   * 都没钱" —— 省里 30 以上的那部分每回合都会搬回中央，队头转眼就付得起。
+   * 这一条验的是"付不起就停"（与上解无关），所以临时摘掉上解让金真的留在省里，
+   * 验完立刻装回（bench-lifeline 也是同一手法）。 */
   const stall = await ev((o) => {
     const R = window.AO.resResearch[o];
     R.cur = null; R.queue.length = 0; R.done = Object.create(null);
     R.pts = 500; R.unlocked = true;
     window.AO.resCentral[o].gold = 0;
+    window.__remit0 = window.AO.GOV.remit;
+    window.AO.GOV.remit = null;
     window.AO.resDebug.startResearch(o, 'plow2');
     return { q: R.queue.slice() };
   }, owner);
@@ -546,7 +552,9 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
   await sleep(300);
   const stall2 = await ev((o) => {
     const R = window.AO.resResearch[o];
-    return { cur: R.cur, q: R.queue.slice(), pts: R.pts };
+    const r = { cur: R.cur, q: R.queue.slice(), pts: R.pts };
+    window.AO.GOV.remit = window.__remit0;      // 装回上解
+    return r;
   }, owner);
   const stallMsg = await ev(() => document.getElementById('ttMsg').textContent);
   ck('中央造空 → 队头停摆、不扣科研点、给「资源不足，队列等待」',
