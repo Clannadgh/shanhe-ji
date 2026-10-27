@@ -1637,24 +1637,29 @@
     return out;
   }
 
-  /* ---------------- 养得起几座就养几座（v18.5） ----------------
-   * 欠费停产是**整类一起停**：4 座农场 + 省库只剩 2 铁 → 4 座全停、全欠着，
-   * 而它其实养得起 2 座。于是穷省越穷：账面上一座都没在跑，欠账还越滚越大。
+  /* ---------------- 养得起几座就养几座（v18.5 / v18.8 改成反馈式） ----------------
+   * 欠费停产是**整类一起停**：4 座农场 + 省库 2 铁 → 4 座全停、全欠着，
+   * 而它其实养得起 2 座。所以按"能养几座"给每类设保留座数
+   * （19-repair 的 KEEP，和玩家在「维修」面板手动调的是**同一个开关**）。
    *
-   * 这里在维护**之前**按库存给每类算"能养几座"，写进 19-repair 的保留座数
-   * （和玩家在「维修」面板里手动调的是**同一个开关**，不是第二套系统）：
-   *   · 预算 = 本省铁 + 本省金；按 AO.rep.kinds() 的次序挨个分（口粮与料在前）；
-   *   · 每类的"每座维护费"直接从 def.maint 取，含科技折扣（和真扣的钱同源）；
-   *   · 欠账（mAcc）按"停下几座"的比例一起砍 —— 停掉的座不缴费，也不能让
-   *     它们的旧账把还在跑的那几座拖下水；
-   *   · 只碰**没人设过**（keep === null）或**我们自己设过**的类：玩家手调的、
-   *     战时换挡（warEcon）设的比例一律不动；发现别人改过就放弃这一类的所有权；
-   *   · 库存回来了自动放开（can ≥ built → 设回 null），不用人工复位。
+   * **v18.8 重做：从"按库存预算"改成"欠费反馈"**。老版本（按这一回合的库存
+   * 算能养几座）实测把产出砍了 20%：它只看**此刻的存货**，而省里的收入
+   * （铁税 / 人口税）是维护**之后**才进账的 —— 于是它总是少算，把本来付得起
+   * 的座也停掉。探针（diag/stuck-probe）对照：在跑 622 / 真在产 619，
+   * 而关掉裁座是 1106 / 777。指标漂亮了，东西少产了两成。
    *
-   * 只管 **AI 国**：玩家有「维修」面板可以自己按城调座数，自动去改是越权；
-   * AI 没有面板，这张表就是它的面板。 */
-  var AUTOK = Object.create(null);   // pid -> { kind: seats }：我们自己设的（可回收）
-  var TRIMSTAT = { n: 0 };           // 这一局一共设/放开过几处（bench 与测试看它在不在动）
+   * 新规则（每条每省各自一套，慢速回差）：
+   *   · 上一回合**真的欠费**（halted）→ 少养一座（这是唯一会裁座的时机）；
+   *   · 没欠费、而且是我们设过的 → 每 recoverEvery 回合养回一座；
+   *   · 养满 → 把保留座数清成 null（全开），不留痕迹。
+   * 这样欠费只活一回合，产出不掉：只有真的付不起的那一座会让位。
+   *
+   * 只裁**资源七类**（学校/市场是开/关二态，停了在结算里同样写 halted，
+   * 裁它们既省不了指标、又让面板分不清"欠费停"和"主动停"）。
+   * 只碰**没人设过**或**我们自己设过**的类：玩家手调的、战时换挡设的比例都不动。
+   * 只管 **AI 国**：玩家有「维修」面板可以自己调，自动去改是越权。 */
+  var AUTOK = Object.create(null);   // pid -> { kind: { n, t } }：我们设的座数与回合
+  var TRIMSTAT = { n: 0, cut: 0, back: 0 };  // 设过几处 / 裁了几次 / 放回几次
   function trimSeats(pid, kind) {
     var bag = SIM[pid | 0];
     if (AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind]) {
@@ -1665,26 +1670,6 @@
     }
     var st = univOf(kind, pid | 0);
     return (st && st.n) || 0;
-  }
-  /* 一座的维护费（铁 / 金），含「标准工料」折扣 —— 和 maintDue 同一把尺子，
-   * 只是不按座数加权：这里要算的正是"一座（平均）多少钱"。
-   * 按 tiers 取**加权平均**：Lv2 的维护费是 Lv1 的两倍，全按 Lv1 算会让
-   * 升级过的省"账面养得起、实际付不出"，又滑回欠费停产。 */
-  function trimPerSeat(owner, kind, s) {
-    var def = (AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind]) || univDef(kind);
-    if (!def || !def.maint) return { iron: 0, gold: 0 };
-    var cut = 1 - (MODS(owner).maintCut || 0);
-    var a = def.maint, b = def.maint2 || a;
-    var t1 = 0, t2 = 0;
-    if (s && s.tiers) { t1 = s.tiers[1] || 0; t2 = s.tiers[2] || 0; }
-    var tot = t1 + t2;
-    if (tot > 0) {
-      return {
-        iron: ((a.iron || 0) * t1 + (b.iron || 0) * t2) / tot * cut,
-        gold: ((a.gold || 0) * t1 + (b.gold || 0) * t2) / tot * cut
-      };
-    }
-    return { iron: (a.iron || 0) * cut, gold: (a.gold || 0) * cut };
   }
   /* 按座数比例砍欠账（停掉的座不欠）；砍到 0 就等于"这笔账结了" */
   function trimArrears(pid, kind, built, can) {
@@ -1702,55 +1687,41 @@
     if (!owner || owner === (PLAYER | 0)) return 0;      // 玩家自己调，不越权
     var bag = SIM[pid | 0];
     if (!bag) return 0;
-    var pool = { iron: (bag.iron && bag.iron.stock) || 0,
-      gold: (bag.gold && bag.gold.stock) || 0 };
-    var ks = (T.order && T.order.length) ? T.order : (R.kinds ? R.kinds() : []);
-    var changed = 0, i;
+    var gap = T.recoverEvery === undefined ? 6 : T.recoverEvery;
     var mine = AUTOK[pid | 0];
-    for (i = 0; i < ks.length; i++) {
-      var kind = ks[i];
-      if (kind === 'wall') continue;        // 城墙不按座数养（另有一套按缺口的维护）
-      /* 只裁**资源七类**：只有它们有"留几座在跑"这回事（tiers + 保留座数）。
-       * 学校 / 市场 / 兵营是开/关二态的，停了在结算里同样写 halted，
-       * 裁它们既省不了指标、又让面板分不清"欠费停"和"主动停"。 */
-      if (!(AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind])) continue;
-      var built = trimSeats(pid, kind);
-      if (!(built > 0)) continue;
-      var cur = R.keep(pid | 0, kind);
-      var ours = !!(mine && mine[kind] !== undefined);
+    var changed = 0, k;
+    for (k in AO.RESOURCE_BY_KEY) {
+      var s = bag[k];
+      if (!s || !(s.built > 0)) continue;
+      if (s.gone || (k === 'iron' && s.cool > 0)) continue;
+      var built = s.built | 0;
+      var cur = R.keep(pid | 0, k);
+      var rec = mine && mine[k];
       /* 别人改过我们设的数（战时换挡 / 读档 / 手改）→ 放手，这一类别再管 */
-      if (ours && cur !== null && cur !== mine[kind]) {
-        delete mine[kind];
-        ours = false;
-        var leftA = false, kk2;
-        for (kk2 in mine) { leftA = true; break; }
-        if (!leftA) { delete AUTOK[pid | 0]; mine = undefined; }
+      if (rec && cur !== rec.n) {
+        delete mine[k];
+        rec = null;
+        if (!Object.keys(mine).length) { delete AUTOK[pid | 0]; mine = undefined; }
       }
-      if (cur !== null && !ours) continue;
-      var per = trimPerSeat(owner, kind, bag[kind]);
-      var can = built;
-      if (per.iron > 0) can = Math.min(can, Math.floor(pool.iron / per.iron + 1e-9));
-      if (per.gold > 0) can = Math.min(can, Math.floor(pool.gold / per.gold + 1e-9));
-      if (can < 0) can = 0;
-      if (can > built) can = built;
-      if (can < built) {
-        pool.iron -= can * per.iron;
-        pool.gold -= can * per.gold;
-        if (cur !== can) {
-          R.setKeep(pid | 0, kind, can);
-          mine = mine || (AUTOK[pid | 0] = Object.create(null));
-          mine[kind] = can;
-          trimArrears(pid, kind, built, can);
-          TRIMSTAT.n++; changed++;
+      if (cur !== null && !rec) continue;                // 不是我们设的：不动
+      var eff = cur === null ? built : Math.min(cur, built);
+      var can = eff;
+      if (s.halted) can = Math.max(0, eff - 1);          // 上一回合真欠费 → 让一座
+      else if (rec && turnNo >= (rec.t || 0) + gap) can = Math.min(built, eff + 1);
+      if (can === eff) continue;
+      if (can >= built) {
+        R.setKeep(pid | 0, k, null);                     // 养满了：还给"全开"
+        if (rec) {
+          delete mine[k];
+          if (!Object.keys(mine).length) { delete AUTOK[pid | 0]; mine = undefined; }
         }
-      } else if (ours) {
-        R.setKeep(pid | 0, kind, null);     // 养得起：放开（只放开我们自己设过的）
-        delete mine[kind];
-        /* 一条都不剩就把这个省整条删掉 —— 表要能干净地空出来
-         * （测试直接看 autoKeep[pid] === undefined） */
-        var anyLeft = false, kk;
-        for (kk in mine) { anyLeft = true; break; }
-        if (!anyLeft) delete AUTOK[pid | 0];
+        TRIMSTAT.n++; changed++;
+      } else {
+        R.setKeep(pid | 0, k, can);
+        mine = mine || (AUTOK[pid | 0] = Object.create(null));
+        mine[k] = { n: can, t: turnNo };
+        if (can < eff) { trimArrears(pid, k, built, can); TRIMSTAT.cut++; }
+        else TRIMSTAT.back++;
         TRIMSTAT.n++; changed++;
       }
     }

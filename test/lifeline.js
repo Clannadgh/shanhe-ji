@@ -1283,80 +1283,92 @@ function add(list) { for (const c of list) out.push(c); }
   }));
 
   /* =============================================================
-   * K 养得起几座就养几座（v18.5）—— 欠费停产是"整类一起停"，
-   * 而省库里的钱往往够养活其中几座
+   * K 养得起几座就养几座（v18.5，v18.8 改成"欠费反馈"）
    *
-   * 实测口径：4 座农场 ×（0.2 铁 + 0.2 金）/座 → 省库 0.4 铁只养得起 2 座。
-   * 这一节直接调 D.trimKeep（结算里就在维护之前调它，位置见 11-ui 的 ①-0）。
+   * 老版本按"这一回合的库存能养几座"算，实测把产出砍了两成（只看存货、
+   * 不算维护之后才进账的收入）。新规则只在**真的欠费之后**才少养一座，
+   * 缓过来每 recoverEvery 回合养回一座。这一节就验这个回差。
    * ============================================================= */
   add(await page.evaluate(() => {
     const D = window.AO.resDebug, A = window.AO, o = [];
     const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
-    const w = D.world(), rep = A.rep;
-    const player = A.resPlayer();
+    const w = D.world(), rep = A.rep, player = A.resPlayer();
     const c = w.countries.filter(x => x && x.id !== player && !D.deadMap[x.id] &&
       x.provinces && x.provinces.length >= 2)[0];
     if (!c) { ok('K 找得到一个 AI 国', false, '没有'); return o; }
-    const cid = c.id;
-    const pk = c.provinces.find(id => A.resSim[id] && A.resSim[id].iron);
+    const cid = c.id, pk = c.provinces.find(id => A.resSim[id] && A.resSim[id].iron);
     const bag = A.resSim[pk];
+    const G = A.GOV.trimKeep;
 
-    /* 清场：这一省只留 4 座农场（别的类清空，免得抢同一笔预算） */
+    ok('K 规则在定义区（on / recoverEvery 6）',
+      !!G && G.on === true && G.recoverEvery === 6, JSON.stringify(G));
+
+    /* 清场：这一省只留 4 座农场 */
     for (const k in bag) if (bag[k] && bag[k].built !== undefined) bag[k].built = 0;
     for (const k2 in A.resSim[pk]) {
-      const s = A.resSim[pk][k2];
-      if (s && s.tiers) s.tiers = { 1: 0, 2: 0 };
+      const s2 = A.resSim[pk][k2];
+      if (s2 && s2.tiers) s2.tiers = { 1: 0, 2: 0 };
+      if (s2 && s2.mAcc) s2.mAcc = { iron: 0, gold: 0 };
+      if (s2) s2.halted = false;
     }
-    const UN = { school: A.resSchool, market: A.resMarket, builder: A.resBuilder,
-      granary: A.resGranary, university: A.resUniversity, barracks: A.resBarracks,
-      armory: A.resArmory, stable: A.resStable, shipyard: A.resShipyard,
-      factory: A.resFactory };
-    for (const k3 in UN) if (UN[k3]) delete UN[k3][pk];
     bag.grain.built = 4; bag.grain.tiers = { 1: 4, 2: 0 };
-    bag.grain.mAcc = { iron: 0, gold: 0 };
     rep.setKeep(pk, 'grain', null);
     delete D.autoKeep[pk];
-    bag.gold.stock = 100;                    // 金管够，只看铁
 
-    /* ① 0 铁：一座都养不起 → 保留 0 座（主动停，不是欠费停） */
-    bag.iron.stock = 0;
+    /* ① 没欠费 → 不动（这是新规则和旧版最大的差别：不许"预算式"提前裁） */
+    const cut0 = D.trimStat.cut;
     D.trimKeep(pk, cid);
-    ok('K 省库 0 铁 → 4 座农场全停（保留 0 座，不是欠费停产）',
-      rep.keep(pk, 'grain') === 0,
+    ok('K 没欠费 → 一座都不裁（不按库存预算提前停）',
+      rep.keep(pk, 'grain') === null && D.trimStat.cut === cut0,
       'keep=' + rep.keep(pk, 'grain'));
 
-    /* ② 0.4 铁：刚好养 2 座（0.2 铁/座） */
-    bag.iron.stock = 0.4;
+    /* ② 上一回合真欠费了 → 少养一座（4 → 3），欠账按 3/4 砍 */
+    bag.grain.halted = true;
+    bag.grain.mAcc = { iron: 4, gold: 0 };
     D.trimKeep(pk, cid);
-    ok('K 省库 0.4 铁 → 只养 2 座（每座 0.2 铁）',
-      rep.keep(pk, 'grain') === 2, 'keep=' + rep.keep(pk, 'grain'));
-
-    /* ③ 欠账跟着座数一起砍：4 座欠 2 铁，只养 2 座 → 欠 1 铁 */
-    bag.iron.stock = 0.4;
-    bag.grain.mAcc = { iron: 2, gold: 0 };
-    rep.setKeep(pk, 'grain', null);
-    delete D.autoKeep[pk];
-    D.trimKeep(pk, cid);
-    ok('K 停掉的那两座，旧账一起砍掉（2 铁 → 1 铁）',
-      rep.keep(pk, 'grain') === 2 && Math.abs(bag.grain.mAcc.iron - 1) < 1e-9,
+    ok('K 真欠费 → 少养一座（4 → 3），欠账同比例砍（4 → 3）',
+      rep.keep(pk, 'grain') === 3 && Math.abs(bag.grain.mAcc.iron - 3) < 1e-9,
       'keep=' + rep.keep(pk, 'grain') + ' acc=' + bag.grain.mAcc.iron);
 
-    /* ④ 铁回来了：自动放回"全开"（不用人工复位） */
-    bag.iron.stock = 5;
-    bag.grain.mAcc = { iron: 0, gold: 0 };
+    /* ③ 还在欠费 → 继续让（3 → 2），一路到底但不为负 */
+    bag.grain.halted = true;
     D.trimKeep(pk, cid);
-    ok('K 铁回来（5）→ 自动放回全开（keep = null）',
+    bag.grain.halted = true;
+    D.trimKeep(pk, cid);
+    bag.grain.halted = true;
+    D.trimKeep(pk, cid);
+    const k3 = rep.keep(pk, 'grain'), a3 = bag.grain.mAcc.iron;
+    bag.grain.halted = true;
+    D.trimKeep(pk, cid);
+    ok('K 连续欠费 → 一路让到 0 座，不会变负',
+      k3 === 0 && rep.keep(pk, 'grain') === 0 && bag.grain.mAcc.iron === 0,
+      '第三步 keep=' + k3 + ' acc=' + a3 + ' → 最后 keep=' + rep.keep(pk, 'grain'));
+
+    /* ④ 缓过来：不欠费 + 过了 recoverEvery 回合 → 每回合养回一座 */
+    bag.grain.halted = false;
+    bag.grain.mAcc = { iron: 0, gold: 0 };
+    D.setTurn(D.turn() + G.recoverEvery + 1);
+    D.trimKeep(pk, cid);
+    const b1 = rep.keep(pk, 'grain');
+    D.setTurn(D.turn() + G.recoverEvery + 1);
+    D.trimKeep(pk, cid);
+    ok('K 缓过来 → 过 recoverEvery 回合养回一座', b1 === 1 && rep.keep(pk, 'grain') === 2,
+      '第一次 ' + b1 + ' 座 → 第二次 ' + rep.keep(pk, 'grain') + ' 座');
+
+    /* ⑤ 一路养满 → 保留座数清成 null（全开，不留痕迹） */
+    for (let i = 0; i < 3; i++) { D.setTurn(D.turn() + G.recoverEvery + 1); D.trimKeep(pk, cid); }
+    ok('K 养满 → 清成全开（autoKeep 里不留这条）',
       rep.keep(pk, 'grain') === null && D.autoKeep[pk] === undefined,
       'keep=' + rep.keep(pk, 'grain'));
 
-    /* ⑤ 别人设过的座数不许改（战时换挡 / 玩家手调都走这条） */
-    bag.iron.stock = 0;
-    rep.setKeep(pk, 'grain', 1);
+    /* ⑥ 别人设过的座数不许改（战时换挡 / 玩家手调都走这条） */
+    rep.setKeep(pk, 'grain', 2);
+    bag.grain.halted = true;
     D.trimKeep(pk, cid);
-    ok('K 已经有人设过保留座数（战时换挡 / 手调）→ 不覆盖',
-      rep.keep(pk, 'grain') === 1, 'keep=' + rep.keep(pk, 'grain'));
+    ok('K 已经有人设过保留座数 → 不覆盖', rep.keep(pk, 'grain') === 2,
+      'keep=' + rep.keep(pk, 'grain'));
 
-    /* ⑥ 玩家国不碰：同样的局面，玩家那一省保持"全开"由玩家自己决定 */
+    /* ⑦ 玩家国不碰 */
     const pp = player ? (w.countries[player - 1] || {}).provinces : null;
     if (pp && pp.length) {
       const pv = pp.find(id => A.resSim[id] && A.resSim[id].iron);
@@ -1364,13 +1376,13 @@ function add(list) { for (const c of list) out.push(c); }
         const b2 = A.resSim[pv];
         for (const k4 in b2) if (b2[k4] && b2[k4].built !== undefined) b2[k4].built = 0;
         b2.grain.built = 2; b2.grain.tiers = { 1: 2, 2: 0 };
-        b2.iron.stock = 0;
+        b2.grain.halted = true;
         rep.setKeep(pv, 'grain', null);
         const n0 = D.trimStat.n;
         D.trimKeep(pv, player);
-        ok('K 玩家国不动（玩家自己调「维修」面板，自动改是越权）',
+        ok('K 玩家国不动（面板归玩家）',
           rep.keep(pv, 'grain') === null && D.trimStat.n === n0,
-          'keep=' + rep.keep(pv, 'grain') + ' 统计没动=' + (D.trimStat.n === n0));
+          'keep=' + rep.keep(pv, 'grain'));
       }
     }
     return o;
