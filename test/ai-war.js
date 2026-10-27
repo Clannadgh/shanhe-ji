@@ -64,9 +64,13 @@ function add(list) { for (const c of list) out.push(c); }
     ok('0 进攻比例三档（30% / 15% / 0）与战术（军国强攻 / 均衡围城）',
       W.attack.highPct === 0.3 && W.attack.midPct === 0.15 &&
       W.attack.tactic.mil === 'assault' && W.attack.tactic.balanced === 'siege');
-    ok('0 求和（落后 30 · 持续 5 回合）与军费护栏（60% / 90%）',
-      W.peace.behind === 30 && W.peace.turns === 5 &&
-      W.guard.milShare === 0.6 && W.guard.hardShare === 0.9);
+    /* v18.9：求和门槛从 behind 30 / turns 5 收紧到 18 / 3（让中等国家在
+     * 被打到投降线之前就能用一笔钱收场）。这里跟着定义区走，别再写死。 */
+    ok('0 求和（落后 ' + W.peace.behind + ' · 持续 ' + W.peace.turns +
+      ' 回合）与军费护栏（60% / 90%）',
+      W.peace.behind === 18 && W.peace.turns === 3 &&
+      W.guard.milShare === 0.6 && W.guard.hardShare === 0.9,
+      JSON.stringify(W.peace));
     ok('0 阻尼（灭国后 10 回合内、战争 ≥6 → 门槛 +15）',
       W.damp.afterDeath === 10 && W.damp.wars === 6 && W.damp.add === 15);
     ok('0 世界纪要每回合最多 2 条', W.newsPerTurn === 2);
@@ -276,29 +280,32 @@ function add(list) { for (const c of list) out.push(c); }
     /* 求和计数整表清零：前面几段单步测试留下的"落后计数"会串味 */
     Object.keys(AI.losing).forEach(function (k) { delete AI.losing[k]; });
     D.declareWar(a, b);
-    /* a 落后 30 分（b 赢）；b 是"经营"（软），a 国库有钱。
-     * 30 是阈值本身：落后 30 → −30 + 性格 +10 + 赔款 25 = +5，勉强点头；
-     * 落后 40 就不够了（−40+10+25 = −5）—— 打崩了还只赔 50 金，人家当然不干。 */
-    D.wsOf(a, b).a = 0; D.wsOf(a, b).b = 30;
+    /* a 落后 `behind` 分（b 赢）；b 是"经营"（软），a 国库有钱。
+     * 打分 = −min(deficitCap, 落后) + 性格 + 民心 + 赔款/2 —— 这四个数都从
+     * 定义区读，别再写死（v18.9 改过一轮：behind 30→18、pay 50→30）。 */
+    const P = A.AIWAR.peace;
+    D.wsOf(a, b).a = 0; D.wsOf(a, b).b = P.behind;
     AI.setPersona(b, 'econ');
     AI.setPersona(a, 'balanced');
     D.ensureCentral(a).gold = 120;
     const g0 = D.ensureCentral(a).gold, g1 = D.ensureCentral(b).gold;
     const key = a < b ? a + '|' + b : b + '|' + a;
-    const sc = AI.peaceScore(b, a, 50);
+    const sc = AI.peaceScore(b, a, P.pay);
     ok('④ 求和评估用"战况 + 性格 + 民心 + 赔款"（不带要价）',
-      Math.abs(sc.score - ((-30) + sc.ev.persona + sc.ev.press + 25)) < 1e-6,
+      /* 落后分先被 deficitCap 夹住（def = min(cap, adv)），所以用 sc.def */
+      Math.abs(sc.score - ((-sc.def) + sc.ev.persona + sc.ev.press + P.pay / 2)) < 1e-6,
       JSON.stringify(sc));
-    /* 连续 5 回合落后才动手：第 1~4 回合只是记账，第 5 回合才开口 */
+    /* 连续 turns 回合落后才动手：第 1~turns-1 回合只是记账，第 turns 回合才开口 */
     let n = 0;
-    for (let i = 0; i < 4; i++) n += AI.peace(a);
+    for (let i = 0; i < P.turns - 1; i++) n += AI.peace(a);
     /* 落后计数是**带方向**的键（a>b）：记的是"我连续几回合落后于它" */
-    ok('④ 落后满 5 回合才求和（前 4 回合不动）', n === 0 && AI.losing[a + '>' + b] === 4,
+    ok('④ 落后满 ' + P.turns + ' 回合才求和（前 ' + (P.turns - 1) + ' 回合不动）',
+      n === 0 && AI.losing[a + '>' + b] === P.turns - 1,
       'n=' + n + ' losing=' + AI.losing[a + '>' + b]);
     n = AI.peace(a);
-    ok('④ 第 5 回合成交', n === 1 && !D.atWar(a, b), 'n=' + n);
-    ok('④ 赔款真实到账（败方 −50 / 胜方 +50）',
-      D.ensureCentral(a).gold === g0 - 50 && D.ensureCentral(b).gold === g1 + 50,
+    ok('④ 第 ' + P.turns + ' 回合成交', n === 1 && !D.atWar(a, b), 'n=' + n);
+    ok('④ 赔款真实到账（败方 −' + P.pay + ' / 胜方 +' + P.pay + '）',
+      D.ensureCentral(a).gold === g0 - P.pay && D.ensureCentral(b).gold === g1 + P.pay,
       D.ensureCentral(a).gold + ' / ' + D.ensureCentral(b).gold);
     ok('④ 停战写进条约纪要', D.notesList().some(x => /条约/.test(x.text) && /赔款/.test(x.text)),
       (D.notesList().find(x => /条约/.test(x.text)) || {}).text);
