@@ -103,6 +103,10 @@
      * 新世界的 bench 上 —— 也正是"这条规则有没有在动"的证据链。 */
     SELFSTAT.n = 0; SELFSTAT.gold = 0; SELFSTAT.iron = 0;
     SELFBUY = Object.create(null); SELFBUY_TURN = -1;
+    /* 保留座数的"我们自己设的"记录（v18.5）同理：换世界必须清，
+     * 否则上一局的 pid 会让我们把新世界同号省的座数当成自己的去改 */
+    for (var tkk in AUTOK) delete AUTOK[tkk];
+    TRIMSTAT.n = 0;
     /* v12：宰相也是"这一局"的 —— 不清的话新世界的 1 号国直接继承上一局的宰相 */
     for (var ck in CHANCELLOR) delete CHANCELLOR[ck];
     GOV_ID = 1;
@@ -1633,6 +1637,126 @@
     return out;
   }
 
+  /* ---------------- 养得起几座就养几座（v18.5） ----------------
+   * 欠费停产是**整类一起停**：4 座农场 + 省库只剩 2 铁 → 4 座全停、全欠着，
+   * 而它其实养得起 2 座。于是穷省越穷：账面上一座都没在跑，欠账还越滚越大。
+   *
+   * 这里在维护**之前**按库存给每类算"能养几座"，写进 19-repair 的保留座数
+   * （和玩家在「维修」面板里手动调的是**同一个开关**，不是第二套系统）：
+   *   · 预算 = 本省铁 + 本省金；按 AO.rep.kinds() 的次序挨个分（口粮与料在前）；
+   *   · 每类的"每座维护费"直接从 def.maint 取，含科技折扣（和真扣的钱同源）；
+   *   · 欠账（mAcc）按"停下几座"的比例一起砍 —— 停掉的座不缴费，也不能让
+   *     它们的旧账把还在跑的那几座拖下水；
+   *   · 只碰**没人设过**（keep === null）或**我们自己设过**的类：玩家手调的、
+   *     战时换挡（warEcon）设的比例一律不动；发现别人改过就放弃这一类的所有权；
+   *   · 库存回来了自动放开（can ≥ built → 设回 null），不用人工复位。
+   *
+   * 只管 **AI 国**：玩家有「维修」面板可以自己按城调座数，自动去改是越权；
+   * AI 没有面板，这张表就是它的面板。 */
+  var AUTOK = Object.create(null);   // pid -> { kind: seats }：我们自己设的（可回收）
+  var TRIMSTAT = { n: 0 };           // 这一局一共设/放开过几处（bench 与测试看它在不在动）
+  function trimSeats(pid, kind) {
+    var bag = SIM[pid | 0];
+    if (AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind]) {
+      var s = bag && bag[kind];
+      if (!s || !s.built || s.gone) return 0;      // 枯竭的不收维护，也不用养
+      if (kind === 'iron' && s.cool > 0) return 0; // 休眠矿同 maintDue 的口径
+      return s.built;
+    }
+    var st = univOf(kind, pid | 0);
+    return (st && st.n) || 0;
+  }
+  /* 一座的维护费（铁 / 金），含「标准工料」折扣 —— 和 maintDue 同一把尺子，
+   * 只是不按座数加权：这里要算的正是"一座（平均）多少钱"。
+   * 按 tiers 取**加权平均**：Lv2 的维护费是 Lv1 的两倍，全按 Lv1 算会让
+   * 升级过的省"账面养得起、实际付不出"，又滑回欠费停产。 */
+  function trimPerSeat(owner, kind, s) {
+    var def = (AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind]) || univDef(kind);
+    if (!def || !def.maint) return { iron: 0, gold: 0 };
+    var cut = 1 - (MODS(owner).maintCut || 0);
+    var a = def.maint, b = def.maint2 || a;
+    var t1 = 0, t2 = 0;
+    if (s && s.tiers) { t1 = s.tiers[1] || 0; t2 = s.tiers[2] || 0; }
+    var tot = t1 + t2;
+    if (tot > 0) {
+      return {
+        iron: ((a.iron || 0) * t1 + (b.iron || 0) * t2) / tot * cut,
+        gold: ((a.gold || 0) * t1 + (b.gold || 0) * t2) / tot * cut
+      };
+    }
+    return { iron: (a.iron || 0) * cut, gold: (a.gold || 0) * cut };
+  }
+  /* 按座数比例砍欠账（停掉的座不欠）；砍到 0 就等于"这笔账结了" */
+  function trimArrears(pid, kind, built, can) {
+    var s = (AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind])
+      ? (SIM[pid | 0] && SIM[pid | 0][kind]) : univOf(kind, pid | 0);
+    if (!s || !s.mAcc) return;
+    var r = built > 0 ? can / built : 0;
+    s.mAcc.iron = (s.mAcc.iron || 0) * r;
+    s.mAcc.gold = (s.mAcc.gold || 0) * r;
+  }
+  function trimKeep(pid, owner) {
+    var T = AO.GOV && AO.GOV.trimKeep, R = AO.rep;
+    if (!T || T.on === false || !R || !R.setKeep) return 0;
+    owner = owner | 0;
+    if (!owner || owner === (PLAYER | 0)) return 0;      // 玩家自己调，不越权
+    var bag = SIM[pid | 0];
+    if (!bag) return 0;
+    var pool = { iron: (bag.iron && bag.iron.stock) || 0,
+      gold: (bag.gold && bag.gold.stock) || 0 };
+    var ks = (T.order && T.order.length) ? T.order : (R.kinds ? R.kinds() : []);
+    var changed = 0, i;
+    var mine = AUTOK[pid | 0];
+    for (i = 0; i < ks.length; i++) {
+      var kind = ks[i];
+      if (kind === 'wall') continue;        // 城墙不按座数养（另有一套按缺口的维护）
+      /* 只裁**资源七类**：只有它们有"留几座在跑"这回事（tiers + 保留座数）。
+       * 学校 / 市场 / 兵营是开/关二态的，停了在结算里同样写 halted，
+       * 裁它们既省不了指标、又让面板分不清"欠费停"和"主动停"。 */
+      if (!(AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind])) continue;
+      var built = trimSeats(pid, kind);
+      if (!(built > 0)) continue;
+      var cur = R.keep(pid | 0, kind);
+      var ours = !!(mine && mine[kind] !== undefined);
+      /* 别人改过我们设的数（战时换挡 / 读档 / 手改）→ 放手，这一类别再管 */
+      if (ours && cur !== null && cur !== mine[kind]) {
+        delete mine[kind];
+        ours = false;
+        var leftA = false, kk2;
+        for (kk2 in mine) { leftA = true; break; }
+        if (!leftA) { delete AUTOK[pid | 0]; mine = undefined; }
+      }
+      if (cur !== null && !ours) continue;
+      var per = trimPerSeat(owner, kind, bag[kind]);
+      var can = built;
+      if (per.iron > 0) can = Math.min(can, Math.floor(pool.iron / per.iron + 1e-9));
+      if (per.gold > 0) can = Math.min(can, Math.floor(pool.gold / per.gold + 1e-9));
+      if (can < 0) can = 0;
+      if (can > built) can = built;
+      if (can < built) {
+        pool.iron -= can * per.iron;
+        pool.gold -= can * per.gold;
+        if (cur !== can) {
+          R.setKeep(pid | 0, kind, can);
+          mine = mine || (AUTOK[pid | 0] = Object.create(null));
+          mine[kind] = can;
+          trimArrears(pid, kind, built, can);
+          TRIMSTAT.n++; changed++;
+        }
+      } else if (ours) {
+        R.setKeep(pid | 0, kind, null);     // 养得起：放开（只放开我们自己设过的）
+        delete mine[kind];
+        /* 一条都不剩就把这个省整条删掉 —— 表要能干净地空出来
+         * （测试直接看 autoKeep[pid] === undefined） */
+        var anyLeft = false, kk;
+        for (kk in mine) { anyLeft = true; break; }
+        if (!anyLeft) delete AUTOK[pid | 0];
+        TRIMSTAT.n++; changed++;
+      }
+    }
+    return changed;
+  }
+
   /* 付维护：**本省库存 → 中央国库**。
    * 维护是日常开销，不是一次性工程；而且没有矿的省根本没有铁/金袋子，
    * 只能靠中央接济 —— 所以抽税那条规则必须先落地。
@@ -1776,6 +1900,11 @@
       var mods = MODS(owner);
       /* 官员加成（科技加成 + 这一省在任官员的词条）每省算一次，③④⑤ 共用 */
       var pmod = PMOD(pid, owner);
+
+      /* ①-0 养得起几座就养几座（v18.5）：按库存把"能养的座数"写进保留表。
+       * 必须在 ① 维护**之前** —— 这一回合就按新座数收钱，否则先按全座收一遍，
+       * 收不起再改成 0 座，等于白停一回合。 */
+      trimKeep(pid, owner);
 
       /* ① 维护：**在产出之前**算，按建筑类型各自付、各自停。
        * 付得起 → 当回合照常出产；付不起 → 这一类当回合起产量 0，凑齐了自动复工。
@@ -16663,6 +16792,10 @@
     selfBuyIron: selfBuyIron,
     selfBuyUnit: selfBuyUnit,
     selfBuyStat: SELFSTAT,
+    /* 养得起几座就养几座（v18.5）：定点验"2 铁 4 座 → 保留 2 座、欠账减半" */
+    trimKeep: trimKeep,
+    trimStat: TRIMSTAT,
+    autoKeep: AUTOK,
     popOf: function (pid) { return (POP[pid | 0] && POP[pid | 0].v) || 0; },
     goldOf: function (pid) { return (SIM[pid | 0] && SIM[pid | 0].gold) ? SIM[pid | 0].gold.stock : 0; },
     setGold: function (pid, v) { if (SIM[pid | 0] && SIM[pid | 0].gold) SIM[pid | 0].gold.stock = v; },

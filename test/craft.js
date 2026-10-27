@@ -302,14 +302,24 @@ function add(list) {
     const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
     const owner = B.owner, pid = B.pid;
     /* 维护欠费会让厂停产 → 产能缩水，把"5 点/1 点/10 点"的断言带偏。
-     * 这一段只验订单机制，所以每回合前把本国的军工建筑强制复工。 */
+     * 这一段只验订单机制，所以每回合前把本国的军工建筑强制复工。
+     * **光"复工"还不够**（v18.5 补）：产能是结算**当中**按 `halted` 算的 ——
+     * 复了工再走一回合，维护那一段又会把它打回去（金/铁不够时），那一步的
+     * 产能照样是 0，于是 alloc 被永久压掉、进度卡住。所以这里连"付得起"一起给：
+     * 省库与国库各塞一笔金，并把这三类的欠账清零。 */
     const unhalt = () => {
       for (const k of ['armory', 'stable', 'shipyard']) {
         for (const pp of D.coOf(owner).provinces) {
           const st = AO.resMil[k][pp];
-          if (st) st.halted = false;
+          if (!st) continue;
+          st.halted = false;
+          st.mAcc = { iron: 0, gold: 0 };
         }
       }
+      if (cen.gold < 200) cen.gold = 200;
+      if (bag.gold.stock < 50) bag.gold.stock = 50;
+      bag.iron.stock = Math.max(bag.iron.stock, 200);
+      bag.timber.stock = Math.max(bag.timber.stock, 200);
     };
     /* 料管够：中央 + 这个省都塞满 */
     /* 先研青铜工艺：皮甲的 recipe 是「马」，青铜才是「铁 + 木」——

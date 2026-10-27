@@ -99,9 +99,12 @@ const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
     throw new Error('生成超时');
   }
 
-  /* 六个开关：on=true → 用定义区的默认值；on=false → 全关（= 改前基线）
+  /* 八个开关：on=true → 用定义区的默认值；on=false → 全关（= 改前基线）
    * 第 6 个是 v18 追加一补课的常数（铁矿 cool 48）：关掉它就回到"采空即永久枯竭"，
-   * 这样 T150 全国铁库存那一列才有"改前趋零"的分母。 */
+   * 这样 T150 全国铁库存那一列才有"改前趋零"的分母。
+   * 第 7、8 个是 v18.4 / v18.5 补的：**买铁付维护**与**养得起几座就养几座**。
+   * 这两条一旦漏在基线那一侧，基线就会跟着一起变好 —— 上一版实测基线停产
+   * 从 250 掉到 133、铁中位从 0 涨到 17，"改前"两个字就名不副实了。 */
   const setV18 = (on) => page.evaluate((ON) => {
     const A = window.AO;
     if (!window.__v18) {
@@ -111,7 +114,9 @@ const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
         at: JSON.parse(JSON.stringify(A.AIECON.mineOpen.at)),
         equipNeed: A.AIECON.mill.equipNeedPerArmy,
         wpnCap: A.AIECON.mill.wpnStockCap,
-        ironCool: A.RESOURCE_BY_KEY.iron.cool
+        ironCool: A.RESOURCE_BY_KEY.iron.cool,
+        selfBuy: A.GOV.selfBuy,
+        trimKeep: A.GOV.trimKeep
       };
     }
     const o = window.__v18;
@@ -121,9 +126,12 @@ const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
     A.AIECON.mill.equipNeedPerArmy = ON ? o.equipNeed : 0;
     A.AIECON.mill.wpnStockCap = ON ? o.wpnCap : 0;
     A.RESOURCE_BY_KEY.iron.cool = ON ? o.ironCool : 0;
+    A.GOV.selfBuy = ON ? o.selfBuy : null;
+    A.GOV.trimKeep = ON ? o.trimKeep : null;
     return { sellLots: A.AIECON.sellLots, remit: A.GOV.remit, at: A.AIECON.mineOpen.at,
       equip: A.AIECON.mill.equipNeedPerArmy, wpn: A.AIECON.mill.wpnStockCap,
-      ironCool: A.RESOURCE_BY_KEY.iron.cool };
+      ironCool: A.RESOURCE_BY_KEY.iron.cool, selfBuy: A.GOV.selfBuy,
+      trimKeep: A.GOV.trimKeep };
   }, on);
 
   /* 一次采样：中央金/铁（按国）+ 停产省数 + gone 矿数 + 存活国数

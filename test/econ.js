@@ -511,11 +511,17 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
   });
   ck('队列节点有序号角标', badges.saw2 === '1' && badges.net2 === '2', JSON.stringify(badges));
 
+  /* 这一回合**临时摘掉上解**（v18.3）：上解就是"省库 → 中央"，而这一条验的是
+   * "国库金少了那 5 金" —— 省里每回合搬回来的金会把它抵掉，看起来像没扣。
+   * 和下面"中央造空 → 队头停摆"同一条处理，验完立刻装回。 */
+  await ev(() => { window.__remit0 = window.AO.GOV.remit; window.AO.GOV.remit = null; });
   await ev(() => document.getElementById('ttTurn').click());   // 树盖着屏幕，用树里的回合钮
   await sleep(300);
   const Q2 = await ev((o) => {
     const R = window.AO.resResearch[o];
-    return { pts: R.pts, gold: window.AO.resCentral[o].gold, q: R.queue.slice(), cur: R.cur && R.cur.key };
+    const r = { pts: R.pts, gold: window.AO.resCentral[o].gold, q: R.queue.slice(), cur: R.cur && R.cur.key };
+    window.AO.GOV.remit = window.__remit0;
+    return r;
   }, owner);
   ck('队头开研才扣费（科研点 + 国库金）',
     Q2.cur === 'saw2' && Q2.pts < Q1.pts && Q2.gold < Q1.gold && Q2.q.length === 1,
