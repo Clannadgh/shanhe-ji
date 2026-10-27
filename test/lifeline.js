@@ -16,6 +16,9 @@
  *   I   存钱本能（v18.3）：goldReserve 15 + 中央金 < 10 时整条建造跳过
  *   J   省库买铁付维护（v18.4）：维护缺铁 → 世界市场按缺口零买，金沉没；
  *       每国每回合 ≤1 手、付完留 keepGold、封锁 / 满仓 / 没钱不买
+ *   K   养得起几座就养几座（v18.5）：维护前按库存写保留座数，欠账按座数砍
+ *   L   开辟新资源（v18.6）：图上有空着的富矿就去开一座；
+ *       本国同类还有停着的座时不开（和 K 一进一出）
  *
  * 每一节都对着任务书那一条验收写，断言尽量落在"规则层"（check / settle /
  * 表本身）而不是像素上；只有"钮亮不亮、title 写什么"这类必须走 DOM。
@@ -1370,6 +1373,90 @@ function add(list) { for (const c of list) out.push(c); }
           'keep=' + rep.keep(pv, 'grain') + ' 统计没动=' + (D.trimStat.n === n0));
       }
     }
+    return o;
+  }));
+
+  /* =============================================================
+   * L 开辟新资源（v18.6）—— 图上没人开的矿，AI 会不会去开
+   *
+   * 以前只有两条路会新建资源建筑：缺铁缺金（tryMineOpen）、人挤（tryExpand）。
+   * 盐场 / 伐木场 / 牧场**永远不会被新建**。这一节验新加的 tryOpen，
+   * 以及它和 v18.5「养不起就少养几座」的一进一出。
+   * ============================================================= */
+  add(await page.evaluate(() => {
+    const D = window.AO.resDebug, A = window.AO, AI = A.aiDebug, o = [];
+    const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
+    const w = D.world(), player = A.resPlayer();
+    const c = w.countries.filter(x => x && x.id !== player && !D.deadMap[x.id] &&
+      x.provinces.length >= 2)[0];
+    if (!c) { ok('L 找得到一个 AI 国', false, '没有'); return o; }
+    const cid = c.id, cen = D.ensureCentral(cid);
+    const keys = ['grain', 'fish', 'salt', 'timber', 'horse', 'iron', 'gold'];
+    const pk = c.provinces[0];
+
+    /* 清场：全国所有矿脉储量归零、建筑清零 —— 只留 pk 的一块盐矿 60 */
+    for (const id of c.provinces) {
+      for (const k of keys) {
+        const s = A.resSim[id] && A.resSim[id][k];
+        if (!s) continue;
+        s.built = 0; s.site = 0; s.tiers = { 1: 0, 2: 0 };
+        s.left = 0; s.gone = false; s.cool = 0; s.halted = false;
+        s.mAcc = { iron: 0, gold: 0 };
+      }
+      if (A.rep && A.rep.setKeep) for (const k of keys) A.rep.setKeep(id, k, null);
+    }
+    A.resSim[pk].salt.left = 60;
+    cen.gold = 300; cen.timber = 300; cen.grain = 300; cen.iron = 300;
+    /* 先把学校铺到配额（省数/3，这里至少 1 座）—— v18.6 的闸：先扫盲再开矿 */
+    if (!A.resSchool[pk]) A.resSchool[pk] = { n: 0, site: 0, halted: false, mAcc: { iron: 0, gold: 0 } };
+    const SCAP = Math.max(1, Math.ceil(c.provinces.length / (A.AIECON.schoolQuotaDiv || 3)));
+    A.resSchool[pk].n = SCAP; A.resSchool[pk].site = 0; A.resSchool[pk].halted = false;
+
+    ok('L 规则在定义区（openResource：on / minLeft 25）',
+      !!A.AIECON.openResource && A.AIECON.openResource.on === true &&
+      A.AIECON.openResource.minLeft === 25, JSON.stringify(A.AIECON.openResource));
+
+    /* ① 有富矿 + 有钱 → 开一座（这就是"未开发资源"那条缺口） */
+    const r1 = AI.open(cid);
+    const st1 = A.resSim[pk].salt;
+    ok('L 一块 left=60 的空盐矿 → AI 去开了（盐场原来永远没人建）',
+      r1 === true && st1.site > 0, 'ret=' + r1 + ' site=' + st1.site + ' built=' + st1.built);
+
+    /* ② 这一类的座还有停着的 → 先养活现有的，不扩产（和 trimKeep 一进一出） */
+    const p2 = c.provinces[1] || pk;
+    A.resSim[p2].salt.built = 1;
+    A.resSim[p2].salt.tiers = { 1: 1, 2: 0 };
+    A.resSim[p2].salt.halted = true;
+    A.resSim[pk].salt.site = 0;                 // 上一座撤掉，重新来
+    const r2 = AI.open(cid);
+    ok('L 本国盐场还有停着的座 → 不扩产（先养活旧的）',
+      r2 === false && A.resSim[pk].salt.site === 0, 'ret=' + r2);
+
+    /* ③ 那座复工了（不再停）→ 又能开 */
+    A.resSim[p2].salt.halted = false;
+    const r3 = AI.open(cid);
+    ok('L 旧的复工之后 → 继续开新矿', r3 === true && A.resSim[pk].salt.site > 0,
+      'ret=' + r3 + ' site=' + A.resSim[pk].salt.site);
+
+    /* ④ 被围 / 占领的省不开 */
+    A.resSim[pk].salt.site = 0;
+    A.resWar.occupy[pk] = cid;
+    const r4 = AI.open(cid);
+    delete A.resWar.occupy[pk];
+    ok('L 被占领的省：不在那儿开矿', r4 === false, 'ret=' + r4);
+
+    /* ⑤ 穷国不开：中央金不够成本 + goldReserve */
+    cen.gold = 0;
+    const r5 = AI.open(cid);
+    ok('L 中央金 0：不为了开矿把国库抽干', r5 === false, 'ret=' + r5);
+    cen.gold = 300;
+
+    /* ⑥ 先扫盲再开矿：学校配额没铺够，建造格留给学校 */
+    A.resSim[pk].salt.site = 0;
+    A.resSchool[pk].n = 0;
+    const r6 = AI.open(cid);
+    A.resSchool[pk].n = SCAP;
+    ok('L 学校配额没铺够 → 先盖学校，不开矿', r6 === false, 'ret=' + r6);
     return o;
   }));
 

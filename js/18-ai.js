@@ -644,6 +644,68 @@
     }
     return false;
   }
+  /* ---------------- 开辟新资源（v18.6）：图上还有没人开的矿 ----------------
+   * 真空在哪：新建资源建筑原来只有两条路 —— tryMineOpen（缺铁缺金）和
+   * tryExpand（人挤）。**盐场 / 伐木场 / 牧场永远不会被新建**：开局铺多少
+   * 就是多少。T100 实测：44 个盐省 / 37 个木省 / 26 个马省的富矿（left ≥ 25）
+   * 一直空着，谁都不去开 —— 图上四成的资源省就那样躺着。
+   *
+   * 这一条补的是"有禀赋就去用"：找一块"这一种 built === 0、left 还够、
+   * 没被围 / 占"的省，开一座。挑 left 最大的那种地（好矿先开）。
+   *
+   * 三条闸（和 tryMineOpen 同一套，多一条最关键的）：
+   *   ① **这一类的座全在跑**（没有停着的、也没有被压座的）—— 和 v18.5 的
+   *      trimKeep 是一进一出：养不起就少养几座，养满了才扩产。没有这道闸，
+   *      它就变成"盖到养不起"的加速器。
+   *   ② 中央金 ≥ cost.gold + goldReserve（不许为了开矿把国库抽干）
+   *   ③ 每国每回合一座（吃掉这一回合的建造格）；围城 / 占领省不动；战时不开。
+   * 玩家侧零改动 —— 面板本来就能这么建。 */
+  function kindFull(cid, kind) {
+    var list = provsOf(cid), R = AO.rep, i;
+    for (i = 0; i < list.length; i++) {
+      var pid = list[i].id, bag = AO.resSim[pid];
+      var s = bag && bag[kind];
+      if (!s || !(s.built | 0)) continue;
+      if (s.halted) return false;                       // 有欠费停着的
+      if (R && R.effKeep && R.effKeep(pid, kind, s.built) < s.built) return false;
+    }
+    return true;
+  }
+  function tryOpen(cid) {
+    var E = AO.AIECON, D = AO.resDebug, M = E && E.openResource;
+    if (!M || M.on === false || !D || !D.buildOne) return false;
+    var minLeft = M.minLeft === undefined ? 25 : M.minLeft;
+    var list = provsOf(cid);
+    if (!list.length) return false;
+    /* 先扫盲、再开矿：学校配额（省数 / schoolQuotaDiv）没铺够的时候，
+     * 建造格留给学校 —— 识字是慢变量，矿晚几回合开不致命，
+     * 但"全国都在挖盐、没人读书"会把科研与官员一起拖死。 */
+    var schoolCap = Math.max(1, Math.floor(list.length / (E.schoolQuotaDiv || 3)));
+    if (univCountAll(cid, 'school') < schoolCap) return false;
+    var cen = D.ensureCentral(cid);
+    var keys = AO.RESOURCES ? AO.RESOURCES.map(function (r) { return r.key; }) : [];
+    var bestP = null, bestKind = null, bestLeft = -1, i, j;
+    for (i = 0; i < keys.length; i++) {
+      var kind = keys[i];
+      if (!AO.RESOURCE_BY_KEY[kind]) continue;
+      if (!kindFull(cid, kind)) continue;               // ① 先养活现有的
+      var cost = costForKind(cid, kind);
+      if ((cen.gold || 0) < (cost.gold || 0) + (E.goldReserve || 0)) continue;  // ②
+      for (j = 0; j < list.length; j++) {
+        var p = list[j];
+        if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;          // ③
+        var bag = AO.resSim[p.id];
+        var s = bag && bag[kind];
+        if (!s || s.gone || (s.built | 0) > 0) continue;
+        var left = s.left || 0;
+        if (left < minLeft) continue;
+        if (left > bestLeft) { bestLeft = left; bestP = p; bestKind = kind; }
+      }
+    }
+    if (!bestP) return false;
+    D.buildOne(bestP, bestKind, true);
+    return siteOf(bestP.id, bestKind).site > 0;
+  }
   function tryBuild(cid, persona) {
     var E = AO.AIECON, D = AO.resDebug;
     var provs = provsOf(cid);
@@ -663,6 +725,10 @@
     /* 扩容本能（v18.2）：人挤到 85% 以上就先扩地 —— 和"缺矿先开矿"同一个道理，
      * 饿着 / 挤着的时候，别的事都往后放。战时不动（战争档的建造白名单只有军备）。 */
     if (!war && tryExpand(cid)) return true;
+    /* 开辟新资源（v18.6）：上面两条只覆盖"铁金缺"与"人挤"，
+     * 盐 / 木 / 马三类从来没人新建。这条把"图上空着的富矿"接进来，
+     * 但只在**这一类的座全在跑**时才扩产（和 v18.5 的 trimKeep 一进一出）。 */
+    if (!war && tryOpen(cid)) return true;
     /* 战时只盖军备类（§9 ⑤：兵营 / 军械坊）。
      * 民用全停 —— 打仗的时候盖学校是白扔料，而且省下的维护费
      * 正是军费护栏要的那一笔。熔旧坊不在白名单里也不用管了：它 v18.1b 起
@@ -2127,6 +2193,9 @@
     sellMarket: aiMarketSell,
     mineOpen: tryMineOpen,
     expand: tryExpand,
+    /* v18.6：开辟新资源（盐 / 木 / 马原来永远不会被新建）—— test/lifeline 定点验 */
+    open: tryOpen,
+    kindFull: kindFull,
     wash: tryWash,
     /* v18.1b：改建快速通道（不占建造格）—— test/lifeline.js 定点验 */
     convert: aiConvert,
