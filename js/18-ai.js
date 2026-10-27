@@ -27,8 +27,8 @@
  *   不另写一套"AI 专用建造"，否则迟早两套账对不上。
  *
  * 三条纪律（和任务书一致）：
- *   1) 只在 PLAYER > 0（"开始游戏"之后）运行。工坊模式（PLAYER = 0）AI 全静止 ——
- *      在工坊里涂色改归属时不该有一堆国家趁机动土。
+ *   1) 玩家国不归 AI 管。工坊模式（PLAYER = 0）**照常跑**（上帝模式是"看世界
+ *      自己怎么长"）；只有涂色模式（正在改归属）时暂停，免得一边涂一边有人动土。
  *   2) **只看自己的省**。决策读的全是 owner 等于自己的那份 SIM / HAPPY / OFFICIAL，
  *      别国的实时数据一个都不读（迷雾框架下"偷看"是走后门，AI 也不该全知）。
  *   3) 一律 silent：不写 bldMsg、不弹提示条、不推 NOTES。36 个国家一回合
@@ -572,6 +572,9 @@
   function tryMineOpen(cid) {
     var E = AO.AIECON, M = E && E.mineOpen, D = AO.resDebug;
     if (!M || !M.at) return false;
+    /* 这里**故意不加**"先扫盲"闸（v18.12 撤回）：铁见底是急症 —— 矿不开，
+     * 全国建筑就没钱养，先办学也活不到开学。扫盲的顺序只在 tryOpen（开新矿）
+     * 那边管，而且木材要放行（学校自己就要 14 木）。 */
     var want = [], keys = ['iron', 'gold'], i, k;
     for (i = 0; i < keys.length; i++) {
       k = keys[i];
@@ -682,15 +685,21 @@
     if (!list.length) return false;
     /* 先扫盲、再开矿：学校配额（省数 / schoolQuotaDiv）没铺够的时候，
      * 建造格留给学校 —— 识字是慢变量，矿晚几回合开不致命，
-     * 但"全国都在挖盐、没人读书"会把科研与官员一起拖死。 */
+     * 但"全国都在挖盐、没人读书"会把科研与官员一起拖死。
+     *
+     * **木材例外**（v18.12）：学校本身要 14 木材，而木材只能靠伐木场来。
+     * 闸一关，没木头的国家就永远盖不了学校 → 学校永远不够 → 永远不开伐木场，
+     * 实测有 16 个国家卡在这个死结里（阿卡王国 2134 金、木材 12）。 */
     var schoolCap = Math.max(1, Math.floor(list.length / (E.schoolQuotaDiv || 3)));
-    if (univCountAll(cid, 'school') < schoolCap) return false;
+    var schoolOk = univCountAll(cid, 'school') >= schoolCap;
     var cen = D.ensureCentral(cid);
     var keys = AO.RESOURCES ? AO.RESOURCES.map(function (r) { return r.key; }) : [];
     var bestP = null, bestKind = null, bestLeft = -1, i, j;
     for (i = 0; i < keys.length; i++) {
       var kind = keys[i];
       if (!AO.RESOURCE_BY_KEY[kind]) continue;
+      /* 扫盲没够时只准开伐木场（盖学校要木材，这是唯一的破环口） */
+      if (!schoolOk && kind !== 'timber') continue;
       if (!kindFull(cid, kind)) continue;               // ① 先养活现有的
       var cost = costForKind(cid, kind);
       if ((cen.gold || 0) < (cost.gold || 0) + (E.goldReserve || 0)) continue;  // ②
@@ -1906,8 +1915,12 @@
 
   /* 每回合一次，挂在 tick() 的末尾（结算尾、情报 tick 之后） */
   function warTick() {
-    if (!AO.AIWAR) return 0;
-    if (!AO.resDebug || AO.resDebug.player() <= 0) return 0;   // 工坊模式：AI 全静止
+    if (!AO.AIWAR || AIOFF) return 0;
+    var D0 = AO.resDebug;
+    if (!D0) return 0;
+    /* v18.11：和 tick() 同一条改口 —— 工坊模式照常跑，只有涂色模式暂停。
+     * 不放开这一处的话，上帝模式里连"别国互相宣战"都不会发生（世界停摆）。 */
+    if (D0.player() <= 0 && D0.paintMode && D0.paintMode()) return 0;
     var w = syncWorld();
     if (!w || !w.countries) return 0;
     syncDeaths();
@@ -1973,9 +1986,22 @@
   }
 
   /* 每回合一次，挂在战争段之后 / 情报 tick 之后（11-ui.js 的 settleTurn ⓫ 前） */
+  /* 测试用的总闸（v18.11）：工坊模式不再自动冻结之后，那些"手工摆一个局面、
+   * 跑一回合、比对账本"的用例需要 AI 完全不插手，否则它会在同一回合花钱盖房。
+   * 从 resDebug.aiOff(true) 打开，只给测试用，玩家界面没有入口。 */
+  var AIOFF = false;
+  function aiOff(v) { AIOFF = !!v; return AIOFF; }
   function tick() {
-    if (!AO.AIECON) return 0;
-    if (!AO.resDebug || AO.resDebug.player() <= 0) return 0;   // 工坊模式：AI 全静止
+    if (!AO.AIECON || AIOFF) return 0;
+    var D0 = AO.resDebug;
+    if (!D0) return 0;
+    /* v18.11：**工坊模式（PLAYER=0）也让 AI 跑**。
+     * 原来这里 `player() <= 0 → return 0`，理由是"涂色时不该有人趁机动土"；
+     * 但结果是上帝模式变成了一个**冻住的世界**：没人盖学校、没人改建、
+     * 铁永远见底（用户实测的三连问都出在这里）。改成：
+     *   · 工坊模式照常跑 AI（上帝模式 = 观察一个自己会动的世界）；
+     *   · 只有**涂色模式**（正在改归属）时暂停 —— 原来的顾虑只剩这一种情况。 */
+    if (D0.player() <= 0 && D0.paintMode && D0.paintMode()) return 0;
     var w = syncWorld();
     if (!w || !w.countries) return 0;
     var played = 0, i;
@@ -2240,6 +2266,7 @@
     allKinds: allKinds,
     /* 单步入口（测试用）：只做一件事，不走"每回合两格"的调度 */
     build: tryBuild,
+    aiOff: aiOff,
     buildOrder: function (cid) { return buildOrderOf(cid, personaOf(cid), false); },
     /* v18.2：选省分数单独给出来 —— test/pop.js 要直接验"负载 > 85% 加分、
      * < 50% 淘汰"，而不是靠挂机 60 回合去反推一个概率 */

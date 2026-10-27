@@ -489,13 +489,18 @@ function add(list) { for (const c of list) out.push(c); }
   add(await page.evaluate(() => {
     const A = window.AO, D = A.resDebug, AI = A.aiDebug, o = [];
     const ok = (n, c, d) => o.push({ name: n, ok: !!c, detail: d === undefined ? '' : String(d) });
+    /* v18.11 拍板改口：**工坊模式（PLAYER=0）AI 照常跑**。
+     * 原来是全静止（怕涂色时有人动土），结果是上帝模式变成一个冻住的世界 ——
+     * 没人盖学校、没人改建、铁永远见底。现在只有**涂色模式**暂停。
+     * 断言改成"它确实在动"：动作统计里至少有一项涨了。 */
     D.exitGame();
     const before = JSON.parse(JSON.stringify(AI.war));
-    for (let i = 0; i < 6; i++) D.nextTurn();
+    for (let i = 0; i < 12; i++) D.nextTurn();
     const after = JSON.parse(JSON.stringify(AI.war));
-    ok('① 工坊模式（PLAYER=0）AI 全静止',
-      after.declare === before.declare && after.attack === before.attack,
-      JSON.stringify(after));
+    const moved = ['declare', 'attack', 'peace', 'trade', 'sell', 'export', 'guard']
+      .some(k => (after[k] | 0) > (before[k] | 0));
+    ok('① 工坊模式（PLAYER=0）AI 照常跑（不是冻住的世界）',
+      moved && !D.paintMode(), JSON.stringify(after));
     return o;
   }));
 

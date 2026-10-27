@@ -49,6 +49,9 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
 
   await page.goto(URL, { waitUntil: 'load' });
   await sleep(2600);
+  /* v18.11：工坊模式不再自动冻结 AI —— 这个文件是"摆一个局面再对账"，
+   * AI 在同一回合花钱盖房，账本立刻对不上。显式关掉（只关 AI，不动别的）。 */
+  await page.evaluate(() => { window.AO.aiDebug.aiOff(true); });
 
   /* ---------- 选一个普通省（非首都、主资源最富），打开省卡 ---------- */
   const P = await ev(() => {

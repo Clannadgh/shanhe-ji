@@ -16891,6 +16891,8 @@
 
     /* ---- 战争迷雾 / 情报署（v6）：test/fog.js 只从这里进 ---- */
     fogOn: fogOn,
+    /* 涂色模式（上帝工坊里改归属）：AI 的回合要暂停，免得一边涂一边有人动土 */
+    paintMode: function () { return !!(state.renderer && state.renderer.mode === 'paint'); },
     fogVis: visCode,
     fogVisName: function (pid) { return visOf(pid); },
     fogExplored: EXPLORED,

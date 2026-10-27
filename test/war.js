@@ -48,6 +48,9 @@ function add(list) { for (const c of list) out.push(c); }
     document.getElementById('gen').click();
   });
   await sleep(2600);
+  /* v18.11：工坊模式不再自动冻结 AI —— 这个文件验的是战争/产线的**机制**，
+   * 手工摆的局面不能被 AI 在同一回合搅掉，所以显式关掉 AI。 */
+  await page.evaluate(() => { window.AO.aiDebug.aiOff(true); });
 
   /* ---------------- ① 选国锁权 ---------------- */
   add(await page.evaluate(() => {
