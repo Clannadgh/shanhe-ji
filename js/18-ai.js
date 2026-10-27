@@ -448,6 +448,9 @@
     for (var i = 0; i < list.length; i++) {
       var p = list[i];
       if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;   // 打着的省不盖房
+      /* 这一省这一类已经被压到 0 座（v18.5 的裁座）：说明它连现有的都养不起，
+       * 再往这儿盖就是往火里扔料（v18.7 加的行为闸，不动任何规则）。 */
+      if (AO.rep && AO.rep.keep && AO.rep.keep(p.id, kind) === 0) continue;
       var st = siteOf(p.id, kind);
       if (st.n > 0 || st.site > 0) continue;                            // 同省同 kind 只建一座
       if (AO.FACTORY && AO.FACTORY[kind]) {
@@ -1458,6 +1461,22 @@
     if (AO.resDebug.turn() - LASTDEATH > A.damp.afterDeath) return 0;
     return warCount() >= A.damp.wars ? A.damp.add : 0;
   }
+  /* 宣战的钱包闸（v18.7）：打得起才打。
+   * 只读决策（兵、军费、国库），不改任何规则。
+   * 为什么需要：bench 的曲线是 T50 中央金中位 99 → T100 只剩 17~34 ——
+   * 国家攒钱、开战、把钱烧在军费上，然后连维护都付不出。
+   * 门槛 = max(minGold, 军费/回合 × goldTurns)：掏不出 8 个回合的军费就先攒。 */
+  function warCofferOk(cid) {
+    var A = AO.AIWAR, D = AO.resDebug, G = A && A.guard, C = (A && A.declare) || {};
+    if (!D || !G) return true;
+    var men = 0, list = D.armiesOf(cid), i;
+    for (i = 0; i < list.length; i++) men += list[i].men || 0;
+    var upkeep = men / 1000 * (G.upkeepGoldPerK || 0);
+    var need = Math.max(C.minGold === undefined ? 25 : C.minGold,
+      upkeep * (C.goldTurns === undefined ? 8 : C.goldTurns));
+    var cen = D.ensureCentral(cid);
+    return (cen.gold || 0) >= need;
+  }
   function tryDeclare(cid, per, q) {
     var A = AO.AIWAR, D = AO.resDebug, turn = D.turn();
     /* 傀儡不主动宣战（v13）：它的外交权在宗主手里，宣战钮在 11-ui 那边就是灰的，
@@ -1465,6 +1484,7 @@
     if (AO.resPuppetOf && AO.resPuppetOf(cid)) return 0;
     if (turn % A.every !== (cid % A.every)) return 0;     // 各国错开，免得同回合一起动手
     if (warsOf(cid).length >= A.maxWars) return 0;
+    if (!warCofferOk(cid)) return 0;                      // 打不起就别开新战场（v18.7）
     var cd = D.peaceCd || {}, thr = A.threshold + dampAdd();
     var provs = provsOf(cid), best = 0, bestS = -1e9, i, j;
     var seen = Object.create(null);
