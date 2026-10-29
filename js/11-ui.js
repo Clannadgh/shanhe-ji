@@ -81,6 +81,8 @@
     for (var wsk in WASH) delete WASH[wsk];
     for (var iak in IRONACC) delete IRONACC[iak];
     for (var rak in REMITACC) delete REMITACC[rak];
+    for (var rar in REMITACC_R) delete REMITACC_R[rar];
+    for (var rsk in RESACC) delete RESACC[rsk];
     for (var pk in POP) delete POP[pk];
     for (var hk in SCHOOL) delete SCHOOL[hk];
     for (var mk in MARKET) delete MARKET[mk];
@@ -94,6 +96,9 @@
     /* 治理层同理：官员、税率、民心都是"这一局"的，换世界必须清干净 */
     for (var tk in TALENT) delete TALENT[tk];
     for (var ok in OFFICIAL) delete OFFICIAL[ok];
+    /* 官员 id 计数也归零（v19.3）：开局铺底那 500 多位要拿 1..N，
+     * 不归零的话同一颗种子在"重新生成"之后 id 会一直往上爬。 */
+    GOV_ID = 1;
     for (var xk in TAXRATE) delete TAXRATE[xk];
     for (var hk2 in HAPPY) delete HAPPY[hk2];
     for (var ak in TAXACC) delete TAXACC[ak];
@@ -126,6 +131,7 @@
      * 3 号省会扛着上一局的 80 点不安开局就叛乱 */
     for (var ug in UNREST) delete UNREST[ug];
     for (var ig in INTEG) delete INTEG[ig];
+    for (var cq in CONQ) delete CONQ[cq];
     for (var bg in BANDIT) delete BANDIT[bg];
     for (var pc in PACIFY) delete PACIFY[pc];
     for (var uw in UNWARN) delete UNWARN[uw];
@@ -460,6 +466,14 @@
    * 变成"涓流不存在"。所以和 TAXACC / IRONACC 同一个办法：攒够 1 才落袋，
    * 零头留在表里。**进档**（和 IRONACC 一样，不存的话读档后那点零头归零）。 */
   var REMITACC = Object.create(null);
+  /* 物资上解的零头（v19.1）：键是 `pid|key`（和 RESACC 一个形状），10%/20% 两段
+   * 乘出来都是小数，floor 掉就永远搬不动 —— 一个 40 铁的省会一直"上解 0"。
+   * 和 REMITACC 一样**进档**：存的是零头，不存的话读档后那点零头归零。 */
+  var REMITACC_R = Object.create(null);
+  /* 生产抽税的零头（v18.12）：按比例抽之后每笔都是小数（产出 3 × 1/3 = 1），
+   * 逐笔 floor 会把零头全丢掉。键是 `pid|key`，**不进存档**：
+   * 最多丢每种不到 1 单位，换个世界的代价也一样。 */
+  var RESACC = Object.create(null);
   var GOV_ID = 1;                     // 官员 id 计数器（存档里存的是 id，不重排）
 
   /* ---------------- 官员的"人味"（v11：资历 / 怨气） ----------------
@@ -514,6 +528,9 @@
   function salaryOf(off) {
     var G = AO.GOV;
     offNorm(off);
+    /* 开局铺底的那位是"吏"：不领俸禄（GOV.seedOff.grow 打开才按官算）。
+     * 见 15-resources 里 seedOff 的注释 —— 500 多位 × 1 金是八成省库收入。 */
+    if (off.seed && !(G.seedOff && G.seedOff.grow)) return 0;
     var want = G.salary * (G.rankPay[off.rank] || 1);
     off.salAcc += want;
     var whole = Math.floor(off.salAcc + 1e-9);
@@ -714,7 +731,10 @@
     if (!AO.aiDecide) return 0;
     var opt = {
       slots: L.acts, taxMul: L.taxMul, smartTax: !!L.smartTax,
-      forceMax: !!L.forceMax, noMaxTax: !L.forceMax
+      forceMax: !!L.forceMax, noMaxTax: !L.forceMax,
+      /* 宰相是**替玩家干活**的（管国库与兵）：玩家国的"无官省不投资"不该卡他 ——
+       * 玩家可能正准备派官，宰相先按"没官"把活推了就是帮倒忙。见 18-ai 的 GOVREQ_BYPASS。 */
+      byChancellor: true
     };
     var perms = chPerms(ch);
     /* "你手动做的他绝不推翻"：你刚调过税率 → 他这几回合不碰税。
@@ -761,6 +781,12 @@
   var ARMY_ID = 1, GEN_ID = 1;
   var OCCUPY = Object.create(null);
   var INTEG = Object.create(null);
+  /* CONQ：省 id → 易主的回合号（v19.4）。**只记"官跟着旧朝廷一起没了"的那些省**。
+   * 为什么要单独记：v19.3 起每省开局都坐一位"吏"，所以"无官"只会出现在易主之后；
+   * 而用户定的口径是"占领省不给吏 —— 打下来的省必须派真官"。判据不能看 OCCUPY
+   * （整合完就删了），也不能看 p.owner（世界重生成后原始归属就没了），所以记一张表。
+   * 旧档没有这块 → 空表：那些省会被当成老国土（能补吏），只影响补吏的松紧，不影响存量。 */
+  var CONQ = Object.create(null);
   var UNREST = Object.create(null);
   var BANDIT = Object.create(null);
   var PACIFY = Object.create(null);
@@ -903,6 +929,10 @@
   AO.resFlowC = FLOWC;
   AO.resTalent = TALENT;
   AO.resOfficial = OFFICIAL;
+  /* 有没有武将（v19.5）：AI 宣战与玩家面板共用这一句 */
+  AO.resHasGeneral = hasGeneral;
+  /* 易主记录（v19.4）：省 id → 易主回合。AI 的补吏兜底与面板都从这里读 */
+  AO.resConq = CONQ;
   AO.resTaxRate = TAXRATE;
   AO.resHappy = HAPPY;
   AO.resTaxAcc = TAXACC;
@@ -1537,6 +1567,92 @@
   }
 
   /* 整张图一次性进模拟 + 给每国发一点中央库存 */
+  /* ---------------- 开局吏治（v19.3） ----------------
+   * 给一国的**每个省**放一位普通官员（词条 plain：fx 全空，一点加成都没有）。
+   *
+   * 为什么要这一条：无官省的税收 ×0.6（GOV.noOfficerMul），而开局人才点是 0、
+   * 候选池是空的 —— 于是头十几回合全世界都在吃这个惩罚，省卡上写着"无官"，
+   * 不像一个国家，更像一片没人管的荒地。开局这一位只补"有没有人管"这条底线；
+   * **加成、升迁、抽卡戏剧感仍然只能靠开科取士**。
+   *
+   * 名字由 pid 直接算（不用 Math.random）：同种子必须逐字节可复现，
+   * 而每局要铺 500~1100 位，随机取名会把"同一颗种子两个世界"这条底线打掉。 */
+  function seedOffName(pid, S) {
+    var sn = S.surnames, gv = S.givens;
+    var base = sn[(pid | 0) % sn.length] + gv[Math.floor((pid | 0) / sn.length) % gv.length];
+    var used = usedOffNames(), tails = ['之', '卿', '甫', '翁', '叟'], i;
+    if (!used[base]) return base;
+    for (i = 0; i < tails.length; i++) if (!used[base + tails[i]]) return base + tails[i];
+    var k = 2;
+    while (used[base + k]) k++;
+    return base + k;
+  }
+  /* 补一位"吏"（v19.4 兜底）—— 和开局铺底那一位完全同形：seed=1、plain 词条、
+   * 不领俸禄、不擢升、不生怨，被真官顶掉就退场不回池。
+   *
+   * 为什么要有这个出口：v19.4 起"无官省不投资"，而一个没有学校、攒不出人才点
+   * 的小国永远开不了科 —— 那些省就会卡在"没官 → 不建 → 没收益 → 更没官"里。
+   *
+   * **但不给易主的省**（CONQ）：打下来的省必须派**真官**才恢复建造 ——
+   * 这是扩张的门槛，"先有科场，再谈开疆"。老国土（开局就在自己手里的）才有这个兜底，
+   * 因为它们的官本来就不是打仗打没的。
+   * 补吏不破坏"加成只能靠开科"：吏一点加成都没有，只是把"有没有人管"这条底线
+   * 还给小国。谁想让人管得更好，还是得盖学校、开科取士。 */
+  function appointSeed(pid) {
+    var G = AO.GOV, S = AO.OFF_NAMES;
+    if (!G || !G.seedOff || !G.seedOff.on) return null;
+    pid = pid | 0;
+    if (!pid || OFFICIAL[pid]) return null;
+    if (CONQ[pid]) return null;                 // 易主的省只认真官（用户口径）
+    var off = {
+      id: GOV_ID++, name: seedOffName(pid, S),
+      traitKey: G.seedOff.trait || 'plain',
+      owed: 0, rank: 0, ten: 0, griev: 0, salAcc: 0, warned: 0,
+      at: turnNo, seed: 1
+    };
+    offNorm(off);
+    OFFICIAL[pid] = off;
+    return off;
+  }
+  /* 开局给每国一位"无名将"（v19.5）—— 和开局吏同一个思路：给底配，不给加成。
+   *
+   * 为什么必须有这一位：v19.5 起**没武将不能宣战**（见 18-ai 的 tryDeclare），
+   * 而武将只能从武科来。开局一个将都没有的话，全世界头十几回合一场仗都打不起来 ——
+   * 实测 100 回合灭国 0（对照基线 2），那不是"有门槛"，那是"没仗打"。
+   * 给一位 plain 将（fx 全空）之后，战争照旧从第一回合就可能发生；
+   * **好词条、更多将仍然只能靠武科**（要人才点，要学校）。
+   *
+   * 这条闸真正管的是"手里一个将都没有"的国家：新成立的（倒戈 / 独立）那些 ——
+   * 它们先只能招兵防守，开了武科才打得出去。
+   * 名字由国家 id 算，不用 Math.random：同种子必须逐字节可复现。 */
+  function seedPlainGeneral(c) {
+    var G = AO.GOV, SG = G && G.seedGen;
+    if (!SG || SG.on === false) return null;
+    var cid = (c && c.id) | 0;
+    if (!cid) return null;
+    var S = AO.OFF_NAMES, sn = S.surnames, gv = S.givens;
+    var used = Object.create(null), k;
+    for (k in GENERALS) if (GENERALS[k]) used[GENERALS[k].name] = 1;
+    var base = sn[cid % sn.length] + gv[Math.floor(cid / sn.length) % gv.length];
+    var nm = base, n = 2;
+    while (used[nm]) nm = base + (n++);
+    var g = { id: GEN_ID++, name: nm, traitKey: SG.trait || 'm_plain', owner: cid, armyId: 0 };
+    GENERALS[g.id] = g;
+    /* **不进候选池**（有意）：进了池 AI 就会把它派给军队，全世界的部队配置跟着变 ——
+     * 那是另一件事（会动到 ai-war / puppet 的整条曲线）。这一位只是"国有将"的凭证：
+     * 满足"没将不能宣战"的闸、玩家想用可以自己派。真带兵、真加成的将仍靠武科。 */
+    return g;
+  }
+  function seedPlainOfficials(c) {
+    var G = AO.GOV;
+    if (!G || !G.seedOff || !G.seedOff.on) return 0;
+    var provs = (c && c.provinces) || [], n = 0, i;
+    for (i = 0; i < provs.length; i++) {
+      if (appointSeed(provs[i])) n++;
+    }
+    return n;
+  }
+
   function seedAllSims(w) {
     for (var i = 0; i < w.provinces.length; i++) {
       var p = w.provinces[i];
@@ -1556,6 +1672,8 @@
       };
       researchOf(c.id);
       talentOf(c.id);                 // 人才点从 0 开始，候选池空
+      seedPlainOfficials(c);          // v19.3：每省先坐一位 plain（无加成、不领俸禄）
+      seedPlainGeneral(c);            // v19.5：每国先有一位 plain 将（没将不能宣战）
       if (TAXRATE[c.id] === undefined) TAXRATE[c.id] = 1;   // 默认「常规」
       /* 城墙（城防值）：每国首都开局自动砌到 aiCapitalLv 级（一次性）。
        * 生成期还没有"玩家"这个概念（PLAYER=0），所以**所有**首都一视同仁 ——
@@ -2096,22 +2214,31 @@
         if (key === 'grain' || key === 'fish') foodProd += kept;
         s.left -= take;
         s.pop = Date.now();
-        /* 抽税：这一省这一种资源本回合产得够多，就抽一份进中央。
-         * 中央要养全国的维护费，没有这条，没矿的省会集体停产。
-         * 「复式账簿」让每笔多抽 fx.tax —— 先算总量，抽不起就整笔不抽
-         * （抽一半比不抽更难看懂）。
-         * 这是"每笔 +1"，不是"抽成 ×1.1" —— 后者在有科技加成时算出来是小数，
-         * 又得回到攒整那套账，不如直接给一个整数。 */
-        var taxN = AO.TAX.take + (mods.tax || 0);
-        if (take >= AO.TAX.min && s.stock >= taxN) {
-          s.stock -= taxN;
-          var cen = ensureCentral(owner);
-          cen[key] = (cen[key] || 0) + taxN;
-          CUR.F.loss[key] = (CUR.F.loss[key] || 0) + taxN;
-          CUR.F.d.tax[key] = (CUR.F.d.tax[key] || 0) + taxN;
-          if (CUR.FC) {
-            CUR.FC.gain[key] = (CUR.FC.gain[key] || 0) + taxN;
-            CUR.FC.d.tax[key] = (CUR.FC.d.tax[key] || 0) + taxN;
+        /* 抽税（v18.12）：按**比例**分成，不再是"每笔固定 1 单位"。
+         * 旧规则是累退的（产出 2 抽 1 = 50%，产出 12 抽 1 = 8%），
+         * 小农被抽一半、大矿几乎免税，中央反而收不上来。
+         * 新规则：中央拿 `share`（默认 1/3），省留其余；小数走 RESACC 攒整，
+         * 和 TAXACC / IRONACC / REMITACC 同一套办法（0.33 单位 floor 掉就永远没有）。
+         * 抽的是**这一回合的产出**，不碰省里原有库存 —— 省不会因上缴而养不起房。 */
+        var T = AO.TAX;
+        var sh = (T.share === undefined ? 1 / 3 : T.share) +
+          (mods.tax || 0) * (T.bonus === undefined ? 0.1 : T.bonus);
+        if (sh > 1) sh = 1;
+        if (sh > 0) {
+          var akey = (pid | 0) + '|' + key;
+          RESACC[akey] = (RESACC[akey] || 0) + take * sh;
+          var taxN = Math.floor(RESACC[akey] + 1e-9);
+          if (taxN > 0 && s.stock >= taxN) {
+            RESACC[akey] -= taxN;
+            s.stock -= taxN;
+            var cen = ensureCentral(owner);
+            cen[key] = (cen[key] || 0) + taxN;
+            CUR.F.loss[key] = (CUR.F.loss[key] || 0) + taxN;
+            CUR.F.d.tax[key] = (CUR.F.d.tax[key] || 0) + taxN;
+            if (CUR.FC) {
+              CUR.FC.gain[key] = (CUR.FC.gain[key] || 0) + taxN;
+              CUR.FC.d.tax[key] = (CUR.FC.d.tax[key] || 0) + taxN;
+            }
           }
         }
         if (s.left <= 0) {
@@ -2345,36 +2472,83 @@
     var R = AO.GOV && AO.GOV.remit;
     if (!R || !owner) return 0;          // 无主省不搬（别给 CENTRAL[0] 造一本假账）
     var bag = SIM[pid | 0];
-    var g = bag && bag.gold;
-    if (!g) return 0;
+    if (!bag) return 0;
+    var g = bag.gold;
     var free = R.free === undefined ? 30 : R.free;
     var low = R.low === undefined ? 80 : R.low;
     var r1 = R.lowRate === undefined ? 0.10 : R.lowRate;
     var r2 = R.highRate === undefined ? 0.25 : R.highRate;
     var cap = R.cap === undefined ? 3 : R.cap;
-    var stock = g.stock || 0;
-    if (stock <= free) return 0;         // 没到起征点：零头留着，别清（攒整跨回合）
-    var amt = (Math.min(stock, low) - free) * r1 + Math.max(0, stock - low) * r2;
-    if (amt > cap) amt = cap;
-    REMITACC[pid | 0] = (REMITACC[pid | 0] || 0) + amt;
-    var move = Math.floor(REMITACC[pid | 0] + 1e-9);
-    if (move > stock) move = Math.floor(stock);   // 不留负数：理论上到不了，防手改档
-    if (move <= 0) return 0;
-    REMITACC[pid | 0] -= move;
-    g.stock -= move;
-    var cen = ensureCentral(owner | 0);
-    cen.gold = (cen.gold || 0) + move;
+    var stock = (g && g.stock) || 0;
+    var move = 0;
     var F = FLOW[pid | 0];
-    if (F) {
-      F.loss.gold = (F.loss.gold || 0) + move;
-      F.d.remit = (F.d.remit || 0) + move;
-    }
     var FC = FLOWC[owner | 0] || ensureFlowC(owner | 0);
-    if (FC) {
-      FC.gain.gold = (FC.gain.gold || 0) + move;
-      FC.d.remit = (FC.d.remit || 0) + move;
+    var cen = ensureCentral(owner | 0);
+    /* 金：没到起征点就不动（零头留着，攒整跨回合），**但不能 return** ——
+     * 下面还有物资那一条，穷省的金少不代表它的铁也不该上解（v19.1）。 */
+    if (g && stock > free) {
+      var amt = (Math.min(stock, low) - free) * r1 + Math.max(0, stock - low) * r2;
+      if (amt > cap) amt = cap;
+      REMITACC[pid | 0] = (REMITACC[pid | 0] || 0) + amt;
+      move = Math.floor(REMITACC[pid | 0] + 1e-9);
+      if (move > stock) move = Math.floor(stock);   // 不留负数：理论上到不了，防手改档
+      if (move > 0) {
+        REMITACC[pid | 0] -= move;
+        g.stock -= move;
+        cen.gold = (cen.gold || 0) + move;
+        if (F) {
+          F.loss.gold = (F.loss.gold || 0) + move;
+          F.d.remit = (F.d.remit || 0) + move;
+        }
+        if (FC) {
+          FC.gain.gold = (FC.gain.gold || 0) + move;
+          FC.d.remit = (FC.d.remit || 0) + move;
+        }
+        REMIT.n++; REMIT.gold += move;
+      }
     }
-    REMIT.n++; REMIT.gold += move;
+    /* 物资：和金同一套累进，按"每种资源"各算一遍（v19.1，规则见 GOV.remit.res）。
+     * 顺序放在金之后：两本账互不侵占，先钱后料只是读起来顺。
+     * 返回值仍然是**金**搬了多少 —— 测试和 bench 都按这个口径读数。 */
+    var RR = R.res;
+    if (RR && RR.on && RR.keys) {
+      var rFree = RR.free === undefined ? 20 : RR.free;
+      var rLow = RR.low === undefined ? 60 : RR.low;
+      var rr1 = RR.lowRate === undefined ? 0.10 : RR.lowRate;
+      var rr2 = RR.highRate === undefined ? 0.20 : RR.highRate;
+      var rCap = RR.cap === undefined ? 3 : RR.cap;
+      for (var ri = 0; ri < RR.keys.length; ri++) {
+        var rk = RR.keys[ri], rs = bag[rk];
+        if (!rs || rs.gone) continue;
+        /* 本省这一类已经因为缺料停了 → 不抽它的料（穷省不该给富省交租） */
+        if (RR.skipHalt && rs.halted) continue;
+        var rStock = rs.stock || 0;
+        if (rStock <= rFree) continue;
+        var rAmt = (Math.min(rStock, rLow) - rFree) * rr1 +
+                   Math.max(0, rStock - rLow) * rr2;
+        if (rAmt > rCap) rAmt = rCap;
+        var rKey = (pid | 0) + '|' + rk;
+        REMITACC_R[rKey] = (REMITACC_R[rKey] || 0) + rAmt;
+        var rMove = Math.floor(REMITACC_R[rKey] + 1e-9);
+        if (rMove > rStock) rMove = Math.floor(rStock);
+        if (rMove <= 0) continue;
+        REMITACC_R[rKey] -= rMove;
+        rs.stock -= rMove;
+        cen[rk] = (cen[rk] || 0) + rMove;
+        if (F) {
+          F.loss[rk] = (F.loss[rk] || 0) + rMove;
+          if (!F.d.remitRes) F.d.remitRes = Object.create(null);
+          F.d.remitRes[rk] = (F.d.remitRes[rk] || 0) + rMove;
+        }
+        if (FC) {
+          FC.gain[rk] = (FC.gain[rk] || 0) + rMove;
+          if (!FC.d.remitRes) FC.d.remitRes = Object.create(null);
+          FC.d.remitRes[rk] = (FC.d.remitRes[rk] || 0) + rMove;
+        }
+        REMIT.resN = (REMIT.resN || 0) + 1;
+        REMIT.resSum = (REMIT.resSum || 0) + rMove;
+      }
+    }
     return move;
   }
   AO.resSettleRemit = settleRemit;
@@ -2398,6 +2572,10 @@
       var off = OFFICIAL[key];
       if (!off) continue;
       offNorm(off);
+      /* 开局铺底的"吏"不走进这条时间线（v19.3）：不攒资历、不生怨望、不擢升。
+       * 走进去的代价已经量过 —— 401 位升到 rank≥1、俸禄 647 金/回合，
+       * 省库金中位 17 → 2。要试就开 GOV.seedOff.grow。 */
+      if (off.seed && !(G.seedOff && G.seedOff.grow)) continue;
       var pid = key | 0;
       var prov = state.world ? state.world.provinces[pid - 1] : null;
       var owner = prov ? prov.owner : 0;
@@ -2939,6 +3117,51 @@
     return txt;
   }
 
+  /* 武将倒戈（v19.6）—— 一个省都举城投敌了，带兵的将也没理由留着。
+   *
+   * 触发点只有两个：**倒戈**与**独立**。它们本来就是"国势已去"的信号
+   * （不安 80 才爆发），不用再造一套"绝望值"：叛乱本身就在说这件事。
+   * 走掉最后一位将的国家从此不能宣战（v19.5 的闸），只能招兵防守 ——
+   * 这就是"没希望的国家"该有的样子。
+   *
+   * 挑谁走：先挑**没带兵**的将（闲居的那位），没有就挑带兵的那位 ——
+   * 那位要走得先解职：军队的 generalId 清掉，兵留在原地（兵不会跟着一个人走）。
+   * 去哪儿：接收国（倒戈的接收国 / 独立出来的新国），进它的候选池，
+   * 和武科抽出来的将走同一条路 —— 那边立刻就能用他。
+   * 概率在 AO.UNREST.genDefect.chance（0.4）：一次叛乱四成带走一位；
+   * 将多就慢慢散，将少就散光。 */
+  function genDefectAt(fromCid, toCid) {
+    var C = AO.UNREST && AO.UNREST.genDefect;
+    if (!C || C.on === false) return null;
+    fromCid = fromCid | 0; toCid = toCid | 0;
+    if (!fromCid || !toCid || fromCid === toCid) return null;
+    /* 掷点走**真随机流**（用户拍板）：叛乱本来就是"说不定"，将跟不跟着走也该是。
+     * 注意它和别的掷点共用同一条 Math.random 流 —— 这里多抽一次，后面的掷点
+     * 全部错位，所以**同一局跑两次结局会不同**（本来也是：叛乱、贪墨、AI 都在掷）。
+     * 想复现某一局，看存档 / 看纪要，别指望重跑。 */
+    if (Math.random() >= (C.chance === undefined ? 0.4 : C.chance)) return null;
+    var idle = null, busy = null, k;
+    for (k in GENERALS) {
+      var g = GENERALS[k];
+      if (!g || (g.owner | 0) !== fromCid) continue;
+      if (g.armyId) { if (!busy) busy = g; }
+      else if (!idle) idle = g;
+    }
+    var pick = idle || busy;
+    if (!pick) return null;
+    if (pick.armyId) {
+      var a = ARMY[pick.armyId];
+      if (a && a.generalId === pick.id) a.generalId = 0;   // 兵留下，将走了
+      pick.armyId = 0;
+    }
+    /* 从旧主的候选池里摘掉（待命的将本来在池里；不摘会两边都挂着他） */
+    var op = milPoolOf(fromCid), ix = op.indexOf(pick);
+    if (ix >= 0) op.splice(ix, 1);
+    pick.owner = toCid;
+    milPoolOf(toCid).push(pick);
+    return pick;
+  }
+
   /* 倒戈：整省改投"接壤、REL 最高的邻国"。
    * 走 occupyProvince 是为了复用那一整套易主（成员表、颜色、战争分、缓存失效、编年史）——
    * 唯一的补充是把 INTEG 从 0 开始、不安清零（举城投过去，怨气跟着散了）。 */
@@ -2960,8 +3183,11 @@
     u.v = 0; u.target = 0;
     delete UNWARN[pid | 0];
     addRel(oldOwner, best, AO.UNREST.defectRel);
+    /* 举城投敌 → 带兵的将也可能跟着走（v19.6） */
+    var gd = genDefectAt(oldOwner, best);
     var txt = '🏳 ' + prov.name + ' 举城投' + (newC ? newC.name : '?') +
-      '（原属' + (oldC ? oldC.name : '?') + '，关系 ' + bestRel + '）';
+      '（原属' + (oldC ? oldC.name : '?') + '，关系 ' + bestRel + '）' +
+      (gd ? '，' + gd.name + ' 弃主来投' : '');
     revoltNote(txt, 'bad', oldOwner, pid);
     return txt;
   }
@@ -2990,11 +3216,18 @@
       a.owner = nc.id;
       a.rebelFrom = oldOwner;
       a.order = { type: 'defend', cid: nc.id, pid: pid, tactic: 'assault' };
+      /* 将随军走（v19.6，顺手修一处不一致）：军队换了旗，将领不能还挂在旧主名下 ——
+       * 不然旧主拿他凑"有武将"（v19.5 的宣战闸），叛军却在用他的战术。 */
+      var gg = a.generalId && GENERALS[a.generalId];
+      if (gg && (gg.owner | 0) === oldOwner) gg.owner = nc.id;
     }
+    /* 再掷一次"离心"（v19.6）：独立比倒戈更伤，闲居的将也可能走 */
+    var gd2 = genDefectAt(oldOwner, nc.id);
     addRel(oldOwner, nc.id, U.secedeRel);
     var oldC = coOf(oldOwner);
     var txt = '⚑ ' + prov.name + ' 独立，立' + nc.name + '（带走 ' + group.length +
-      ' 省' + (gar.length ? '、驻军 ' + gar.length + ' 支' : '') + '），原属' + (oldC ? oldC.name : '?');
+      ' 省' + (gar.length ? '、驻军 ' + gar.length + ' 支' : '') + '），原属' + (oldC ? oldC.name : '?') +
+      (gd2 ? '，' + gd2.name + ' 随之而去' : '');
     revoltNote(txt, 'bad', oldOwner, pid);
     return txt;
   }
@@ -3361,16 +3594,22 @@
     var T = talentOf(prov.owner), idx = -1, i;
     for (i = 0; i < T.pool.length; i++) if (T.pool[i].id === offId) { idx = i; break; }
     if (idx < 0) return { ok: false, msg: '这位不在候选池里（可能已经上任了）' };
-    var cur = OFFICIAL[pid | 0];
+    var cur = OFFICIAL[pid | 0], wasCur = cur;
     if (cur) {
-      retireNote(cur, prov, silent);
-      T.pool.push(retireOff(cur));
+      /* 开局属吏（v19.3）：被真官顶掉就**直接退场**，不回候选池。
+       * 回池的话池里会堆满没有加成的吏，AI 下一步又把它派给另一个省 ——
+       * 每回合原地换人，人事那一格永远空转。 */
+      if (cur.seed) { delete OFFICIAL[pid | 0]; cur = null; }
+      else {
+        retireNote(cur, prov, silent);
+        T.pool.push(retireOff(cur));
+      }
     }
     var off = T.pool.splice(idx, 1)[0];
     offNorm(off);
     off.at = turnNo;                 // 上任回合：贪墨官的"3 回合窗口"从这里算
     OFFICIAL[pid | 0] = off;
-    return { ok: true, off: off, replaced: cur || null };
+    return { ok: true, off: off, replaced: wasCur || null };
   }
 
   /* 撤换：在任的回候选池（免费，随便调） */
@@ -3380,6 +3619,8 @@
     var pv0 = state.world ? state.world.provinces[(pid | 0) - 1] : null;
     if (pv0 && !silent && !canAct(pv0.owner)) return null;
     delete OFFICIAL[pid | 0];
+    /* 开局属吏被撤就直接走人：回池会让 AI 拿它去顶别省的吏，原地打转（v19.3） */
+    if (off.seed) return off;
     var prov = state.world ? state.world.provinces[(pid | 0) - 1] : null;
     retireNote(off, prov || pv0, silent);
     talentOf(prov ? prov.owner : 0).pool.push(retireOff(off));
@@ -3593,24 +3834,36 @@
     return a.join(' · ');
   }
 
-  /* 付账：本省库存 → 中央国库 → 从同国富裕省调拨（按损耗放大需求量）。
+  /* 付账：**谁的钱先出**由 from / pull 决定（v19.2 建造分工）。
+   *   from = 'central' → 中央国库 → 本省 → 同国调拨   （AI 建造/养兵走这条）
+   *   from = null      → 本省 → 中央 → 同国调拨       （玩家，老口径）
+   *   pull = false     → 中央 + 本省凑不齐就不办（不向邻近省伸手）
    * 先全部核算，凑齐了才真扣，避免"扣了一半又失败"。 */
-  function payCost(p, cost) {
+  function payCost(p, cost, from, pull, useProv, useCen) {
     var keys = Object.keys(cost), i, k;
-    var short = {}, fromCentral = {};
-    for (i = 0; i < keys.length; i++) {
-      k = keys[i];
-      short[k] = Math.max(0, cost[k] - stockOf(p.id, k));
-    }
     var cen = ensureCentral(p.owner);
+    var cenFirst = (from === 'central');
+    var canPull = (pull !== false);
+    var canProv = (useProv !== false);
+    var canCen = (useCen !== false);
+    var fromCen = {}, fromProv = {}, short = {};
     for (i = 0; i < keys.length; i++) {
       k = keys[i];
-      if (!short[k]) continue;
-      var tc = Math.min(cen[k] || 0, short[k]);
-      if (tc > 0) { fromCentral[k] = tc; short[k] -= tc; }
+      var need0 = cost[k];
+      var provPay = 0, cenPay = 0;
+      if (cenFirst) {
+        cenPay = canCen ? Math.min(cen[k] || 0, need0) : 0;
+        if (canProv) provPay = Math.min(stockOf(p.id, k), need0 - cenPay);
+      } else {
+        provPay = canProv ? Math.min(stockOf(p.id, k), need0) : 0;
+        cenPay = canCen ? Math.min(cen[k] || 0, need0 - provPay) : 0;
+      }
+      fromCen[k] = cenPay;
+      fromProv[k] = provPay;
+      short[k] = Math.max(0, need0 - provPay - cenPay);
     }
     var loss = effectiveLoss(p.id, p.owner);
-    var need = {}, list = countryProvinces(p.owner);
+    var need = {}, list = canPull ? countryProvinces(p.owner) : [];
     /* lack 记**第一处凑不齐的资源**（键 + 还差多少），缺多少种都写进 lack 表：
      * 调用方只读 r.lack / r.need（老写法），面板能拿到整张表。 */
     var lack = Object.create(null), lackKey = null, lackNeed = 0;
@@ -3629,14 +3882,13 @@
     }
     if (lackKey) return { ok: false, lack: lackKey, need: lackNeed, lacks: lack, loss: loss };
 
-    /* 真扣：本省 */
+    /* 真扣：本省（按上面算好的份额，顺序无所谓，份额已经定死） */
     for (i = 0; i < keys.length; i++) {
       k = keys[i];
-      var take = Math.min(stockOf(p.id, k), cost[k]);
-      if (take > 0) SIM[p.id][k].stock -= take;
+      if (fromProv[k] > 0) SIM[p.id][k].stock -= fromProv[k];
     }
     /* 真扣：中央 */
-    for (k in fromCentral) cen[k] -= fromCentral[k];
+    for (k in fromCen) if (fromCen[k] > 0) cen[k] -= fromCen[k];
     /* 真扣：同国富裕省（按该资源库存从多到少） */
     for (i = 0; i < keys.length; i++) {
       k = keys[i];
@@ -3650,6 +3902,22 @@
       }
     }
     return { ok: true, loss: loss };
+  }
+
+  /* 建造付款的唯一入口（v19.2）：**两条账分开**（见 GOV.buildPay）。
+   *   local（省里经营：资源建筑 / 升档 / 熔旧坊 / 淘金场）
+   *       → 只掏省库；掏不出就不建（不许向中央要，也不向邻省伸手）
+   *   nat（国家工程：学校 / 市场 / 粮仓 / 兵营 / 大学 / 工厂）
+   *       → 只掏中央；中央没有就不建（这才是"中央自己要建"）
+   *   玩家 → 仍是 省库 → 中央 → 调拨（他要看得见自己付了什么）。
+   * 分成一个函数是为了"只改这一处" —— 建造有七个入口，漏一个就出现
+   * "省 AI 又从中央掏钱盖房"。 */
+  function payBuild(p, cost, silent, nat) {
+    var B = (AO.GOV && AO.GOV.buildPay) || {};
+    if (!silent) return payCost(p, cost, null, true, true, true);
+    var R = (nat ? B.nat : B.local) || {};
+    return payCost(p, cost, R.from || (nat ? 'central' : 'prov'),
+      R.pull === true, R.useProv !== false, R.useCen !== false);
   }
 
   /* 一次性扣款（维修面板用）：本省库存 → 中央国库，**不调拨**。
@@ -3806,10 +4074,12 @@
    * 科技已研 → 新盖的直接是 Lv2（付 cost2）；否则 Lv1（付 cost）。
    *
    * silent=true 是给敌国内政 AI（18-ai.js）用的：不检查玩家锁、不写 bldMsg。
-   * 为什么同一个函数走两遍而不是另写一套"AI 建造"：付账顺序（本省 → 中央 →
-   * 同国调拨）、工期、调拨损耗全在这里，抄一份出去迟早两边对不上账。
+   * nat=true 表示这一座是**中央自己决定要建的**（缺矿 / 人挤 / 开新矿），
+   * 钱从中央出；不传就是"省里自己经营"，只掏省库（见 GOV.buildPay）。
+   * 为什么同一个函数走两遍而不是另写一套"AI 建造"：付账顺序、工期、调拨损耗
+   * 全在这里，抄一份出去迟早两边对不上账。
    * AI 也不该弹提示条 —— 36 个国家每回合各盖一座，弹一次就吃掉玩家的界面。 */
-  function buildOne(p, key, silent) {
+  function buildOne(p, key, silent, nat) {
     var say = silent ? noop : bldMsg;
     var def = AO.RESOURCE_BY_KEY[key];
     var s = SIM[p.id] && SIM[p.id][key];
@@ -3823,7 +4093,7 @@
     if (s.site > 0) return say(def.build + ' 还在建（剩 ' + s.site + ' 回合）', 'warn');
     var lv2 = researched(p.owner, key);
     var cost = costOf(def, lv2);
-    var r = payCost(p, cost);
+    var r = payBuild(p, cost, silent, nat);
     if (!r.ok) {
       return say('资源不够：' + cnOf(r.lack) + ' 还差 ' + r.need + '（本省 → 中央 → 同国各省都没凑齐）', 'warn');
     }
@@ -3893,7 +4163,8 @@
     if (kind === 'market' && st.n >= AO.MARKET.maxPer) {
       return say('每省一座市场——要吞吐量就去修货运（本省已有 ' + st.n + ' 座）', 'warn');
     }
-    var r = payCost(p, D.cost);
+    /* 国家工程（学校/市场/粮仓/兵营/大学/工厂）→ nat 那条账：中央出 */
+    var r = payBuild(p, D.cost, silent, true);
     if (!r.ok) {
       return say('资源不够：' + cnOf(r.lack) + ' 还差 ' + r.need + '（本省 → 中央 → 同国各省都没凑齐）', 'warn');
     }
@@ -4662,10 +4933,11 @@
       edu: talentOf(p.owner).total || 0
     });
     if (!ck.ok) return say(ck.why, 'warn');
-    var r = payCost(p, D.cost);
+    /* 改建是省里自己的事（local 那条账）：只掏省库，掏不出就等 */
+    var r = payBuild(p, D.cost, silent, false);
     if (!r.ok) {
       return say('改建资源不够：' + cnOf(r.lack) + ' 还差 ' + r.need +
-        '（本省 → 中央 → 同国各省都没凑齐）', 'warn');
+        '（本省省库没这么多料）', 'warn');
     }
     st.site = effectiveTurns(p.id, p.owner, D.turns);
     var pop = (POP[p.id] && POP[p.id].v) || 0;
@@ -4769,10 +5041,11 @@
     var st = washNew(p.id);
     var ck = D.check(p, { bag: bag, washN: st.n, site: st.site });
     if (!ck.ok) return say(ck.why, 'warn');
-    var r = payCost(p, D.cost);
+    /* 改建是省里自己的事（local 那条账）：只掏省库，掏不出就等 */
+    var r = payBuild(p, D.cost, silent, false);
     if (!r.ok) {
       return say('改建资源不够：' + cnOf(r.lack) + ' 还差 ' + r.need +
-        '（本省 → 中央 → 同国各省都没凑齐）', 'warn');
+        '（本省省库没这么多料）', 'warn');
     }
     st.site = effectiveTurns(p.id, p.owner, D.turns);
     var pop = (POP[p.id] && POP[p.id].v) || 0;
@@ -6831,6 +7104,16 @@
     /* 省库上解（v18 / D）：省库 → 中央。单列一行 —— 不然玩家只会看到
      * "省库金少了 17"，找不到是谁搬走的。 */
     if (F.d.remit) parts.push('上解 −' + F.d.remit + ' 金（省库 → 中央）');
+    /* 物资上解（v19.1）：和上面同一件事，只是换了个"单位"。
+     * 合并成一行（"上解 −2 铁 · 1 木"）—— 一种资源一行会把小结撑成十行。 */
+    if (F.d.remitRes) {
+      var rs2 = [];
+      for (k in F.d.remitRes) {
+        if (!F.d.remitRes[k]) continue;
+        rs2.push(F.d.remitRes[k] + ' ' + (AO.RES_SHORT[k] || k));
+      }
+      if (rs2.length) parts.push('上解 −' + rs2.join(' · ') + '（省库 → 中央）');
+    }
     /* 买铁续命（v18.4）：金出省库、铁进省库。它是"花金买铁"，
      * 和上解方向相反，所以单独一行 —— 两笔都记在省库账上，混起来会看不懂。 */
     if (F.d.buyIron) parts.push('买铁 −' + F.d.buyIron + ' 金（世界市场 · 维护缺铁' +
@@ -7277,8 +7560,15 @@
       '（rank ' + off.rank + '）· 怨气 ×' + (1 - off.griev * G.grievFx).toFixed(2) +
       '（' + Math.round(off.griev) + '/100）');
     L.push('资历 ' + off.rank + '「' + G.rankCn[off.rank] + '」· 在任 ' + off.ten + ' 回合');
-    L.push('俸禄 ' + (G.salary * (G.rankPay[off.rank] || 1)).toFixed(2) + ' 金/回合（省库发）' +
-      (off.owed ? '　欠俸 ' + off.owed + ' 金（下回合补，不罚）' : ''));
+    /* 开局铺底的"吏"不领俸禄（v19.3），别在 tooltip 里写一个不会扣的数 */
+    var payNow = (off.seed && !(G.seedOff && G.seedOff.grow))
+      ? 0 : G.salary * (G.rankPay[off.rank] || 1);
+    if (payNow > 0) {
+      L.push('俸禄 ' + payNow.toFixed(2) + ' 金/回合（省库发）' +
+        (off.owed ? '　欠俸 ' + off.owed + ' 金（下回合补，不罚）' : ''));
+    } else {
+      L.push('开局属吏：不领俸禄、不升迁 —— 加成要靠开科取士换人');
+    }
     if (off.griev >= G.griev.steal) {
       L.push('⚠ 怨气 ≥' + G.griev.steal + '：每回合从省库侵吞 1 金');
     } else if (off.griev >= G.griev.warn) {
@@ -9506,13 +9796,17 @@
       var suzMe2 = suzerainOf(PLAYER);
       var isVasC = suzerainOf(c.id) === PLAYER;
       var adjC = ((coOf(PLAYER) || {}).neighbors || []).indexOf(c.id) >= 0;
-      var offD = !!suzMe2 || !!pkD || isVasC || !adjC;
+      /* v19.5：**没有武将就不能宣战**（有兵没将打不出去，只能招兵防守）。
+       * 和"必须陆上接壤"同一层：面板置灰 + 一句为什么，玩家不用去猜。 */
+      var noGen = !(AO.resHasGeneral && AO.resHasGeneral(PLAYER));
+      var offD = !!suzMe2 || !!pkD || isVasC || !adjC || noGen;
       h += '<button type="button" class="warbtn" data-declare="' + c.id + '"' +
         (offD ? ' disabled' : '') + ' title="' +
         escHtml(suzMe2 ? ('听命于宗主 ' + nameOf(suzMe2) + '：傀儡不能自行宣战')
           : isVasC ? (c.name + ' 是你的属国：要收地走「强并入」，不能宣战自己的属国')
           : pkD ? ('与 ' + c.name + ' 有' + pactCn(pkD) + '：先毁约才能宣战')
           : !adjC ? '不相邻：跨海的敌国要等舰队'
+          : noGen ? '没有武将：有兵没将打不出去 —— 先开武科（人才点 → 武科），招兵只够防守'
           : '向 ' + c.name + ' 宣战：宣战后双方军队才会交战、才能占领对方省份') +
         '">宣战</button>';
     }
@@ -10922,7 +11216,8 @@
     if (st.site > 0) return say(D.cn + '还在建（剩 ' + st.site + ' 回合）', 'warn');
     var ck = AO.FACTORY.check(kind, p, factoryCtx(p));
     if (!ck.ok) return say('建不了' + D.cn + '：' + ck.why, 'warn');
-    var r = payCost(p, D.cost);
+    /* 国家工程（学校/市场/粮仓/兵营/大学/工厂）→ nat 那条账：中央出 */
+    var r = payBuild(p, D.cost, silent, true);
     if (!r.ok) {
       return say('资源不够：' + cnOf(r.lack) + ' 还差 ' + r.need + '（本省 → 中央 → 同国各省都没凑齐）', 'warn');
     }
@@ -11138,6 +11433,30 @@
     return { ok: true, gen: gen, trait: tr };
   }
   function generalOf(a) { return (a && a.generalId && GENERALS[a.generalId]) || null; }
+
+  /* 这个国家有没有武将（v19.5）—— "能不能宣战"的第一道闸。
+   *
+   * 规则：**没有武将就不能宣战，只能招兵、只能防守。**
+   * 有兵没将 = 一群没人带的兵：守城可以（守军不吃将领加成也照样站墙上），
+   * 但打不出去。想开疆，先开武科 —— 武科要人才点，人才点要学校。
+   * 于是"先有科场，再谈开疆"这条线在军事上也闭环了：
+   * 没学校的国家连仗都开不了，自然也不会打下一堆没人管的省。
+   *
+   * 只算**在任/待命**的武将（GENERALS 里 owner 是自己的都算 —— 池里待命、
+   * 带兵出征、闲着都算"国家有将"）；阵亡的会从 GENERALS 里删掉，自动不算。
+   *
+   * 为什么这道闸不写进 declareWar：declareWar 是底层原语 ——
+   * 事件（揭竿而起，opt.force）与测试要走它。闸放在**决策层**：
+   * AI 的 tryDeclare、玩家面板的宣战钮各查一次。 */
+  function hasGeneral(owner) {
+    owner = owner | 0;
+    if (!owner) return false;
+    for (var k in GENERALS) {
+      var g = GENERALS[k];
+      if (g && (g.owner | 0) === owner) return true;
+    }
+    return false;
+  }
   function genTrait(g) { return g ? AO.milTraitOf(g.traitKey) : null; }
   /* 给军队指派将领（武将必须在候选池里、且没带兵） */
   function assignGeneral(armyId, genId, silent) {
@@ -11271,11 +11590,17 @@
     if (!info.ok) return { ok: false, msg: info.why };
     var R = AO.RECRUIT, need = info.need;
 
-    /* 扣金：先省库、再中央 */
-    var g = SIM[pid].gold, left = need.gold;
-    var take1 = Math.min(g.stock, left);
-    g.stock -= take1; left -= take1;
-    if (left > 0) { var cen = ensureCentral(p.owner); cen.gold = (cen.gold || 0) - left; }
+    /* 扣金：**先中央、再省库**（v19.2 的分工，和建造同一条家法）：
+     * 养兵是国家的钱，省库那点铁金留给下一回合的维修费。
+     * 老口径反过来（省库先掏），穷省征一次兵就把维护钱花光，房子跟着失修。 */
+    var cen0 = ensureCentral(p.owner), left = need.gold;
+    var tc0 = Math.min(cen0.gold || 0, left);
+    cen0.gold = (cen0.gold || 0) - tc0; left -= tc0;
+    if (left > 0) {
+      var g = SIM[pid].gold;
+      var t1 = Math.min(g.stock, left);
+      g.stock -= t1; left -= t1;
+    }
     /* 扣人口（POP.v 直接减，不产生"饿死"的粮食结算） */
     POP[pid].v = Math.max(1000, POP[pid].v - need.pop);
 
@@ -12122,8 +12447,15 @@
     }
     for (var gid in GENERALS) if (GENERALS[gid] && GENERALS[gid].owner === loser) delete GENERALS[gid];
     /* 官员：投降并入时清空（并入的省由赢家重新派官，老的跟着旧朝廷一起没了）；
-     * 傀儡并入时留任 —— 它本来就是你的地，官不用重新派。 */
-    if (!opt.keepOfficials) for (i = 0; i < list.length; i++) delete OFFICIAL[list[i]];
+     * 傀儡并入时留任 —— 它本来就是你的地，官不用重新派。
+     * v19.4：清官的同时记一笔 CONQ —— 这些省**从此只认真官**，补吏的兜底不给它们。
+     * 口径是用户定的："占领省不给吏，打下来的省必须派真官"。 */
+    if (!opt.keepOfficials) {
+      for (i = 0; i < list.length; i++) {
+        delete OFFICIAL[list[i]];
+        CONQ[list[i]] = turnNo;
+      }
+    }
     var T = talentOf(loser);
     T.pool = []; T.milPool = []; T.pts = 0;
     RESEARCH[loser] = newResearch();
@@ -15432,6 +15764,9 @@
       /* 上解零头（v18.3，**不升 SAVE_VER**）：pid → 小数，只有累进那两段
        * 乘出零头的省才有值；旧档缺这个键 → 空表，零头从 0 起。 */
       REMITACC: REMITACC,
+      /* 物资上解零头（v19.1，**不升 SAVE_VER**）：键是 `pid|key`。旧档缺这个键
+       * → 空表，零头从 0 攒起（最多丢每种不到 1 单位，和 RESACC 同一个代价）。 */
+      REMITACC_R: REMITACC_R,
       /* 淘金场（v18 / A，**不升 SAVE_VER**）：和 SMELT 一个瘦身法（sparseWash），
        * 旧档没有这个键 → 读进来是空表，等于"这一局还没人改建过"。 */
       WASH: sparseWash(),
@@ -15461,7 +15796,7 @@
        * 等于"这一局还没人闹过事"，和新开一局走同一条路，不写迁移函数。
        * 唯一的例外是**旧档里已经有 OCCUPY 的省**：它们没有 INTEG，
        * 读档后按"刚打下来"（×0.4）算，见产出那一处的兜底。 */
-      INTEG: INTEG, UNREST: sparseUnrest(), BANDIT: BANDIT, PACIFY: PACIFY, UNWARN: UNWARN,
+      INTEG: INTEG, CONQ: CONQ, UNREST: sparseUnrest(), BANDIT: BANDIT, PACIFY: PACIFY, UNWARN: UNWARN,
       /* 动态市场（v14，**不升 SAVE_VER**）：物价指数 / 事件冲击 / 卖货零头 / 出口闸。
        * 旧档没有这四块 → fill 之后是空表：物价一律回基准 1.0（等价于"这一局还没
        * 交易过"），出口闸 EXP1 空 → 本回合谁都能出口一笔，和"新开一局"同一条路。 */
@@ -15736,6 +16071,11 @@
       var rmv = +REMITACC[rmpid];
       REMITACC[rmpid] = (isFinite(rmv) && rmv > 0) ? rmv : 0;
     }
+    /* 物资上解零头（v19.1）：同一个形状，键是 `pid|key`，校验也一样 */
+    fill(REMITACC_R, d.REMITACC_R);  for (var rrk in REMITACC_R) {
+      var rrv = +REMITACC_R[rrk];
+      REMITACC_R[rrk] = (isFinite(rrv) && rrv > 0) ? rrv : 0;
+    }
     fill(CENTRAL, d.CENTRAL);
     fill(RESEARCH, d.RESEARCH);
     /* 工艺链折算（v19）：兵器名节点全下树，已研的旧键折成对应的工艺 ——
@@ -15911,6 +16251,8 @@
      * 否则它在存档里"没有整合记录"，而产出那边按 0 算，两边看着是同一个数，
      * 但省卡的「整合」行会整行消失（判据是 integOf 非空），玩家会以为坏了。 */
     fill(INTEG, d.INTEG);
+    /* 易主记录（v19.4）：旧档缺这块 → 空表（见 save 里的说明） */
+    fill(CONQ, d.CONQ);
     fill(UNREST, d.UNREST);
     fill(BANDIT, d.BANDIT);
     fill(PACIFY, d.PACIFY);
@@ -16507,6 +16849,9 @@
     /* 维护单价（逐座、逐类，可复算） */
     maintDue: maintDue,
     buildOne: buildOne,
+    appointSeed: appointSeed,
+    conq: CONQ,
+    genDefectAt: genDefectAt,
     buildSchool: buildSchool,
     buildMarket: buildMarket,
     buildBuilder: buildBuilder,
@@ -16759,6 +17104,8 @@
     settleRemit: settleRemit,
     remitStat: REMIT,
     remitAcc: REMITACC,
+    /* 物资上解零头（v19.1）：键 `pid|key` —— test/lifeline 的 D 节定点验要用 */
+    remitAccR: REMITACC_R,
     /* 省库买铁付维护（v18.4）：定点验"铁见底 + 金够 → 买几单位" */
     selfBuyIron: selfBuyIron,
     selfBuyUnit: selfBuyUnit,

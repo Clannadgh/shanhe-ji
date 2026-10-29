@@ -215,11 +215,14 @@
         pid: pid, name: p.name || ('#' + pid),
         v: (V.pop[pid] && V.pop[pid].v) || 1,
         happy: (AO.resHappyOf ? AO.resHappyOf(pid).v : 55),
-        cut: 1, taxN: AO.TAX.take, kinds: {}, univ: {}, wall: null
+        cut: 1, share: 1 / 3, kinds: {}, univ: {}, wall: null
       };
       var pmod = AO.resPMOD ? AO.resPMOD(pid, owner) : null;
       pr.cut = 1 - ((pmod && pmod.maintCut) || 0);
-      pr.taxN = AO.TAX.take + ((pmod && pmod.tax) || 0);
+      /* 生产抽税（v18.12）：按比例分成，和 11-ui 的结算同一个口径 */
+      var T = AO.TAX;
+      pr.share = Math.min(1, (T.share === undefined ? 1 / 3 : T.share) +
+        ((pmod && pmod.tax) || 0) * (T.bonus === undefined ? 0.1 : T.bonus));
 
       /* 资源建筑：tiers 取**原始档位**（干跑里工地完工会改它），
        * 保留座数取 KEEP 原值（null=全开），每一步现裁。 */
@@ -408,7 +411,8 @@
           else if (key === 'grain' || key === 'fish') food += kept;
           /* 抽税是省内→中央的内部划账，对国家净额是零，只影响存在哪边；
            * 为了"下一回合省库还装不装得下"照扣。 */
-          if (take >= AO.TAX.min && K.stock >= pr.taxN) K.stock -= pr.taxN;
+          var cutT = Math.floor(take * pr.share + 1e-9);
+          if (cutT > 0 && K.stock >= cutT) K.stock -= cutT;
           if (K.left <= 0) {
             if ((K.def.cool || 0) > 0) K.cool = K.def.cool;
             else K.gone = true;

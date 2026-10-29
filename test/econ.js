@@ -477,10 +477,22 @@ const URL = 'file://' + path.join(root, 'index.html').replace(/\\/g, '/');
     const cen = window.AO.resCentral[o];
     const g0 = cen[key] || 0;
     window.AO.resDebug.settleTurn();
-    return { key: key, delta: (cen[key] || 0) - g0, tax: window.AO.TAX.take, fx: window.AO.resMODS(o).tax };
+    /* v18.12：抽税改成按 share 比例分成（原来是"每笔固定抽 1 单位"，
+     * 产出 2 抽 1 = 50%、产出 12 抽 1 = 8%，是累退的）。
+     * 断言改成**账实相符**：中央这一种的进项 = 全国各省 d.tax[key] 之和。 */
+    const D2 = window.AO.resDebug;
+    let sum = 0;
+    for (const pid of (D2.country(o).provinces || [])) {
+      const f = D2.flow[pid] && D2.flow[pid].d && D2.flow[pid].d.tax && D2.flow[pid].d.tax[key];
+      if (f) sum += f;
+    }
+    return { key: key, delta: (cen[key] || 0) - g0, sum: sum,
+      share: window.AO.TAX.share, bonus: window.AO.TAX.bonus };
   }, owner);
-  ck('「复式账簿」让每笔抽税多抽 1', taxEff.delta >= taxEff.tax + taxEff.fx,
-    taxEff.key + ' 中央 +' + taxEff.delta + '（基础 ' + taxEff.tax + ' + 账簿 ' + taxEff.fx + '）');
+  ck('生产抽税按 share 分成，且中央进项 = 各省上缴之和',
+    taxEff.share > 0 && taxEff.share < 1 && taxEff.delta === taxEff.sum && taxEff.delta >= 1,
+    taxEff.key + ' 中央 +' + taxEff.delta + ' · 各省合计 ' + taxEff.sum +
+    '（share ' + taxEff.share + '）');
 
   /* 队列：入队不扣费；队头开研才扣；扣不起停摆 */
   const Q = await ev((o) => {

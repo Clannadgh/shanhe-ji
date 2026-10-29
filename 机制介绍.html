@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>山河纪 · 机制介绍</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23b0492f'/%3E%3Ctext x='32' y='46' font-size='40' text-anchor='middle' fill='%23fdf8ee' font-family='serif'%3E%E5%B1%B1%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --ink:#24292e; --ink2:#5a6570; --ink3:#8a939c;
+  --line:rgba(20,26,32,.10); --line2:rgba(20,26,32,.16);
+  --card:#fcfaf6; --card2:#f6f1e6; --paper:#fdf8ee;
+  --accent:#b0492f; --accent-soft:#f3ded7;
+  --sea:#3d6883; --sea-deep:#2f516d;
+  --gold:#c08a2d; --gold-soft:#f4e8cf;
+  --green:#5b7a46; --green-soft:#e8eedd;
+  --blue:#3d6883; --blue-soft:#dee9f0;
+  --purple:#6e5a86; --purple-soft:#ebe5f2;
+  --red:#a8402e; --red-soft:#f4ded8;
+  --serif:"Songti SC","STZhongsong","SimSun",Georgia,serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--sea);
+  font:14px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:60px;
+}
+.wrap{max-width:1060px;margin:0 auto;padding:0 20px}
+
+/* ============ 顶部导航 ============ */
+#topnav{
+  position:sticky;top:0;z-index:50;
+  background:rgba(36,41,46,.94);backdrop-filter:blur(6px);
+  box-shadow:0 2px 10px rgba(0,0,0,.25);
+}
+#topnav .wrap{display:flex;align-items:center;gap:6px;height:52px}
+#brand{display:flex;align-items:center;gap:9px;margin-right:auto;user-select:none}
+#brand .bicon{width:28px;height:28px;border-radius:8px;background:var(--accent);color:var(--paper);
+  font-family:var(--serif);font-size:17px;font-weight:700;display:flex;align-items:center;justify-content:center}
+#brand b{color:var(--paper);font-size:15px;letter-spacing:1px}
+#brand span{color:#9aa5ae;font-size:11.5px}
+#topnav a.nl{color:#c6cdd3;text-decoration:none;font-size:13px;padding:5px 11px;border-radius:8px;font-weight:600}
+#topnav a.nl:hover{color:#fff;background:rgba(255,255,255,.10)}
+#topnav a.nl.on{color:#fff;background:var(--accent)}
+#topnav a.play{color:var(--paper);background:var(--accent);margin-left:4px}
+#topnav a.play:hover{background:#c2543a}
+
+/* ============ 首屏 ============ */
+.hero{padding:56px 0 40px}
+.hero .wrap{display:flex;flex-direction:column;align-items:center;text-align:center}
+.hero .kicker{
+  display:inline-flex;align-items:center;gap:8px;background:rgba(253,248,238,.14);
+  color:#e8e2d2;border:1px solid rgba(253,248,238,.25);border-radius:999px;
+  padding:4px 16px;font-size:12.5px;letter-spacing:2px;margin-bottom:22px}
+.hero h1{
+  font-family:var(--serif);color:var(--paper);font-size:52px;line-height:1.25;
+  letter-spacing:6px;font-weight:700;text-shadow:0 3px 0 rgba(0,0,0,.18)}
+.hero h1 em{font-style:normal;color:#f0c86a}
+.hero .sub{color:rgba(253,248,238,.85);font-size:16px;margin:16px 0 8px;max-width:640px}
+.hero .sub2{color:rgba(253,248,238,.55);font-size:13px;margin-bottom:30px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.chip{
+  background:var(--card);border-radius:12px;padding:10px 18px;min-width:118px;
+  box-shadow:0 3px 0 rgba(0,0,0,.18)}
+.chip b{display:block;font-size:20px;font-variant-numeric:tabular-nums;line-height:1.2}
+.chip span{font-size:11.5px;color:var(--ink2)}
+
+/* ============ 通用节 ============ */
+section.block{padding:34px 0 6px}
+.sechead{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+.sechead h2{
+  font-family:var(--serif);font-size:27px;letter-spacing:2px;color:var(--paper);
+  padding-left:14px;border-left:6px solid var(--accent);line-height:1.3;text-shadow:0 2px 0 rgba(0,0,0,.15)}
+.sechead .en{color:rgba(253,248,238,.5);font-size:12px;letter-spacing:1px}
+.secintro{color:rgba(253,248,238,.78);font-size:13.5px;margin:0 0 18px 20px;max-width:760px}
+
+/* ============ 一回合流程 ============ */
+.pipe{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--card);
+  border-radius:16px;padding:20px 22px;box-shadow:0 4px 0 rgba(0,0,0,.18)}
+.pipe .step{
+  display:flex;align-items:center;gap:7px;background:var(--card2);
+  border:1px solid var(--line2);border-radius:10px;padding:6px 12px;font-size:13px;font-weight:600}
+.pipe .step i{font-style:normal;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.pipe .step.hot{background:var(--accent-soft);border-color:rgba(176,73,47,.35)}
+.pipe .step.hot i{color:var(--accent)}
+.pipe .step.ghost{background:transparent;border-style:dashed;color:var(--ink2)}
+.pipe .arr{color:var(--ink3);font-size:13px;user-select:none}
+.pipe-note{color:rgba(253,248,238,.6);font-size:12.5px;margin:12px 2px 0}
+
+/* ============ 上手路径 ============ */
+.quick{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+@media(max-width:900px){.quick{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.quick{grid-template-columns:1fr}}
+.qcard{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 3px 0 rgba(0,0,0,.18);position:relative}
+.qcard .qn{font-family:var(--serif);font-size:26px;color:var(--accent);font-weight:700;line-height:1}
+.qcard b{display:block;font-size:13.5px;margin:8px 0 4px}
+.qcard p{font-size:12.3px;color:var(--ink2);line-height:1.65}
+
+/* ============ 机制卡片 ============ */
+.mechgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+@media(max-width:760px){.mechgrid{grid-template-columns:1fr}}
+.mcard{
+  background:var(--card);border-radius:16px;padding:20px 22px 18px;
+  box-shadow:0 4px 0 rgba(0,0,0,.18);display:flex;flex-direction:column;gap:10px;
+  border-top:5px solid var(--accent)}
+.mcard .mhead{display:flex;align-items:center;gap:12px}
+.mcard .micon{width:46px;height:46px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center}
+.mcard h3{font-size:17px;letter-spacing:.5px}
+.mcard .tag{font-size:11px;color:var(--ink3);margin-top:1px}
+.mcard ul{list-style:none;display:flex;flex-direction:column;gap:7px}
+.mcard li{font-size:13.2px;color:#3a424a;padding-left:16px;position:relative;line-height:1.65}
+.mcard li::before{content:"";position:absolute;left:2px;top:9px;width:6px;height:6px;border-radius:2px;background:var(--accent);opacity:.75}
+.mcard li b{color:var(--ink)}
+.mcard li .n{font-variant-numeric:tabular-nums;font-weight:650;color:var(--accent)}
+.mcard .more{margin-top:auto;padding-top:8px;border-top:1px dashed var(--line2);font-size:12px;color:var(--ink3)}
+
+/* 卡片主题色 */
+.mcard.c-sea{border-top-color:var(--sea)} .mcard.c-sea .micon{background:var(--blue-soft)}
+.mcard.c-gold{border-top-color:var(--gold)} .mcard.c-gold .micon{background:var(--gold-soft)}
+.mcard.c-green{border-top-color:var(--green)} .mcard.c-green .micon{background:var(--green-soft)}
+.mcard.c-purple{border-top-color:var(--purple)} .mcard.c-purple .micon{background:var(--purple-soft)}
+.mcard.c-red{border-top-color:var(--red)} .mcard.c-red .micon{background:var(--red-soft)}
+.mcard.c-ink{border-top-color:var(--ink)} .mcard.c-ink .micon{background:#e8e6e1}
+
+/* ============ 深览 / AI 大节 ============ */
+.aibox{background:var(--card);border-radius:18px;padding:26px 28px;box-shadow:0 4px 0 rgba(0,0,0,.18);margin-bottom:18px}
+.aibox h3{display:flex;align-items:center;gap:10px;font-size:19px;letter-spacing:.5px;margin-bottom:4px}
+.aibox h3 .no{flex:none;width:30px;height:30px;border-radius:9px;background:var(--ink);color:var(--paper);
+  font-size:14px;display:flex;align-items:center;justify-content:center;font-family:var(--serif)}
+.aibox .asub{color:var(--ink2);font-size:13px;margin-bottom:14px;padding-left:40px}
+.aibox h4{font-size:14.5px;margin:16px 0 8px;color:var(--ink);display:flex;align-items:center;gap:8px}
+.aibox h4::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
+.aibox p{font-size:13.4px;color:#3a424a;margin-bottom:8px}
+.aibox ul{list-style:none;display:flex;flex-direction:column;gap:7px;margin:8px 0}
+.aibox li{font-size:13.3px;color:#3a424a;padding-left:16px;position:relative;line-height:1.7}
+.aibox li::before{content:"";position:absolute;left:2px;top:10px;width:6px;height:6px;border-radius:2px;background:var(--accent);opacity:.75}
+.aibox li b{color:var(--ink)}
+.aibox code{background:var(--card2);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;
+  font:12px/1.5 Consolas,Menlo,monospace;color:var(--accent)}
+
+table.t{width:100%;border-collapse:collapse;margin:10px 0 14px;font-size:13px;background:var(--paper);border-radius:10px;overflow:hidden}
+table.t th{background:var(--ink);color:var(--paper);font-weight:600;padding:8px 12px;text-align:left;font-size:12.5px;letter-spacing:.5px}
+table.t td{padding:8px 12px;border-top:1px solid var(--line);vertical-align:top;color:#3a424a;line-height:1.6}
+table.t tr:nth-child(even) td{background:rgba(246,241,230,.55)}
+table.t td b{color:var(--ink)}
+table.t td .n, .n{font-variant-numeric:tabular-nums;font-weight:650;color:var(--accent)}
+.tagline{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 13px;font-size:12.5px;font-weight:600;border:1px solid transparent}
+.pill.econ{background:var(--green-soft);color:var(--green);border-color:rgba(91,122,70,.3)}
+.pill.bal{background:var(--blue-soft);color:var(--sea);border-color:rgba(61,104,131,.3)}
+.pill.mil{background:var(--red-soft);color:var(--red);border-color:rgba(168,64,46,.3)}
+.pill.gold{background:var(--gold-soft);color:var(--gold);border-color:rgba(192,138,45,.3)}
+.pill.ink{background:#e8e6e1;color:var(--ink);border-color:var(--line2)}
+.formula{
+  background:var(--ink);color:#e8e2d2;border-radius:12px;padding:14px 18px;margin:10px 0 14px;
+  font:13px/1.9 Consolas,Menlo,monospace;overflow-x:auto}
+.formula em{font-style:normal;color:#f0c86a}
+.formula .cm{color:#7d8891}
+.callout{border-left:4px solid var(--gold);background:var(--gold-soft);border-radius:0 10px 10px 0;
+  padding:10px 16px;font-size:13px;color:#4a3f22;margin:10px 0}
+.callout.red{border-left-color:var(--red);background:var(--red-soft);color:#54281f}
+.callout.blue{border-left-color:var(--sea);background:var(--blue-soft);color:#28405a}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+@media(max-width:760px){.cols2{grid-template-columns:1fr}}
+
+/* ============ 技术与测试 ============ */
+.techgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+@media(max-width:860px){.techgrid{grid-template-columns:repeat(2,1fr)}}
+.tcard{background:var(--card);border-radius:14px;padding:16px 18px;box-shadow:0 3px 0 rgba(0,0,0,.18);text-align:center}
+.tcard b{display:block;font-size:24px;font-family:var(--serif);color:var(--accent);font-variant-numeric:tabular-nums}
+.tcard span{font-size:12px;color:var(--ink2)}
+.doclist{background:var(--card);border-radius:14px;padding:18px 22px;box-shadow:0 3px 0 rgba(0,0,0,.18)}
+.doclist h4{font-size:14px;margin-bottom:10px}
+.doclist ol{list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:6px 26px}
+@media(max-width:760px){.doclist ol{grid-template-columns:1fr}}
+.doclist a{color:var(--sea);text-decoration:none;font-size:13px}
+.doclist a:hover{text-decoration:underline;color:var(--accent)}
+.doclist li{font-size:13px;color:#3a424a}
+
+footer{margin-top:44px;text-align:center;color:rgba(253,248,238,.55);font-size:12.5px;line-height:2}
+footer .wrap{display:flex;flex-direction:column;align-items:center;gap:4px}
+footer a{color:#f0c86a;text-decoration:none}
+footer a:hover{text-decoration:underline}
+
+@media(max-width:640px){
+  .hero h1{font-size:36px;letter-spacing:3px}
+  #topnav a.nl{padding:5px 7px;font-size:12px}
+  #brand span{display:none}
+}
+</style>
+</head>
+<body>
+
+<nav id="topnav">
+  <div class="wrap">
+    <div id="brand">
+      <div class="bicon">屺</div>
+      <b>山河纪</b><span>机制介绍</span>
+    </div>
+    <a class="nl" href="#overview">总览</a>
+    <a class="nl" href="#loop">一回合</a>
+    <a class="nl" href="#mech">机制</a>
+    <a class="nl" href="#nums">数值</a>
+    <a class="nl" href="#ai">AI 功能</a>
+    <a class="nl" href="#data">技术与测试</a>
+    <a class="nl play" href="index.html">▶ 进游戏</a>
+  </div>
+</nav>
+
+<header class="hero" id="overview">
+  <div class="wrap">
+    <div class="kicker">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 2C7 2 3 6.5 3 12s4 10 9 10 9-4.5 9-10S17 2 12 2z" fill="#f0c86a"/><circle cx="9" cy="10" r="1.6" fill="#b0492f"/><circle cx="15" cy="10" r="1.6" fill="#b0492f"/><path d="M8.5 15q3.5 2.6 7 0" stroke="#b0492f" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+      一个种子 · 一个世界 · 一百年
+    </div>
+    <h1>《山河纪》<em>机制介绍</em></h1>
+    <p class="sub">浏览器里跑的程序化世界生成器 + 回合制大战略沙盒：选一个种子，生成一个世界；选一个国家，活过一百年；最后得到一本只属于你的编年史。</p>
+    <p class="sub2">纯前端 · 零依赖 · 零构建 · 不联网 —— 双击 index.html 就能玩</p>
+    <div class="chips">
+      <div class="chip"><b>80–3000</b><span>省 · 滑杆任调</span></div>
+      <div class="chip"><b>4–140</b><span>国 · 滑杆任调</span></div>
+      <div class="chip"><b>7</b><span>种资源</span></div>
+      <div class="chip"><b>20</b><span>节点科技树</span></div>
+      <div class="chip"><b>63</b><span>个敌国 AI 各有性格</span></div>
+      <div class="chip"><b>1</b><span>位可拜的宰相</span></div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ================= 一回合 ================= -->
+<section class="block" id="loop">
+  <div class="wrap">
+    <div class="sechead"><h2>一回合 = 一年</h2><span class="en">TURN PIPELINE</span></div>
+    <p class="secintro">点一次「下一回合」（或按空格），全世界按固定顺序结算一遍。顺序本身就是设计：先付维护费再谈产出，先吃粮再谈民心，打完仗才轮到情报和事件。</p>
+    <div class="pipe">
+      <span class="step"><i>①</i>维护费</span><span class="arr">→</span>
+      <span class="step"><i>②</i>工地推进</span><span class="arr">→</span>
+      <span class="step"><i>③</i>资源产出</span><span class="arr">→</span>
+      <span class="step"><i>④</i>抽税 · 俸禄</span><span class="arr">→</span>
+      <span class="step"><i>⑤</i>人口吃粮</span><span class="arr">→</span>
+      <span class="step hot"><i>⑥</i>民心</span><span class="arr">→</span>
+      <span class="step"><i>⑦</i>科研 · 产线</span><span class="arr">→</span>
+      <span class="step hot"><i>⑧</i>战争段落</span><span class="arr">→</span>
+      <span class="step"><i>⑨</i>情报署</span><span class="arr">→</span>
+      <span class="step"><i>⑩</i>事件 · 归档</span>
+    </div>
+    <p class="pipe-note">红色两格是玩家盯得最紧的地方：民心决定税能不能收下去，战争段落里行军、会战、围城、占领一次性走完。<br>
+    流水线上还有三个<b>幕后工位</b>（虚线格，每回合跟着跑、但不弹任何提示条）：</p>
+    <div class="pipe">
+      <span class="step ghost"><i>幕</i>官员资历与怨气</span><span class="arr">→</span>
+      <span class="step ghost"><i>幕</i>敌国 AI（内政 · 吏部 · 战争决策）</span><span class="arr">→</span>
+      <span class="step ghost"><i>幕</i>宰相代劳</span><span class="arr">→</span>
+      <span class="step ghost"><i>幕</i>世界纪要按情报档送达</span>
+    </div>
+    <p class="pipe-note">宰相排在敌国 AI 之后 —— 同一回合世界先动、你家宰相后动，他读到的已经是打完之后的版图。其余几十个国家（默认局 63 个对手）同一回合也各走各的这套流程 —— 你挂机，世界自己会动。</p>
+  </div>
+</section>
+
+<!-- ================= 十分钟上手 ================= -->
+<section class="block" id="quick">
+  <div class="wrap">
+    <div class="sechead"><h2>十分钟上手</h2><span class="en">QUICK START</span></div>
+    <div class="quick">
+      <div class="qcard"><div class="qn">壹</div><b>生成世界</b><p>世界工坊里直接点「生成新世界」—— 种子已填好，也可以换一个，或调省份 / 国家 / 陆地三个滑杆。</p></div>
+      <div class="qcard"><div class="qn">贰</div><b>选一个国家</b><p>点右上「开始游戏」。地图立刻按你的眼睛重画：只有自己的领土清晰，其余全是空白羊皮纸。</p></div>
+      <div class="qcard"><div class="qn">叁</div><b>推进几个回合</b><p>连点 5 次「下一回合」→ 打开「治理 → 情报署」调到「常规」→ 对邻国点「定向探测」。</p></div>
+      <div class="qcard"><div class="qn">肆</div><b>看情报变旧</b><p>刚探到的地方从羊皮纸变成「已探」，再等几个回合会慢慢泛黄 —— 地图上那块地方停在了你上次看到的那一天。</p></div>
+      <div class="qcard"><div class="qn">伍</div><b>打一场围城</b><p>省卡里盖一座兵营 → 征兵 → 对邻国宣战 → 下一回合看围城：先磨城墙，再断粮，最后占领。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 机制 ================= -->
+<section class="block" id="mech">
+  <div class="wrap">
+    <div class="sechead"><h2>十三层机制</h2><span class="en">GAME MECHANICS</span></div>
+    <p class="secintro">从地图到史书，每一层都独立可玩、互相咬合。卡片底部标注对应的设计文档 —— 每个数字「为什么是这个数」都有出处。</p>
+    <div class="mechgrid">
+
+      <div class="mcard c-sea">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="#3d6883"/><path d="M6 13q10-6 20 0M6 20q10 6 20 0" stroke="#dee9f0" stroke-width="1.6" fill="none"/><circle cx="16" cy="16" r="12" fill="none" stroke="#2f516d" stroke-width="2"/><circle cx="22" cy="10" r="3" fill="#f0c86a"/></svg></div>
+          <div><h3>世界生成</h3><div class="tag">种子即世界 · 逐字节可复现</div></div>
+        </div>
+        <ul>
+          <li>噪声 + 加权 Voronoi 切分 + 邻接图，约 1 秒生成一张完整世界 —— 默认 <span class="n">2400×1200</span>、<b>约 1100 省、64 国</b></li>
+          <li>世界工坊任调：<b>省份 <span class="n">80–3000</span> · 国家 <span class="n">4–140</span> · 陆地占比 <span class="n">18–60%</span></b> 三个滑杆，外加 标准（1600×800）/ 大（2400×1200）/ 超大（3200×1600）三档尺寸</li>
+          <li>每省有地形、人口、<b>七种资源储量</b>、信仰；河网、海岸、政体、君主、国旗色全部算法生成</li>
+          <li>同一个种子永远得到同一个世界 —— 换浏览器、重开一局都对得上，适合分享与复现问题</li>
+        </ul>
+        <div class="more">详情 → DESIGN.md</div>
+      </div>
+
+      <div class="mcard c-green">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><rect x="4" y="5" width="24" height="18" rx="3" fill="#5b7a46"/><path d="M4 20l7-6 5 4 6-7 6 5" stroke="#fdf8ee" stroke-width="2" fill="none" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.2" fill="#f0c86a"/></svg></div>
+          <div><h3>五种视图 · 地图即界面</h3><div class="tag">能看多少，由你知道多少决定</div></div>
+        </div>
+        <ul>
+          <li>政治 / 地形 / 宗教 / 资源 / <b>迷雾</b>五种视图，外加小地图、省份卡、国家卡</li>
+          <li>所有决策都在图上下：点省出省卡（左栏信息 / 右栏建筑），点国出国卡</li>
+          <li>同一个省，未知时只有一句「尚无测绘资料」；探过但过时给你「上回所见」的建筑与驻军；实时才全透明 —— <b>建造按钮在过时情报上直接禁用</b></li>
+        </ul>
+        <div class="more">详情 → DESIGN-FOG.md</div>
+      </div>
+
+      <div class="mcard c-gold">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="11" cy="11" r="6.5" fill="#c08a2d"/><circle cx="11" cy="11" r="3" fill="#f4e8cf"/><path d="M20 22l4-4 5 5-4 4z" fill="#b0492f"/><path d="M17 15l3 3" stroke="#f4e8cf" stroke-width="2.4"/></svg></div>
+          <div><h3>资源与经济</h3><div class="tag">铁 · 金 · 粮 · 畜 · 木 · 鱼 · 盐</div></div>
+        </div>
+        <ul>
+          <li><b>中央国库 vs 省库两本账</b>：建造先扣本省、再扣中央、再同国调拨（有损耗，驿道科技 −5%）</li>
+          <li>建筑要吃<b>维护费（铁 + 金）</b>，付不起就停产；铁和金是唯二不可再生资源 —— 铁还是唯一的维护货币</li>
+          <li><b>两重人口天花板</b>：粮是短期的，<b>承载力</b>是长期的（地形 + 建筑决定这块地最多住多少人，v18.2）；超载每回合 −1% 人口、民心「人满为患」−2</li>
+          <li>铁矿采空 → <b>深层休眠 48 回合</b>回满复产；枯矿可改建「熔旧坊 / 淘金场」续命，改建走<b>快速通道</b>（不占建造格）</li>
+          <li>市场每省一座、<b>以物易物</b>（任何两种资源互换，5 单位一手）；买货走世界市场 —— 国库不是商店，金沉没不扣中央</li>
+          <li><b>省库上解</b>：省库金 &gt; 80 的部分每回合上解 25%，把散在省里的钱聚回中央（只走金不走铁，玩家与 AI 同一条）</li>
+        </ul>
+        <div class="more">详情 → DESIGN-RESOURCES.md / DESIGN-LIFELINE.md</div>
+      </div>
+
+      <div class="mcard c-ink">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M6 27V9l10-4 10 4v18" fill="#e8e6e1" stroke="#24292e" stroke-width="2"/><path d="M11 27v-8h4v8M18 27V13h4v14" fill="#b0492f"/><path d="M6 27h20" stroke="#24292e" stroke-width="2"/><circle cx="16" cy="8" r="2" fill="#c08a2d"/></svg></div>
+          <div><h3>建造与经营</h3><div class="tag">建造坊加速 · 档位 · 保留座数</div></div>
+        </div>
+        <ul>
+          <li>造价必含金；<b>建造坊</b>是第一座该盖的建筑 —— 什么倒计时都能加速</li>
+          <li>每类建筑有 <b>Lv2 可选升级</b>，独立图标、独立效果</li>
+          <li><b>保留座数</b>三规则：停掉的座不缴维护、不产出、也<b>不失修</b>；同样维护费先保 Lv2；通用设施（学校 / 兵营 / 工厂）只有开 / 停两态 —— 「留半所学校」没有意义</li>
+          <li>维修费两段：先吃本省库存，不够中央拨款</li>
+          <li><b>实时推演</b>：省卡上的未来 8 回合数字不是直线外推，是受控分项 + 残差的干跑估算</li>
+          <li><b>建造参谋</b>给一条目标带：下限 = 口粮余量 +3（最快涨档）或预测净额 ≥ 0；上限 = 顶仓 / 维护占比 &gt; 55% / 矿寿不足 8 回合就停手</li>
+        </ul>
+        <div class="more">详情 → DESIGN-BALANCE.md / DESIGN-FORECAST.md</div>
+      </div>
+
+      <div class="mcard c-purple">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M8 4h13a3 3 0 013 3v21H8z" fill="#ebe5f2" stroke="#6e5a86" stroke-width="2"/><path d="M12 10h9M12 14h9M12 18h6" stroke="#6e5a86" stroke-width="1.8" stroke-linecap="round"/><circle cx="24" cy="23" r="4.5" fill="#c08a2d"/><text x="24" y="25.6" font-size="6.5" text-anchor="middle" fill="#fdf8ee" font-weight="bold">仕</text></svg></div>
+          <div><h3>治理与吏治</h3><div class="tag">三科抽卡 · 官员是活人</div></div>
+        </div>
+        <ul>
+          <li><b>三档税率</b>；民心不是一根数字 —— <b>六项 drivers</b> 逐项可查（税负、信仰、战争、人满为患……悬停见明细）</li>
+          <li><b>开科取士</b>共用人才点，三张池子：<b>文科</b>抽官（7 条普通词条 + 4 条宰相级，宰相级出现率 <span class="n">3.8%</span>）；<b>武科</b>抽将（14 条词条，直接解锁战术：猛将战力 ×1.25、铁壁免夜袭、闪袭跨两省……）；<b>工科</b>抽匠（装备线钥匙）</li>
+          <li>匠人四级：学徒 50 / 巧手 30 / 名师 15 / 宗师 5 —— 产能 +0/10/20/40%，<b>珍品只有宗师出得来</b>；一省没匠人，装备三线直接锁死</li>
+          <li>官员是活人：<b>资历</b>（初任→柱国，每 24 回合掷去留）会升、<b>怨气</b>会积（每回合 +1/12，欠饷 +2；≥90 每回合侵吞省库 1 金）</li>
+          <li>俸禄按资历 ×[1, 1.25, 1.5, 2]；「赏」钮 −15 金压 25 怨；老臣荣休进纪要</li>
+        </ul>
+        <div class="more">详情 → DESIGN-RESOURCES.md §治理</div>
+      </div>
+
+      <div class="mcard c-sea">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="14" cy="14" r="9" fill="#dee9f0" stroke="#3d6883" stroke-width="2"/><path d="M14 8v12M8 14h12M10 10l8 8M18 10l-8 8" stroke="#3d6883" stroke-width="1.4"/><circle cx="14" cy="14" r="2.2" fill="#b0492f"/><path d="M21 21l6 6" stroke="#24292e" stroke-width="3" stroke-linecap="round"/></svg></div>
+          <div><h3>科技树</h3><div class="tag">20 个节点 · 三条枝</div></div>
+        </div>
+        <ul>
+          <li><b>11 资源/全局 + 6 制造工艺 + 3 军工</b>（皮革工艺是免费根，开局已点亮）</li>
+          <li>全局科技直改经营：复式账簿 税 +1 / 标准工料 维护 −25% / 驿道 损耗 −5% / 学徒制 工期 −1；铁犁深耕还把人口承载力 ×1.25</li>
+          <li>学校产科研点与人才点；队列可排、可冲刺；<b>点错不白花钱</b>（只入队不扣费，AI 同规）</li>
+          <li>v19 起科技树上<b>没有一件兵器</b> —— 科技只卖材质：皮革 → 青铜 → 铁器 → 火器 → 精密 → 工业（见下方「数值与公式」节）</li>
+        </ul>
+        <div class="more">详情 → DESIGN-CRAFT.md</div>
+      </div>
+
+      <div class="mcard c-red">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M7 5l9 4v18l-9-4z" fill="#a8402e"/><path d="M25 5l-9 4v18l9-4z" fill="#7d2f21"/><path d="M16 9L7 5" stroke="#f4ded8" stroke-width="1.4"/><circle cx="16" cy="22" r="3.4" fill="#c08a2d"/></svg></div>
+          <div><h3>战争</h3><div class="tag">会战 · 围城 · 城墙 · 傀儡</div></div>
+        </div>
+        <ul>
+          <li>征兵三消耗：<b>人口 1000 / 金 2 / 该代军械 1 件</b>（骑兵另扣战马、炮兵扣炮）；省库存军械不足不可征 —— 成建制门槛</li>
+          <li>命令 × 战术：<b>进攻 / 围城 / 轰击 / 封锁 / 运输</b>等命令，配<b>九种战术</b>（强攻人人会用，其余要将领词条解锁，见数值节）</li>
+          <li><b>两相位自动会战</b>：射击 → 接触；将领、地形、骰子全进算式，战报每个乘数都写出来、可以复算伤亡</li>
+          <li><b>城墙是会战第一条血条</b>：轰击远程磨墙、围城断粮、失修掉防、「营造」词条回血</li>
+          <li><b>不打垮军队也能赢</b>：断粮（战力 ×0.85）、压制（被轰击 ×0.8）、<b>群龙无首</b>（首都陷落：战力 ×0.8 · 税 ×0.7 · 民心 −10）</li>
+          <li>战争结局不止灭国：收成<b>傀儡</b>（每回合上贡中央金收入的两成 · 兵随宗主 · 外交锁 · 可并入 · 会揭竿而起）；简化版海军（封锁 / 运输）</li>
+        </ul>
+        <div class="more">详情 → DESIGN-WAR.md</div>
+      </div>
+
+      <div class="mcard c-ink">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M16 4l9 3v8c0 6-4 10-9 12-5-2-9-6-9-12V7z" fill="#e8e6e1" stroke="#24292e" stroke-width="2"/><path d="M16 8v14M12 12l4 4 4-4" stroke="#b0492f" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg></div>
+          <div><h3>军工与制造</h3><div class="tag">三坊产能 · 订单制 · 装备</div></div>
+        </div>
+        <ul>
+          <li>三坊是<b>产能中心</b>：全国三池 20 条产线，点数自己分 —— 打剑还是打鞋、造投石机还是重炮、四条快船还是一条铁甲舰</li>
+          <li>兵器 = <b>类型 × 材质 × 品质 × 词条</b>；品质四级 凡 / 良 / 上 / 珍，珍品只有宗师出得来</li>
+          <li><b>订单制</b>生产：满速 / 等料 / 溢出三态；两道库存闸 —— 装备够用、兵刃攒够，产线自动归零不白烧铁</li>
+          <li><b>武库统一发配</b>，盔 / 甲 / 靴三槽装备永久叠在部队上；材质换代自动回收旧装备折算存档五项</li>
+          <li>军工科技三件：制式装备（产能 +1/座）· 淬火工艺（品质整体上移一档）· 量产工艺（兵刃线工作量 5→4 点）</li>
+        </ul>
+        <div class="more">详情 → DESIGN-MILL.md / DESIGN-CRAFT.md</div>
+      </div>
+
+      <div class="mcard c-gold">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M17 3l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z" fill="#c08a2d"/><path d="M23 22l2 7M9 22l-2 7" stroke="#f4e8cf" stroke-width="2.4" stroke-linecap="round"/><path d="M7 27h18" stroke="#b0492f" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+          <div><h3>事件与信仰</h3><div class="tag">十条事件池 · 国教两档 · 传教</div></div>
+        </div>
+        <ul>
+          <li>事件池十条随机触发：可以<b>自动选结果，也可以亲自处置</b>（小卡弹窗）；带冷却 / 一次性 / 产量 buff 状态</li>
+          <li>信仰是民心的一项 driver；<b>国教两档</b>：强制（异信仰省幸福 −6，可派传教）/ 宽容（−2，不能传教）</li>
+          <li><b>传教</b>：20 金 · 3 回合一省；未整合省不能传教、不产科研</li>
+          <li>事件效果走白名单执行器，不会出现失控脚本</li>
+        </ul>
+        <div class="more">详情 → js/16-events.js</div>
+      </div>
+
+      <div class="mcard c-sea">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M4 22a8 8 0 0114-5 6 6 0 018 5z" fill="#3d6883"/><path d="M4 22h24" stroke="#24292e" stroke-width="2"/><path d="M10 16q3-4 8-4t8 4" stroke="#dee9f0" stroke-width="1.8" fill="none" stroke-dasharray="3 3"/><circle cx="21" cy="9" r="3.2" fill="#f0c86a"/><path d="M18 9h-3M27 9h3M21 6V3M23.2 6.8l2-2M18.8 6.8l-2-2" stroke="#f0c86a" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <div><h3>战争迷雾与情报署</h3><div class="tag">情报会过时 · 预算即反谍</div></div>
+        </div>
+        <ul>
+          <li>地图三态：<b>未测绘羊皮纸 / 已探旧情报（泛黄做旧）/ 实时</b> —— 情报越旧越黄</li>
+          <li>情报署预算三档（无 / 常规 / 重金），<b>预算同时是反谍等级</b>：你花钱看别人，也花钱防别人看你</li>
+          <li>定向探测：花 10 金派密探看指定邻省；密探被抓会掉关系、双方纪要都记一笔</li>
+          <li><b>世界消息也走情报渠道</b>：别国的宣战 / 灭国 / 都城易手按情报档延迟 5~8 / 3~4 / 1 回合送达，低档还有 15% 走样风闻，实讯会追一条更正 —— 每回合最多放行 2 条防刷屏</li>
+        </ul>
+        <div class="more">详情 → DESIGN-FOG.md</div>
+      </div>
+
+      <div class="mcard c-green">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M12 5a5 5 0 015 5c3 0 5 2 5 5s-2 5-5 5H9a5 5 0 01-1-9.9A5 5 0 0112 5z" fill="#e8eedd" stroke="#5b7a46" stroke-width="2"/><path d="M9 24l-2 4M16 24l-2 4M23 24l-2 4" stroke="#5b7a46" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div><h3>外交</h3><div class="tag">关系值 · 条约 · 谈判桌</div></div>
+        </div>
+        <ul>
+          <li>与每国一个<b>关系值</b>：宣战、边境、贸易、密探被抓都会推它，每回合向 0 缓释</li>
+          <li>可签<b>同盟 / 互不侵犯</b>；停战后有 20 回合冷却</li>
+          <li>打仗攒<b>战争分</b>，端上谈判桌议和：要价、赔款、条款皆可谈</li>
+          <li><b>跨国贸易</b>：资源见底时从外国货源买货（AI 也会买，铁也在交易清单里）</li>
+        </ul>
+        <div class="more">详情 → DESIGN-WAR.md §外交和谈</div>
+      </div>
+
+      <div class="mcard c-purple">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M16 5C10 5 6 9 6 14c0 4 3 7 6 8v4h8v-4c3-1 6-4 6-8 0-5-4-9-10-9z" fill="#ebe5f2" stroke="#6e5a86" stroke-width="2"/><path d="M16 5v6M11 13l5-2 5 2" stroke="#b0492f" stroke-width="2" fill="none"/><path d="M12 26h8" stroke="#6e5a86" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div><h3>安定与整合</h3><div class="tag">叛乱链 · 占领整合 · 安抚金</div></div>
+        </div>
+        <ul>
+          <li>每省一个<b>不安值</b>（0~100），六项驱动：苛税、占领、战乱、信仰冲突……</li>
+          <li>不安爆表有<b>三种叛乱结果</b>，可以武力平定、可以招安</li>
+          <li>新占的省走<b>整合链</b>（0~100）：未整合不产科研、不能传教；发安抚金加速归心，整合完才算真正的国土</li>
+        </ul>
+        <div class="more">详情 → DESIGN-WAR.md §安定与整合</div>
+      </div>
+
+      <div class="mcard c-red">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M7 28V7a2 2 0 012-2h10a2 2 0 012 2v21zM7 28h18" fill="#f4ded8" stroke="#a8402e" stroke-width="2"/><path d="M11 10h7M11 14h7M11 18h4" stroke="#a8402e" stroke-width="1.8" stroke-linecap="round"/><path d="M23 12l2 2-2 2M26 12l-2 2 2 2" stroke="#c08a2d" stroke-width="1.6" fill="none"/></svg></div>
+          <div><h3>编年史</h3><div class="tag">一局一本 · 只属于你</div></div>
+        </div>
+        <ul>
+          <li>每回合归档、年终出年表；<b>统一 / 灭亡时定稿成史书并授称号</b></li>
+          <li>年表里不止你的国：<b>「别处的历史」按事件年份归位</b> —— 但那是史官事后修订、带着时滞与风闻的那一版</li>
+        </ul>
+        <div class="more">详情 → js/17-chrono.js</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ================= 数值与公式 ================= -->
+<section class="block" id="nums">
+  <div class="wrap">
+    <div class="sechead"><h2>数值与公式</h2><span class="en">NUMBERS THAT MATTER</span></div>
+    <p class="secintro">把最容易问「到底怎么算的」的五组机制摊开。全部来自 js/15-resources.js 的定义区与设计文档，战报里的每个乘数都可以照着复算。</p>
+
+    <!-- 会战 -->
+    <div class="aibox">
+      <h3><span class="no">甲</span>会战怎么算</h3>
+      <div class="asub">两相位自动会战（AO.BATTLE）—— 战报把每个乘数都写出来</div>
+      <div class="formula">每方战力 = Σ(兵数/1000 × 兵种战力) × 将领 × 地形(守方)<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; × 压制(<em>被轰击 0.8</em>) × 断粮(<em>0.85</em>) × 群龙无首(<em>0.8</em>) × 骰子(<em>0.85~1.15</em>)<br>
+      合围：同省同国 ≥ 2 军 → 各 <em>×1.15</em></div>
+      <ul>
+        <li><b>两相位</b>：先射击（双方射程 &gt; 0 的战力先互杀伤）→ 再接触（余部互殴，炮兵接触段 ×0.5）</li>
+        <li>每相位损失率 = <code>0.26 × 我方战力 / 双方战力之和</code>，摊到各军头上</li>
+        <li>判定：战后兵力 &lt; 对方 70% 判负，僵持时兵多的算赢；败方退向最近己方省，<b>无路可退则全歼</b></li>
+        <li>阵亡兵<b>从人口里扣</b>；装备按「每死 1000 人损 1 件」从驻省库存扣</li>
+      </ul>
+      <h4>城墙数值（会战第一条血条）</h4>
+      <table class="t">
+        <tr><th>等级</th><th>耐久</th><th>造价</th><th>关键数</th></tr>
+        <tr><td><b>土木</b> Lv1</td><td class="n">30</td><td>18 木 10 金</td><td rowspan="3">满耐久守方战力 ×1.25 · 1 点城防 ≈ 100 人份伤亡<br>轰击削墙 = 攻城值 × 兵数/1000 × 0.5 · 破城锤 = 攻城值合计 ×2<br>无战事 +2/回合 · 维护欠费 −5/回合 · 「营造」词条 +8/回合、守城胜利回充 15%</td></tr>
+        <tr><td><b>砖石</b> Lv2</td><td class="n">60</td><td>36 木 20 金</td></tr>
+        <tr><td><b>棱堡</b> Lv3</td><td class="n">100</td><td>72 木 40 金</td></tr>
+      </table>
+      <p style="font-size:12.5px;color:var(--ink2)">每国首都开局自动砌到 Lv1。耐久上限只有 30~100 而一场会战伤亡几百上千 —— 所以要有「1 点城防 ≈ 100 人」这个换算：Lv1 大约顶一场半，既不是纸糊的，也不至于让没有攻城器械的军队永远啃不动。</p>
+    </div>
+
+    <!-- 九战术 -->
+    <div class="aibox">
+      <h3><span class="no">乙</span>九种战术</h3>
+      <div class="asub">「强攻」人人可用，其余八种全靠将领词条解锁 —— 武科抽到谁，决定你会打什么仗</div>
+      <table class="t">
+        <tr><th>战术</th><th>需要词条</th><th>效果</th></tr>
+        <tr><td><b>强攻</b></td><td>—（人人可用）</td><td>正面会战，没有额外加成 —— 没有对应词条时的唯一选择</td></tr>
+        <tr><td><b>闪袭</b></td><td>闪袭 / 急行军</td><td>一回合跨两省，可直扑敌首都，首战先手 +10%</td></tr>
+        <tr><td><b>围城</b></td><td>围城</td><td>围而不打：敌省产出归零，守军吃存粮，粮尽每回合 −10% —— <b>完全无视城墙</b></td></tr>
+        <tr><td><b>铁壁</b></td><td>铁壁</td><td>防御 ×1.25，免疫一次夜袭</td></tr>
+        <tr><td><b>夜袭</b></td><td>夜战</td><td>跳过守方射击相位</td></tr>
+        <tr><td><b>劫掠</b></td><td>游骑</td><td>抢 30% 存粮与金，该省民心 −15</td></tr>
+        <tr><td><b>设伏</b></td><td>设伏（只防）</td><td>山地 / 森林防御 ×1.3</td></tr>
+        <tr><td><b>坚壁清野</b></td><td>坚壁（只防）</td><td>敌军进入前把 70% 存粮运往内陆省</td></tr>
+        <tr><td><b>合围</b></td><td>—（自动判定）</td><td>同省同国 ≥2 军，各 +15%</td></tr>
+      </table>
+      <div class="callout">武科池里还有两条特殊词条：<b>练兵使</b>（本省征兵快 1 回合，驻军每回合自动补员 2%）、<b>营造</b>（驻防省城墙回复 +8/回合）。也有坑：<b>贪墨</b>将战力 +10% 但驻省民心 −6，抽到是喜是忧自己掂量。金边词条「治世军神」（权重 3，全场最稀）闪袭 + 围城双解锁、战力 +15%。</div>
+    </div>
+
+    <!-- 工艺链 -->
+    <div class="aibox">
+      <h3><span class="no">丙</span>制造工艺链</h3>
+      <div class="asub">科技只卖材质，不卖兵器名 —— 六档工艺一路点上去，兵种三维跟着换装</div>
+      <table class="t">
+        <tr><th>工艺</th><th>研究点 · 工期</th><th>材质乘数</th><th>顺带解锁</th></tr>
+        <tr><td><b>皮革工艺</b></td><td>免费根（开局点亮）</td><td class="n">皮 ×1.00</td><td>投石机 · 桨帆船</td></tr>
+        <tr><td><b>青铜工艺</b></td><td class="n">20 · 2 回合</td><td class="n">青铜 ×1.15</td><td>青铜炮 · 盖伦帆船</td></tr>
+        <tr><td><b>铁器工艺</b></td><td class="n">30 · 3 回合</td><td class="n">铁 ×1.30</td><td>野战炮 · 风帆战列</td></tr>
+        <tr><td><b>火器工艺</b></td><td class="n">45 · 3 回合</td><td class="n">火器 ×1.55</td><td>重炮（弓显示为「铳」）</td></tr>
+        <tr><td><b>精密工艺</b></td><td class="n">60 · 4 回合</td><td>材质不升</td><td><b>全兵种三维 +15%</b></td></tr>
+        <tr><td><b>工业工艺</b></td><td class="n">80 · 4 回合</td><td>材质不升</td><td><b>再 +15%</b>（加算合计 +30%）· 铁甲舰</td></tr>
+      </table>
+      <ul>
+        <li>兵器 = <b>类型（刀/剑/矛/斧/弓）× 材质 × 品质 × 词条</b>；品质凡 / 良 / 上 / 珍四级，宗师的珍品份额 20%，学徒为 0</li>
+        <li>品质 roll 表随匠人等级整体上移，「淬火工艺」再上移一档 —— 同一个工匠，科技前后出的货不一样</li>
+        <li>AI 只追材质不玩花活：默认刀 + 驽马，但会跟着工艺链换代自动换装</li>
+      </ul>
+    </div>
+
+    <!-- 经济续命 -->
+    <div class="aibox">
+      <h3><span class="no">丁</span>经济续命五通道</h3>
+      <div class="asub">铁和金是唯二不可再生的资源，而铁还是唯一的维护货币 —— 缺了怎么办，五条路都通</div>
+      <ul>
+        <li><b>淘金场</b>：枯金矿改建，<b>1 金 = 2 木</b>（没木不出金、不倒扣），每省封顶 2 座 —— 伐木场从此有了新去处</li>
+        <li><b>熔旧坊</b>：枯铁矿改建，教育 ≥ 15、每省 2 座；休眠中的矿也能改，不用干等 48 回合</li>
+        <li><b>改建快速通道</b>（v18.1b）：改建<b>不占每回合的建造格</b>、每回合 1 座、先铁后金 —— 改建不是「盖一座新建筑」，是「把睡着的矿脉换个活法」，不该跟学校排队</li>
+        <li><b>市场以物易物</b>：任何两种资源互换，5 单位一手；买货走世界市场（供给无限、金沉没、不扣中央），AI 比价后也会买</li>
+        <li><b>省库上解</b>：省库金 &gt; 80 的部分每回合搬 25% 给中央（150 → 搬 17 → 剩 133），只走金不走铁 —— 铁的家在矿脉和熔旧坊</li>
+      </ul>
+      <div class="callout blue">AI 侧同样有反应：库存破线就<b>找未采矿脉开新矿</b>（战时不开）；有市场就<b>卖余货</b> —— 卖粮 / 鱼 / 木 / 盐 / 铁 / 马，安全线是粮 / 鱼 &gt; 口粮 ×4 + 30、马 &gt; 20、铁与其余 &gt; 40，只出手余量不卖家底。</div>
+    </div>
+
+    <!-- 人口承载力 -->
+    <div class="aibox">
+      <h3><span class="no">戊</span>人口承载力（POPCAP）</h3>
+      <div class="asub">地能养多少人，人就在哪里停 —— 粮是短期天花板，承载力是长期天花板</div>
+      <div class="formula">承载力 = 地形基数 ×（首都省 <em>×1.5</em>）+ Σ建筑加成&nbsp;&nbsp;<span class="cm">// 「铁犁深耕」科技再 ×1.25</span><br>
+      超载：人口每回合 <em>−1%</em>（往承载力回落）· 民心 driver「人满为患」<em>−2</em></div>
+      <p><b>地形基数（万人/省）</b>：平原 40 · 海岸 35 · 草原 30 · 岛屿 28 · 森林 20 · 丘陵 18 · 山地 12 · 沼泽 10 · 沙漠 8 · 冻土 6</p>
+      <p><b>建筑加成（万人/座）</b>：农场 Lv1 +10 · Lv2 +20 · 渔港 +8 · 粮仓 +6 · 驯马场 +4</p>
+      <div class="callout">岛屿 28 是「海岸 35 打八折」：岛小、耕地碎，但也靠海吃海，不该比山地（12）还低 —— 一个连任务书都没列的地形，给了一条讲得出道理的数。</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= AI ================= -->
+<section class="block" id="ai">
+  <div class="wrap">
+    <div class="sechead"><h2>AI 都有什么功能</h2><span class="en">THE AI STACK</span></div>
+    <p class="secintro">《山河纪》的 AI 不是调参数陪玩的光杆野蛮人：地图上所有国家共用一套「决策核心」，各自带着性格、怪癖、账本和纪律过日子、打仗、治官、造装备；玩家自己还能拜一位宰相，把同一套脑子雇回家。敌国 AI 的三条历史约束 —— 不动经济 / 不主动进攻 / 敌国之间不打 —— 已经<b style="color:#f0c86a">全部解除</b>。</p>
+
+    <!-- AI 0：总纲 -->
+    <div class="aibox">
+      <h3><span class="no">〇</span>一套决策核心，两拨用户</h3>
+      <div class="asub">敌国 AI 与你的宰相跑的是同一段代码 —— AI 与玩家不可能各有一套账</div>
+      <div class="formula">aiDecide(owner, perms, opt)<br>&nbsp;&nbsp;perms = { build, research, tax, officials }&nbsp;&nbsp;<span class="cm">// 四布尔：不许可的格子直接跳过</span><br>&nbsp;&nbsp;opt&nbsp;&nbsp;&nbsp;= { slots, taxMul, smartTax, forceMax, noMaxTax }</div>
+      <ul>
+        <li><b>AI 国</b>：全权限调用，行为与设计逐格一致；<b>玩家宰相</b>：同一段代码，权限由等级与开关决定</li>
+        <li>护栏（中央金够不够、同省同 kind 只建一座、教育门槛、矿脉不枯）全在原函数里 —— <b>AI 走的和玩家点的是同一道闸门</b>，AI 不写新的战斗或建造代码</li>
+      </ul>
+      <div class="callout">三条纪律：① <b>只在游戏模式跑</b>（世界工坊里涂色时不该有国家趁机动土）；② <b>只看自己的省</b>（别国数据一个不读，迷雾框架下那是偷看）；③ <b>一律静默</b>（不弹提示条、不推纪要 —— 几十个国一回合上百个动作，件件都报纪要就废了）。</div>
+    </div>
+
+    <!-- AI 1：内政 -->
+    <div class="aibox">
+      <h3><span class="no">一</span>敌国内政 AI —— 会过日子</h3>
+      <div class="asub">学校一座座盖起来、科研条在涨、官员一个个派下去、税率跟着国情自己调</div>
+
+      <h4>三型性格 + 政体底色</h4>
+      <div class="tagline">
+        <span class="pill econ">经营 econ · 权重 30</span>
+        <span class="pill bal">均衡 balanced · 权重 50</span>
+        <span class="pill mil">军国 mil · 权重 20</span>
+      </div>
+      <table class="t">
+        <tr><th>性格</th><th>建造顺序（底表）</th><th>调税风格</th></tr>
+        <tr><td><b>经营</b></td><td>学校（全国 &lt; 省数/3）→ 市场 → 建造坊 → 粮仓 → 大学 → 工厂 → 军械坊</td><td>民心 &lt;45 降档；<b>永不横征暴敛</b></td></tr>
+        <tr><td><b>均衡</b></td><td>学校 → 市场 → 建造坊 → 兵营（<b>交战中提到最前</b>）→ 工厂 → 军械坊</td><td>同经营，阈值 × 手松手紧</td></tr>
+        <tr><td><b>军国</b></td><td>兵营 → 军械坊 → 工厂 → 学校 → 市场</td><td>民心 &lt;35 保命降档；缺钱时<b>拉满横征</b></td></tr>
+      </table>
+      <ul>
+        <li>政体会加权性格：王国 35% 出军国、共和 48% 出经营 —— 「军事政体更好战」是<b>规则保证</b>，不是运气</li>
+        <li>每国再掷 <b>4 个怪癖系数</b>（营造 / 税赋 / 科研 / 好战，各 0.8~1.2）：手松的国加税晚、偏执的国硬啃贵的科技 —— 同性格的国家也各有各的活法（bench 用两条方差线 σ&gt;0 验收）</li>
+        <li>性格和怪癖由「种子 + 国家 id」哈希掷定：<b>同一个国永远同一个性格</b>，换浏览器重开一局都对得上</li>
+      </ul>
+
+      <h4>每回合两个动作格</h4>
+      <ul>
+        <li><b>格一：建造</b>（每回合最多 1 座）。三道硬门：中央金 ≥ 造价+5（不抽干国库）、同省同 kind 只一座、门槛矿脉与玩家同规。选省「库存最富 / 人口最多优先」</li>
+        <li><b>格二：研究 → 调税 → 人事</b>，按需取第一个可执行的 —— 建造几乎永远可执行，不给研究调税留格的话国家就成了只会砌墙的僵尸</li>
+        <li><b>研究</b>：从「没研完 / 前置满足 / 买得起」的池子里按科研偏执掷最便宜的两条；只入队不扣费，「点错不白花钱」对 AI 同样成立</li>
+        <li><b>人事</b>：撤贪墨 → 派官 → 开科。贪墨官上任 3 回合内每回合 30% 概率自己认错撤换；文官派去人口最多的无官省；武科抽出来的将必须用上；开科要攒 1.5 倍人才点</li>
+      </ul>
+
+      <h4>不占动作格的幕后活（挂在每回合的治国流程边上）</h4>
+      <ul>
+        <li><b>枯矿改建快速通道</b>：独立结算、不占建造格，每回合 1 座、先铁后金；两道额外的钱闸 —— 门槛比普通建造多垫 30 金（不然改建会把下回合学校 / 市场的预算吃光），以及<b>扫盲闸</b>（学校数量不达标的国一律不动土：实测没有这道闸，30 回合里 AI 的学校从 7 座掉到 4 座、第一位官员永远考不出来）</li>
+        <li><b>缺矿开矿</b>：铁 / 金库存破线就找未采矿脉开新矿，储量大的优先（这个吃建造格，饿着肚子先找吃的，比按表盖学校要紧）；战时不开</li>
+        <li><b>卖余货</b>：有市场就出手余粮余铁，安全线内绝不卖 —— 每省每回合 1 手、每国 2 手</li>
+      </ul>
+      <div class="callout blue">挂机 30 回合实测：市场 0→61 座、粮仓 0→8、科研点 0→5195、官员 0→49；枯竭矿的省自发改建熔旧坊、教育够了自己盖大学 —— <b>玩家不需要做任何事，只看得到世界在动</b>。</div>
+    </div>
+
+    <!-- AI 2：战争 -->
+    <div class="aibox">
+      <h3><span class="no">二</span>AI 战争 —— 会打仗，也会认怂</h3>
+      <div class="asub">宣战 / 进攻 / 回撤 / 求和 / 贸易，每国每回合按固定顺序走一遍</div>
+      <div class="formula">每回合六步：<em>军费护栏 → 回撤 → 求和 → 进攻 → 宣战 → 贸易</em><br><span class="cm">// 护栏排第一：先算清自己养不养得起兵，再决定打不打</span><br><span class="cm">// 宣战排最后：这回合宣的战，下回合才出兵，不然像瞬移</span></div>
+
+      <h4>宣战决策（每 6 回合评估一次，按国错峰）</h4>
+      <div class="formula">宣战分 = 好战怪癖 × 20 + 性格权重(<em>军国 +15 / 均衡 0 / 经营 −15</em>)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; + (关系 &lt; −40 ? +10) + (对方正陷战争 ? +10)&nbsp;&nbsp;≥ <em>30</em> 则宣战</div>
+      <ul>
+        <li>经营型满分 <b>29，正好比阈值低 1 分</b> —— 「经营太平」是规则保证的：哪怕关系烂到底、对方正在挨打，也永远不主动开战</li>
+        <li>五道硬约束：不打盟友 / 互不侵犯对象 → 不打停战冷却中的（20 回合）→ <b>军力比 ≥ 0.7</b> 一票否决 → 已在打 2 场不开新战场 → 目标只限接壤邻国</li>
+      </ul>
+
+      <h4>吃迷雾的军力比（对等原则）</h4>
+      <p>算「我打不打得过他」时：自己的兵全算，<b>别人的兵只算我探过的省里那些</b>，再加「每省 300 人」的国家级规模估计。看不见的兵不进算式 —— 重金情报的 AI 目标选择天然更优。行军 / 围城目标也只能从自己的已探集里挑，运行时断言 <code>badTarget</code> 必须永远为 0。</p>
+
+      <h4>进攻 · 回撤 · 求和</h4>
+      <ul>
+        <li>机动军比例按好战怪癖归一化取档（0% / 15% / 30%）；<b>军国强攻、均衡围城、经营不进攻</b>；一国最多 2 支机动军防抽空边防</li>
+        <li><b>回撤</b>：兵损过半或仗打完 → 停止推进，自己省里转「练兵」补员（+2%/回合），敌省里转「驻防」</li>
+        <li><b>求和</b>：落后 ≥ 30 分且连续 5 回合 → 主动求和，赔款从全境出、按绝望分档（50 / 100 / 150 金）；胜方的胃口有封顶（45 分），否则打崩的局只能以灭国收场</li>
+        <li><b>阻尼防雪球</b>：任一国灭亡后 10 回合内，若全球战争 ≥ 6 场，所有 AI 宣战门槛 +15 —— 打完一个大国，世界该喘口气</li>
+      </ul>
+      <div class="callout">bench 策略 H（520 省 · 36 国 · 挂机 150 回合）实测：宣战 40 次、进攻 131 次、求和 19 次、灭国 8 个；军国平均 3.75 场/国 vs 经营 0 场；好战怪癖最高的一档开了 28 场仗，最低的一档 0 场 —— 分化全部来自规则，不是剧本。</div>
+    </div>
+
+    <!-- AI 3：吏部与战时经济 -->
+    <div class="aibox">
+      <h3><span class="no">三</span>AI 吏部与战时经济 —— 会当家</h3>
+      <div class="asub">派下去的官不是棋子：会升、会怨、会被赏、会被换；一打仗，钱袋子自己换挡</div>
+
+      <h4>吏部巡查（治官不是治国，不吃内政动作格）</h4>
+      <table class="t">
+        <tr><th>官员资历</th><th>赏赐线（花 15 金压 25 怨）</th><th>撤换线（认赔换人）</th></tr>
+        <tr><td><b>初任</b> rank 0</td><td>永不赏（不值得救）</td><td>怨气 70</td></tr>
+        <tr><td><b>干吏 / 能臣</b> rank 1–2</td><td>50（经营心软 −10 / 军国心硬 +10）</td><td>80</td></tr>
+        <tr><td><b>柱国</b> rank 3</td><td>45</td><td>90</td></tr>
+      </table>
+      <ul>
+        <li>赏赐有 12 回合冷却；中央金 &lt; 30 一律不赏 —— 国库比面子要紧</li>
+        <li>战时只保 rank ≥ 2 的老臣；撤换后立刻从池里补人，优先人口最多的省</li>
+        <li>官的效果倍率是连续的：资历加成 × 怨气折损（<code>m = (1+rank×0.15)×(1−griev×0.005)</code>），<b>没有死区</b> —— 若做成分档，最优解永远是「卡在 59」</li>
+      </ul>
+
+      <h4>战时经济换挡（宣战后一回合内，停战原样还回去）</h4>
+      <table class="t">
+        <tr><th>类</th><th>建筑</th><th>战时档位</th></tr>
+        <tr><td><b>军备</b></td><td>兵营 / 军械坊 / 造船厂 / 驯马场 / 城墙</td><td>高（p1）</td></tr>
+        <tr><td><b>资源</b></td><td>农场 / 渔港 / 盐场 / 伐木场 / 牧场 / 矿场</td><td>中（p2，断口粮会掉人口，不能一刀切停）</td></tr>
+        <tr><td><b>民用</b></td><td>市场 / 建造坊 / 学校 / 大学 / 粮仓 / 工厂</td><td>低（p3，只吃本省库存）</td></tr>
+      </table>
+      <ul>
+        <li>战时建造只留军备类；俸禄照付不欠，中央只剩 20 金保底时一分不补</li>
+        <li><b>军费护栏（优先级最高，能盖掉换挡）</b>：名义军费 &gt; 60% 岁入 → 停进攻 + 非军备降档 + <b>不再征兵</b>；&gt; 90% → 连军备一起降；每 20 回合最多报一次世界纪要，护栏要可见但不刷屏</li>
+      </ul>
+    </div>
+
+    <!-- AI 4：军工与后勤 -->
+    <div class="aibox">
+      <h3><span class="no">四</span>AI 军工与后勤 —— 会造装备</h3>
+      <div class="asub">管炉子不是治国：产线分配、工科开科、装备配发三件事都不吃内政动作格</div>
+      <ul>
+        <li><b>产线分配</b>一次写全国分配表：交战 <b>兵刃 7 : 装备 3</b>，和平 <b>装备 6 : 兵刃 4</b>；炮线交战开、和平归零；马厩只养驽马；船坞交战时造最高档舰 —— 档位是状态，不是每回合重掷</li>
+        <li><b>工科开科</b>：军国 / 均衡 + 累计教育 ≥ 15 + 国内有坊才开；<b>宗师优先派给驻军最多的省</b> —— 装备是配给机动军的，不是摆给和平年代看的</li>
+        <li><b>装备配发</b>：主力军发最优（兵刃 / 马 / 炮 / 盔甲靴），驻防军只发够用的兵刃；<b>裸兵只驻防</b> —— 没有兵刃的部队连进攻的门槛都进不去</li>
+        <li>AI 不玩类型 / 形制 / 品种（默认刀 + 驽马），但<b>跟着工艺链换代自动换装</b> —— 材质一升，全军下一单就是新料</li>
+      </ul>
+      <div class="callout">bench 策略 N 把「产能怎么分」当变量跑了两遍：爆兵流（全产能砸兵刃、不配装）100 回合战力 138.6；精兵流（2 点兵刃 + 其余装备、每支配齐）同样 99,000 人，战力 <b>205.1、装备倍率 ×1.480</b> —— 装备线不是锦上添花，是第二支军队。</div>
+    </div>
+
+    <!-- AI 5：迷雾与外交 -->
+    <div class="aibox">
+      <h3><span class="no">五</span>AI 与迷雾、外交 —— 守规矩的对手</h3>
+      <div class="asub">AI 不偷看、不耍赖，和你玩同一套规则</div>
+      <ul>
+        <li><b>对等吃迷雾</b>：AI 只看自己省的实时数据；目标只从自己的已探集（AIKNOW）里挑 —— 已探集来自开局邻省一圈、军队踩过的地方、情报署自动织网</li>
+        <li><b>AI 也有情报署</b>：自动织网 + 手动定向探测同规则跑，反谍预算档同样防着你</li>
+        <li><b>性格也是情报</b>：国家卡的「性格」行吃你的情报档 —— 0 档显示 ？？，1 档给性格词（经营 / 均衡 / 军国），2 档再给主导怪癖（如「军国 · 苛税」）。识人也是情报战</li>
+        <li><b>外交</b>：AI 不主动提案，但会按关系与性格评估你的提议 —— 军国多疑（−10），但「共同敌人 +15」的加成它吃得最多：敌人的敌人，再可疑也能坐下来谈</li>
+        <li><b>贸易</b>：资源全国见底、手里有金、有市场才买货；看货的频次按性格分 —— 经营每 3 回合、均衡 6、军国 12</li>
+        <li><b>世界消息走情报渠道</b>：AI 之间的宣战 / 灭国 / 都城易手不当回合直推，按你的情报档延迟 5~8 / 3~4 / 1 回合送达，低档还有 15% 的走样风闻，实讯会追一条更正 —— 年表里「别处的历史」是史官事后修订的那一版</li>
+      </ul>
+    </div>
+
+    <!-- AI 6：宰相 -->
+    <div class="aibox">
+      <h3><span class="no">六</span>宰相 —— 玩家自己的 AI 政府</h3>
+      <div class="asub">开科有 3.8% 概率抽到宰相之才；拜相后每回合代劳你还没做的事</div>
+      <ul>
+        <li>文科卡池里混着四条超稀有词条（合计出现率 <b>3.8%</b>），它们既是省官也是宰相候选人 —— AI 抽到照用当省官，拜相的机会本身就是一次抽卡</li>
+        <li>头衔随政体：王国 <b>宰相</b> / 帝国 <b>摄政</b> / 共和 <b>副总统</b> / 联邦 <b>总理</b> / 城邦联盟 <b>执政官</b> / 汗国 <b>断事官</b></li>
+        <li><b>你手动做的他绝不推翻</b>：手动改税后 3 回合内不碰税率；营造 / 科研 / 人事都是追加动作，闸门天然不覆盖你刚做的事</li>
+        <li>俸禄从中央出，欠一次饷就停摆，补上才复工；罢相随时可点，罢完致仕不回池</li>
+      </ul>
+      <table class="t">
+        <tr><th>等级</th><th>动作/回合</th><th>权限</th><th>代价</th><th>俸禄</th></tr>
+        <tr><td><b>守成之才</b></td><td>1</td><td>只有营造 + 科研（税赋/人事开关点了也不生效 —— 是「这个人不会」，不是按钮坏了）</td><td>—</td><td>×1</td></tr>
+        <tr><td><b>干练能臣</b></td><td>2</td><td>四项全能；降税线 ×0.8 更耐得住</td><td>—</td><td>×2</td></tr>
+        <tr><td><b>一代贤相</b></td><td>3</td><td>四项全能 + 会看账调税；每 10 回合进言</td><td>国民幸福 &lt; 40 撂挑子（回 45 复工）</td><td>×4</td></tr>
+        <tr><td><b>权倾朝野</b></td><td>3</td><td><b>无视权限开关</b>（面板红字「他自作主张」）+ 可横征</td><td>每回合偷国库 3 金 · 全国幸福 −3 · 每回合 10% 被弹劾</td><td>×1（他不靠俸禄吃饭）</td></tr>
+      </table>
+      <div class="callout red">权臣的设计目的就是让你<b>想罢他</b>：他最强（3 动作 + 全权限 + 敢横征），但代价是持续的 —— 偷金、伤民心、随时弹劾。用不用他，是你自己的宫廷剧。</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= 技术与测试 ================= -->
+<section class="block" id="data">
+  <div class="wrap">
+    <div class="sechead"><h2>技术与测试</h2><span class="en">UNDER THE HOOD</span></div>
+    <p class="secintro">纯前端、零依赖、零构建、零后端、零遥测 —— 所有数值集中在 js/15-resources.js 的定义区，改平衡只动一处。</p>
+    <div class="techgrid">
+      <div class="tcard"><b>23 个</b><span>原生 JS 模块 · 共 3.2 万行</span></div>
+      <div class="tcard"><b>0</b><span>外部依赖 / 构建步骤 / 网络请求</span></div>
+      <div class="tcard"><b>45 个</b><span>测试脚本 · 回归断言上千项</span></div>
+      <div class="tcard"><b>v6</b><span>存档版本：存状态不存地图，按种子重建</span></div>
+    </div>
+    <div class="doclist">
+      <h4>每一层的「数值为什么是这些数」都写成了设计文档：</h4>
+      <ol>
+        <li><a href="DESIGN.md">DESIGN.md</a> — 总纲：从地图到游戏</li>
+        <li><a href="DESIGN-RESOURCES.md">DESIGN-RESOURCES.md</a> — 资源 / 科技 / 治理数值</li>
+        <li><a href="DESIGN-BUILDINGS.md">DESIGN-BUILDINGS.md</a> — 建筑与图标</li>
+        <li><a href="DESIGN-WAR.md">DESIGN-WAR.md</a> — 战争 / 城墙 / 外交 / 安定</li>
+        <li><a href="DESIGN-FOG.md">DESIGN-FOG.md</a> — 战争迷雾与情报署</li>
+        <li><a href="DESIGN-AI.md">DESIGN-AI.md</a> — 敌国内政 AI（v7 → v12 全程）</li>
+        <li><a href="DESIGN-MILL.md">DESIGN-MILL.md</a> — 军工产线</li>
+        <li><a href="DESIGN-CRAFT.md">DESIGN-CRAFT.md</a> — 制造工艺</li>
+        <li><a href="DESIGN-LIFELINE.md">DESIGN-LIFELINE.md</a> — 经济续命五件套</li>
+        <li><a href="DESIGN-BALANCE.md">DESIGN-BALANCE.md</a> — 保留座数与平衡面板</li>
+        <li><a href="DESIGN-FORECAST.md">DESIGN-FORECAST.md</a> — 实时推演与建造参谋</li>
+        <li><a href="README.md">README.md</a> — 跑法与测试一览</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>《山河纪》机制介绍 · 与游戏同源同画风：海蓝为海，羊皮纸为卷，赤陶为印</div>
+    <div><a href="index.html">▶ 双击即玩 —— 返回游戏</a></div>
+    <div>种子 → 世界 → 一百年 → 一本编年史</div>
+  </div>
+</footer>
+
+<script>
+// 滚动高亮导航
+const links=[...document.querySelectorAll('#topnav a.nl')].filter(a=>a.getAttribute('href').startsWith('#'));
+const secs=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const spy=new IntersectionObserver(es=>{
+  es.forEach(e=>{
+    if(e.isIntersecting){
+      links.forEach(l=>l.classList.toggle('on',l.getAttribute('href')==='#'+e.target.id));
+    }
+  });
+},{rootMargin:'-30% 0px -60% 0px'});
+secs.forEach(s=>spy.observe(s));
+</script>
+</body>
+</html>

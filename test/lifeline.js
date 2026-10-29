@@ -596,12 +596,43 @@ function add(list) { for (const c of list) out.push(c); }
       m5a === 0 && m5b === 1 && D.goldOf(pid) === 34 && (cen.gold || 0) === 1,
       'moved=' + m5a + ',' + m5b + ' 省库=' + D.goldOf(pid) + ' 中央=' + cen.gold);
 
-    /* ⑥ 只走金不走铁：铁库存原样 */
-    const iron0 = D.stockOf(pid, 'iron');
-    cen.gold = 0; set(150);
+    /* ⑥ 物资上解（v19.1）：铁是**新开的那一条**，规则和检验都在这里
+     *    · 低于 free(20) 不动 —— 那是"明早的料"，不是家底
+     *    · 过线按同一套累进搬、被 cap 夹住、进中央
+     *    · 停产的那一类不搬（穷省不给富省交租）
+     *    · 粮/渔不在名单里（口粮就地吃，中央已经囤了上万） */
+    const RR = A.GOV.remit.res;
+    ok('D 物资上解在定义区（on / free 20 / low 60 / cap 3 / 不含粮渔）',
+      !!RR && RR.on === true && RR.free === 20 && RR.low === 60 && RR.cap === 3 &&
+      RR.keys.indexOf('iron') >= 0 && RR.keys.indexOf('grain') < 0,
+      JSON.stringify(RR));
+    const ironBag = A.resSim[pid].iron;
+    const rA = (v) => { ironBag.stock = v; D.remitAccR[pid + '|iron'] = 0; };
+
+    rA(20); const ci0 = (cen.iron || 0);
     D.settleRemit(pid, owner);
-    ok('D 只搬金：铁库存不动', D.stockOf(pid, 'iron') === iron0,
-      '铁 ' + iron0 + ' → ' + D.stockOf(pid, 'iron'));
+    ok('D 物资：铁 20（正好到线）→ 不动', ironBag.stock === 20 && (cen.iron || 0) === ci0,
+      '铁 ' + ironBag.stock + ' 中央 ' + (cen.iron || 0));
+
+    rA(80);
+    const ci1 = (cen.iron || 0);
+    const mv = D.settleRemit(pid, owner);
+    /* (60−20)×10% + (80−60)×20% = 8 → 被 cap 3 夹住 */
+    ok('D 物资：铁 80 → 上解 3（8 被 cap 夹住），进中央',
+      ironBag.stock === 77 && (cen.iron || 0) === ci1 + 3,
+      '铁 80 → ' + ironBag.stock + '，中央 +' + ((cen.iron || 0) - ci1) + '（金上解 ' + mv + '）');
+
+    rA(80); ironBag.halted = true;
+    const ci2 = (cen.iron || 0);
+    D.settleRemit(pid, owner);
+    ok('D 物资：这一类正在停产 → 不搬（穷省不交租）',
+      ironBag.stock === 80 && (cen.iron || 0) === ci2,
+      '铁 ' + ironBag.stock + ' 中央 +' + ((cen.iron || 0) - ci2));
+    ironBag.halted = false;
+
+    ok('D 物资：粮/渔不搬（口粮就地吃）',
+      !RR || (RR.keys.indexOf('grain') < 0 && RR.keys.indexOf('fish') < 0),
+      RR ? RR.keys.join(',') : 'off');
     return o;
   }));
 
@@ -685,6 +716,12 @@ function add(list) { for (const c of list) out.push(c); }
     const bag = A.resSim[pid], cen = D.ensureCentral(owner);
     window.__Fpid = pid;
 
+    /* 这一节量的是"铁税落袋多少"，所以先把**物资上解**关掉（v19.1）：
+     * 开着的话省库铁过 20 就开始往中央解，10 回合的落袋会少 3 单位 ——
+     * 那是在量上解，不是在量税。跑完装回去（后面的节还要用它）。 */
+    const remitRes0 = A.GOV.remit.res;
+    A.GOV.remit.res = null;
+
     /* ① 常数：铁税与金税同单位（每 10 万人），三档 0.1 / 0.2 / 0.4 */
     ok('F 铁税与金税同单位（ironUnit = 10 万 = popUnit）',
       G.ironUnit === 100000 && G.ironUnit === G.popUnit,
@@ -743,6 +780,7 @@ function add(list) { for (const c of list) out.push(c); }
 
     /* ⑥ 存档零迁移：常数变了，IRONACC 的零头照攒（下一节读档后验它还在） */
     D.ironAcc[pid] = 0.75;
+    A.GOV.remit.res = remitRes0;      // 物资上解装回去（这一节开头关的）
     return o;
   }));
 
@@ -953,7 +991,14 @@ function add(list) { for (const c of list) out.push(c); }
      * v18.1b 之后 AI 每回合都会改建，档里本来就有几条 —— 但这一条是我们自己放的，
      * 断言不依赖 AI 的运气。 */
     D.smelt[T.b] = { n: 1, site: 0, halted: false, mAcc: { iron: 0, gold: 0 }, iAcc: 0 };
-    window.__SMELT_N = Object.keys(A.resSmelt).length;
+    /* 只数"有场或有工地"的记录：存档是**瘦身**的（没场没工地的省不进档，
+     * 见下面那条 WASH 的同款断言）。v19.7 拆了扫盲闸之后，AI 每回合都会摸
+     * 更多省，空记录变多 —— 拿裸条数比会和"瘦身"打架。 */
+    window.__solidSmelt = () => Object.keys(A.resSmelt).filter(k => {
+      const x = A.resSmelt[k];
+      return x && (x.n > 0 || x.site > 0);
+    }).length;
+    window.__SMELT_N = window.__solidSmelt();
     D.save(true);
     let raw = null;
     try { raw = JSON.parse(localStorage.getItem(A.SAVE_KEY)); } catch (e) { /* file:// 禁 ls */ }
@@ -996,8 +1041,8 @@ function add(list) { for (const c of list) out.push(c); }
      * 档里必然有熔旧坊 —— 要验的是**摘掉 WASH 不会连 SMELT 一起清掉**，
      * 所以比"条数没少 + 我们放的那条还在"，而不是比"空"。 */
     ok('A 老档读进来 SMELT 还在（摘掉 WASH 不影响另一套镜像）',
-      Object.keys(A.resSmelt).length === window.__SMELT_N && !!A.resSmelt[window.__T.b],
-      Object.keys(A.resSmelt).length + ' 条 / 存档时 ' + window.__SMELT_N);
+      window.__solidSmelt() === window.__SMELT_N && !!A.resSmelt[window.__T.b],
+      window.__solidSmelt() + ' 条 / 存档时 ' + window.__SMELT_N);
 
     /* F（v18 追加二）：常数从 200 万改成 10 万，但存档格式没动 ——
      * 铁税的零头应该原样读回来（0.75），旧档读入后结算也不能炸。 */
@@ -1046,13 +1091,25 @@ function add(list) { for (const c of list) out.push(c); }
       ['econ', 'balanced', 'mil'].every(k => A.AIECON.buildOrder[k].indexOf('smelt') < 0),
       ['econ', 'balanced', 'mil'].map(k => k + ':' + A.AIECON.buildOrder[k].join(',')).join(' | '));
 
-    /* ② 扫盲闸：学校还没铺够（省数/3）时，改建通道一律不动 ——
-     *    改建不占建造格，花的却是同一个国库；不设这道闸就是"换个位置挤建造"。 */
+    /* ② v19.7：**扫盲闸已拆** —— 学校没铺够也照样改建。
+     * 原来这道闸的理由是"改建花的是同一个国库，会把学校的钱吃掉"；
+     * 实测 T101 有 16 个国家被它锁死（好几个 0 座学校 → 永远改不了），
+     * 而改建不占建造格、每国每回合只一座。国库那道闸（金 ≥ cost+pad）留着。 */
     for (const id of c.provinces) { if (A.resSchool[id]) A.resSchool[id].n = 0; }
     const quota = Math.max(1, Math.floor(c.provinces.length / (A.AIECON.schoolQuotaDiv || 3)));
+    const pid0 = c.provinces[0];
+    const s0 = A.resSim[pid0].iron;
+    s0.built = 1; s0.tiers = { 1: 1, 2: 0 };
+    s0.left = 0; s0.cool = 48; s0.gone = false; s0.halted = false;
+    for (const id of c.provinces) delete A.resSmelt[id];
+    A.resSim[pid0].timber.stock = 30;
+    A.resSim[pid0].gold.stock = 60;
+    const conv0 = AI.convert(cid);
+    const st0 = A.resSmelt[pid0];
     ok('H 扫盲没完（学校 < 省数/' + (A.AIECON.schoolQuotaDiv || 3) + ' = ' + quota +
-      ' 座）：改建通道不动',
-      AI.convert(cid) === 0, 'convert=' + AI.convert(cid) + ' · 学校 0 座');
+      ' 座）：改建通道**照样动**（v19.7 拆闸）',
+      conv0 === 1 && !!st0 && st0.site > 0,
+      'convert=' + conv0 + ' · 学校 0 座 · 工地=' + (st0 ? st0.site : '—'));
 
     /* ③ 铺够学校之后：同一回合 —— 建造格照常动 + 改建通道也动（互不挤） */
     for (const id of c.provinces) {
@@ -1076,12 +1133,27 @@ function add(list) { for (const c of list) out.push(c); }
     };
     const before = cnt();
     const built = AI.build(cid, AI.personaOf(cid));
+    /* v19.2 起改建是**省里自己经营**那一摊（只掏省库，见 GOV.buildPay.local）：
+     * 先把这一省的料备足，否则 AI 会因为"省库掏不出"合法地不动手。 */
+    A.resSim[pid].timber.stock = 30;
+    A.resSim[pid].gold.stock = 60;
     const conv = AI.convert(cid);
     const st = A.resSmelt[pid];
     ok('H 同一回合：建造格真的动了（AI.build 开工）', built === true, 'build=' + built);
     ok('H 同一回合：改建通道也动了（AI.convert → 熔旧坊开工）',
       conv === 1 && !!st && st.site > 0,
       'convert=' + conv + ' site=' + (st ? st.site : '—'));
+    /* 反向：把省库清空，同一省再改建就不动手 ——「掏不出就不建」 */
+    A.resSim[pid].timber.stock = 0;
+    A.resSim[pid].gold.stock = 0;
+    delete A.resSmelt[pid];
+    AI.convert(cid);
+    /* 注意：smeltNew 会先把这一省的记录建出来（n=0 / site=0），
+     * 所以"没建"要看**座数和工地**，不能看表里有没有这条记录。 */
+    const st2 = A.resSmelt[pid];
+    ok('H 省库没料 → 这一省不改建（省里自己建，掏不出就不建）',
+      !(st2 && (st2.n > 0 || st2.site > 0)),
+      st2 ? 'n=' + st2.n + ' site=' + st2.site : '没动');
 
     /* ④ 硬指标：挂机 60 回合 —— 熔旧坊数 > 0、逐回合不降且确实在涨；
      *    学校 / 市场也照涨（建造格没被改建吃掉）。
@@ -1469,6 +1541,67 @@ function add(list) { for (const c of list) out.push(c); }
     const r6 = AI.open(cid);
     A.resSchool[pk].n = SCAP;
     ok('L 学校配额没铺够 → 先盖学校，不开矿', r6 === false, 'ret=' + r6);
+    return o;
+  }));
+
+  /* =============================================================
+   * M 开局吏治（v19.3）—— 每省一位 plain，无加成、不领俸禄、不擢升
+   *
+   * 这一条补的是"无官省税收 ×0.6"那个洞：开局人才点是 0，全世界头十几回合
+   * 都在吃惩罚。开局只补"有人在管"这条底线，加成/升迁仍然只能靠开科取士。
+   * ============================================================= */
+  add(await page.evaluate(() => {
+    const D = window.AO.resDebug, A = window.AO, w = D.world(), o = [];
+    const ok = (name, cond, detail) => o.push({ name, ok: !!cond, detail: detail === undefined ? '' : String(detail) });
+    const G = A.GOV;
+
+    ok('M 定义区（on / plain / 不升迁不发饷）',
+      !!G.seedOff && G.seedOff.on === true && G.seedOff.trait === 'plain' &&
+      G.seedOff.grow === false, JSON.stringify(G.seedOff));
+
+    /* ① 每省都有人、且基本都是 plain。
+     * 注意：M 是最后一节，前面 D/F 节撤过官、F 节还派过自己造的官 ——
+     * 所以这里只要求"几乎每省都在任"，词条以 plain 为主（其余是前几节放的）。 */
+    let n = 0, plain = 0, other = 0, firstSeed = 0;
+    for (const p of w.provinces) {
+      const off0 = A.resOfficial[p.id];
+      if (!off0) continue;
+      n++;
+      if (off0.traitKey === 'plain') { plain++; if (off0.seed && !firstSeed) firstSeed = p.id; }
+      else other++;
+    }
+    const P = w.provinces.length;
+    ok('M 开局每省都有官（' + P + ' 省，前面几节撤过几个）', n >= P - 3,
+      n + '/' + P + ' 在任 · plain ' + plain + ' · 其它 ' + other);
+    ok('M 开局这批都是 plain（无加成）', firstSeed > 0 && other <= 8,
+      'plain ' + plain + ' / 其它 ' + other + '（其它是前面几节放的测试官）');
+
+    /* ② 拿一位真正的开局吏验效果：plain 的 fx 是空的，倍率 1.00 */
+    const pid = firstSeed;
+    const off = A.resOfficial[pid];
+    ok('M 开局吏的效果倍率是 1.00、没有词条加成',
+      !!off && Math.abs(D.offMul(off) - 1) < 1e-9, off ? 'mul=' + D.offMul(off) : '没官');
+
+    /* ③ 不领俸禄：省库金不动、owed 不涨 */
+    const bag = A.resSim[pid];
+    bag.gold.stock = 100;
+    const g0 = bag.gold.stock;
+    A.resSettleTax(pid, w.provinces[pid - 1].owner, w.provinces[pid - 1], null);
+    ok('M 开局吏不领俸禄（税照收、饷不扣）',
+      (off.owed || 0) === 0, '金 ' + g0 + ' → ' + bag.gold.stock + ' · owed=' + (off.owed || 0));
+
+    /* ④ 不擢升：连跑 40 回合，rank 仍然是 0 */
+    for (let t = 0; t < 40; t++) A.resDebug.settleOfficials();
+    ok('M 开局吏不参与擢升（40 回合 rank 仍 0）', off.rank === 0, 'rank=' + off.rank +
+      ' · 怨气 ' + Math.round(off.griev));
+
+    /* ⑤ 被撤换时不回候选池（否则 AI 会拿它去顶别省的吏，原地打转） */
+    const owner = w.provinces[pid - 1].owner;
+    const pool0 = (A.resTalent[owner] && A.resTalent[owner].pool || []).length;
+    D.dismiss(pid, true);
+    const pool1 = (A.resTalent[owner] && A.resTalent[owner].pool || []).length;
+    ok('M 撤掉开局吏 → 不回候选池', pool1 === pool0 && !A.resOfficial[pid],
+      '池 ' + pool0 + ' → ' + pool1);
     return o;
   }));
 

@@ -415,7 +415,32 @@
     ORDER[key] = out;
     return out;
   }
+  /* ---------------- 无官省不投资（v19.4）----------------
+   * 一处判断，三处用（provScore / tryMineOpen / tryOpen）—— 抄三遍的话，
+   * 以后加第四条投资通道的人一定会漏掉其中一条。
+   *
+   * "有官"认 `OFFICIAL[pid]` 非空，**包括开局铺底的那位吏**（v19.3 的 seed）：
+   * 不认它的话开局每省都是"无官"，AI 头十几回合一座都不盖 —— 那不是规则，是关机。
+   * 真官顶掉吏是开科的事，和这里无关。
+   * 开关在 AIECON.govReq（15-resources 里有为什么），只给对照实验关。
+   *
+   * **宰相例外**（GOVREQ_BYPASS）：委任宰相是**替玩家干活**的，不是玩家自己。
+   * 玩家可能正准备派官，宰相却先按"没官不投资"把活推了 —— 那就成了帮倒忙。
+   * 所以 chancellorAct 那条路进来的动作不受这道闸限制（见 aiDecide 的 byChancellor）。 */
+  var GOVREQ_BYPASS = 0;
+  function govReqOn() {
+    var G = AO.AIECON && AO.AIECON.govReq;
+    if (!G || G.on === false) return false;
+    return GOVREQ_BYPASS === 0;
+  }
+  function hasOfficial(pid) {
+    return !!(AO.resOfficial && AO.resOfficial[pid]);
+  }
   function provScore(p, kind) {
+    /* v19.4 第一道闸：没官的省，AI 不往里投钱。
+     * 必须放在最前面、在负载项之前 —— 负载项也会 return −1（淘汰），
+     * 两个 −1 混在一起，调参时就分不清"是没人管"还是"还不挤"把省筛掉的。 */
+    if (govReqOn() && !hasOfficial(p.id)) return -1;
     var s = 0;
     var res = AO.RESOURCE_BY_KEY && AO.RESOURCE_BY_KEY[kind];
     if (res) {
@@ -541,12 +566,16 @@
   function aiConvert(cid) {
     var D = AO.resDebug, E = AO.AIECON;
     if (!D || !D.ensureCentral) return 0;
-    /* 扫盲没完不谈改建：学校配额（省数 / schoolQuotaDiv）是 AI 自己的底线。
-     * 改建不占建造格，花的却是同一个国库 —— 要是它把这笔钱吃掉，
-     * 就等于"换个位置挤建造"，验收里"学校/市场不因此减少"那条立刻翻红。 */
-    var provN = provsOf(cid).length;
-    var quota = Math.max(1, Math.floor(provN / (E.schoolQuotaDiv || 3)));
-    if (univCountAll(cid, 'school') < quota) return 0;
+    /* v19.7：**扫盲闸已拆**（原来：学校 < 省数/3 → 一个都不改）。
+     *
+     * 当初加它的理由是"改建花的是同一个国库，会把学校的钱吃掉"。
+     * 实测（diag/convert-why-probe.js，520 省 / T101）：31 个"有可改省却没改建"的
+     * 国家里 **16 个卡在这道闸**，其中好几个是 0 座学校 —— 它们不是"暂时没空改"，
+     * 是**永远改不了**：矿睡了 → 没有铁 → 更盖不起学校 → 闸永远关着。
+     * 而改建不占建造格、每国每回合只一座，代价远小于"矿睡了就一直睡"。
+     *
+     * 国库那道闸留着（金 ≥ cost + goldReserve + convertPad）：真正要保护的是
+     * "别把下回合的维护费花光"，不是"别在盖学校之前修炉子"。 */
     var cen = D.ensureCentral(cid);
     var g = cen.gold || 0;
     var pad = (E.goldReserve || 0) + (E.convertPad || 0);
@@ -595,6 +624,9 @@
       for (j = 0; j < provs.length; j++) {
         var p = provs[j];
         if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
+        /* v19.4：无官省不投资。它不走 provScore（这里是直接遍历挑 left 最大的），
+         * 所以这道闸要单独写一遍 —— 三处（provScore / 这里 / tryOpen）是同一句话。 */
+        if (govReqOn() && !hasOfficial(p.id)) continue;
         var bag = AO.resSim[p.id], s = bag && bag[k];
         if (!s || s.gone) continue;               // 枯了就改建，不是开矿
         if ((s.built | 0) !== 0) continue;        // 这一种已经有一座了
@@ -607,7 +639,8 @@
         }
       }
       if (!best) continue;
-      D.buildOne(best, k, true);
+      /* nat=true：缺矿是**中央的判断**，钱也从中央出（省库只留给省里自己经营） */
+      D.buildOne(best, k, true, true);
       if (siteOf(best.id, k).site > 0) return true;
     }
     return false;
@@ -645,7 +678,8 @@
       if ((cen.gold || 0) < (cost.gold || 0) + (E.goldReserve || 0)) return false;
       var best = pickProv(cid, k);
       if (!best) continue;
-      D.buildOne(best, k, true);
+      /* nat=true：人挤到 85% 是国家级的需求信号，中央出钱扩地 */
+      D.buildOne(best, k, true, true);
       if (siteOf(best.id, k).site > 0) return true;
     }
     return false;
@@ -706,6 +740,18 @@
       for (j = 0; j < list.length; j++) {
         var p = list[j];
         if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;          // ③
+        /* v19.4：无官省不投资（同上，这里也是直接遍历，不走 provScore） */
+        if (govReqOn() && !hasOfficial(p.id)) continue;
+        /* 农场 / 渔港吃 provScore 那条负载规则（负载 < 50% = 还不挤，别开新农场）。
+         * 这里是直接遍历，不走 provScore，所以同一句话要抄一遍。
+         * 证据（diag/farm-load-probe.js）：开 openResource 时 60 回合有 6 次农场
+         * 落在 35% 负载的省上，关掉 tryOpen 就 0 次 —— test/pop.js ⑥bench
+         * 那条"低负载省一次都没被选中"的偶发红就是从这里漏出去的。 */
+        if (kind === 'grain' || kind === 'fish') {
+          var PC2 = AO.POPCAP;
+          var cap2 = (AO.resPopCap ? AO.resPopCap(p.id) : 0) || 0;
+          if (PC2 && PC2.ai && cap2 > 0 && popOf(p.id) / cap2 < PC2.ai.low) continue;
+        }
         var bag = AO.resSim[p.id];
         var s = bag && bag[kind];
         if (!s || s.gone || (s.built | 0) > 0) continue;
@@ -715,7 +761,8 @@
       }
     }
     if (!bestP) return false;
-    D.buildOne(bestP, bestKind, true);
+    /* nat=true：开一块新矿是国家级决策（"有禀赋就去用"），中央出钱 */
+    D.buildOne(bestP, bestKind, true, true);
     return siteOf(bestP.id, bestKind).site > 0;
   }
   function tryBuild(cid, persona) {
@@ -923,11 +970,16 @@
       var best = null, bestS = -1;
       for (i = 0; i < provs.length; i++) {
         var p = provs[i];
-        if (AO.resOfficial[p.id]) continue;
+        var cur0 = AO.resOfficial[p.id];
+        /* v19.3：开局每省都坐着一位没有加成的"吏" —— 有真官就顶掉它，
+         * 这才是开科取士的意义。真官在任的省不换（换人是要付代价的）。 */
+        if (cur0 && !cur0.seed) continue;
         if (AO.resWar.occupy[p.id] || AO.resWar.siege[p.id]) continue;
         /* 未整合的占领省：+1 亿"虚拟人口"直接把它顶到队首（比任何真省都大），
-         * 但只在"还没整合完"时有效 —— 整合完就不再特殊照顾 */
+         * 但只在"还没整合完"时有效 —— 整合完就不再特殊照顾。
+         * 无官省（刚打下来、还没派人的）排第二：先有人管，再谈人选好坏。 */
         var score = popOf(p.id);
+        if (!cur0) score += 5e7;
         if (AO.resIntegOf && AO.resIntegOf(p.id)) score += 1e8;
         if (score > bestS) { bestS = score; best = p; }
       }
@@ -940,6 +992,34 @@
         D.assign(best.id, offId, true);
         if (AO.resOfficial[best.id] === off0) { off0.at = turn; return true; }
       }
+    }
+
+    /* ②b 活路（v19.4）：池里没人、人才点也攒不够开科 → 给"已整合的无官省"补一位吏。
+     * 没有这条，没学校的小国会永远卡在"没官 → 不建 → 没收益 → 更没官"里：
+     * 实测 T100 有 18 个省连续 60 回合无官，房子停在原地烂掉（它们的主人
+     * 一个人才点都没有，开科是永远等不到的事）。
+     *
+     * 三条限定，都是为了让这条出口不把规则冲垮：
+     *   · **只在开不了科时补**（有点、池里有人就走上面的正路）—— 有学校的国家照旧开科；
+     *   · **只补"已整合"的省**（占领中的省本来就该靠打仗解决，而且那边本来也不许建）；
+     *   · **每国每回合最多一位**（和派官同一个节奏，不搞一夜之间全图有官）。
+     * 补的是"吏"不是"官"：无加成、不领俸、不升迁，被真官顶掉就退场 —— 开科仍然值钱。 */
+    var B = E.govReq;
+    if (B && B.backfill !== false && !(T.pool && T.pool.length) &&
+        T.pts < G.examCost * (E.examMul || 1.5) && D.appointSeed) {
+      var bare = null, barePop = -1;
+      for (i = 0; i < provs.length; i++) {
+        var q = provs[i];
+        if (AO.resOfficial[q.id]) continue;
+        if (AO.resWar.occupy[q.id] || AO.resWar.siege[q.id]) continue;
+        /* 易主的省不给吏（CONQ）：打下来的地方必须派**真官**才恢复建造 ——
+         * 这是"先有科场，再谈开疆"的门槛。appointSeed 里也拦了同一句，
+         * 这里再判一次是为了把动作格让给真正能补的老国土，不是白跑一趟。 */
+        if (AO.resConq && AO.resConq[q.id]) continue;
+        var qp = popOf(q.id);
+        if (qp > barePop) { barePop = qp; bare = q; }
+      }
+      if (bare && D.appointSeed(bare.id)) return true;
     }
 
     /* ③ 武将（池里）→ 派给没将领的军队 —— 武科抽出来就得用，否则人才点白花 */
@@ -957,8 +1037,12 @@
 
     /* ④ 人才点攒够（examCost × examMul）→ 开科 */
     if (T.pts >= G.examCost * (E.examMul || 1.5)) {
-      /* 军国文武各半：拿一个计数器轮流来，文武都不落下 */
-      var mil = persona === 'mil' && (T.examFlip = !T.examFlip);
+      /* v19.5：**一个将都没有的国家先开武科** —— 没将就不能宣战（见 tryDeclare），
+       * 光抽文官的国家会永远打不出去。原来只有军国会轮到武科（examFlip 交替），
+       * 于是经营 / 均衡国一辈子 0 位将，等于被这条闸永久禁战。
+       * 只在"手里一位将都没有"时抢这一格：将够用就回到各性格原来的节奏。 */
+      var noGen = AO.resHasGeneral && !AO.resHasGeneral(cid);
+      var mil = noGen ? true : (persona === 'mil' && (T.examFlip = !T.examFlip));
       var r = mil ? D.examGeneral(cid, true) : D.exam(cid, true);
       return !!(r && r.ok);
     }
@@ -1491,6 +1575,12 @@
     /* 傀儡不主动宣战（v13）：它的外交权在宗主手里，宣战钮在 11-ui 那边就是灰的，
      * 这里再挡一次 —— 挡的是"绕过面板直接调"的那条路。 */
     if (AO.resPuppetOf && AO.resPuppetOf(cid)) return 0;
+    /* v19.5：**没有武将就不能宣战**（有兵没将打不出去，只能招兵防守）。
+     * 为什么闸在决策层而不是 declareWar 里：declareWar 是底层原语，
+     * 事件（揭竿而起，opt.force）与测试要走它；玩家那边由面板置灰同一句话。
+     * 这条把"先有科场，再谈开疆"在军事上也闭环了：没学校 → 没人才点 → 开不了武科
+     * → 没武将 → 不能宣战 → 也就不会打下一堆没人管的省（v19.4 的 27 个省就是这么来的）。 */
+    if (AO.resHasGeneral && !AO.resHasGeneral(cid)) return 0;
     if (turn % A.every !== (cid % A.every)) return 0;     // 各国错开，免得同回合一起动手
     if (warsOf(cid).length >= A.maxWars) return 0;
     if (!warCofferOk(cid)) return 0;                      // 打不起就别开新战场（v18.7）
@@ -1962,19 +2052,27 @@
     var bCap = (E.buildPerTurn || 1);
     var didBuild = 0;
     var n = 0;
-    for (var slot = 0; slot < slots; slot++) {
-      var acted = false;
-      /* 建造：每回合最多 buildPerTurn 座（默认 1）—— 这一格不做，第二格再试 */
-      if (P.build && didBuild < bCap && tryBuild(cid, per)) {
-        didBuild++; did.build = true; acted = true; n++;
-      } else if (P.research && !did.research && tryResearch(cid)) {
-        did.research = true; acted = true;
-      } else if (P.tax && !did.tax && tryTax(cid, per, O)) {
-        did.tax = true; acted = true;
-      } else if (P.officials && !did.off && tryOfficers(cid, per)) {
-        did.off = true; acted = true;
+    /* 宰相代劳（11-ui 的 chancellorAct 传 O.byChancellor）：他替玩家干活，
+     * "无官不投资"这道闸不该卡自己人 —— 玩家可能正准备派官，先让宰相把活干了。
+     * 用计数器而不是布尔：aiDecide 不递归，但留着计数以后嵌一层也不会串。 */
+    if (O.byChancellor) GOVREQ_BYPASS++;
+    try {
+      for (var slot = 0; slot < slots; slot++) {
+        var acted = false;
+        /* 建造：每回合最多 buildPerTurn 座（默认 1）—— 这一格不做，第二格再试 */
+        if (P.build && didBuild < bCap && tryBuild(cid, per)) {
+          didBuild++; did.build = true; acted = true; n++;
+        } else if (P.research && !did.research && tryResearch(cid)) {
+          did.research = true; acted = true;
+        } else if (P.tax && !did.tax && tryTax(cid, per, O)) {
+          did.tax = true; acted = true;
+        } else if (P.officials && !did.off && tryOfficers(cid, per)) {
+          did.off = true; acted = true;
+        }
+        if (!acted) break;          // 这一格什么都做不了 → 后面的格子更做不了
       }
-      if (!acted) break;          // 这一格什么都做不了 → 后面的格子更做不了
+    } finally {
+      if (O.byChancellor) GOVREQ_BYPASS--;
     }
     return n;
   }
@@ -2276,6 +2374,8 @@
     research: tryResearch,
     tax: tryTax,
     officers: tryOfficers,
+    /* v19.5：宣战决策单独给出来 —— test/ai-war.js 要验"没武将就不宣战" */
+    declare: tryDeclare,
     /* v12：决策核心（玩家宰相走这里；AI 走 aiCountry → 同一个函数） */
     decide: aiDecide,
     allPerms: ALL_PERMS,

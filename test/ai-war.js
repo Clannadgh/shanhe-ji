@@ -504,6 +504,72 @@ function add(list) { for (const c of list) out.push(c); }
     return o;
   }));
 
+  /* ---------------- ⑨ 没有武将不能宣战（v19.5） ----------------
+   * 规则：没武将 → 不能宣战（有兵没将打不出去），但招兵/防守照旧。
+   * 做法：把闸以外的条件全部放开（every=1 / 阈值 −999 / 军力比 0 / 国库 5000），
+   * 然后只切"有没有武将"这一个变量 —— 这样读到的差别只能来自这道闸。 */
+  add(await page.evaluate(() => {
+    const A = window.AO, D = A.resDebug, AI = A.aiDebug, o = [];
+    const ok = (n, c, d) => o.push({ name: n, ok: !!c, detail: d === undefined ? '' : String(d) });
+    const W = A.AIWAR;
+    const keep = { every: W.every, threshold: W.threshold, maxWars: W.maxWars,
+      powerRatio: W.powerRatio, minGold: W.declare ? W.declare.minGold : undefined };
+
+    /* 挑一对"相邻、不同国、没在打、没条约"的活国 */
+    let a = 0, b = 0;
+    for (const c of window.__world.countries) {
+      if (!c || A.resWar.dead[c.id]) continue;
+      for (const x of (c.neighbors || [])) {
+        const q = window.__world.countries.find(z => z && z.id === x);
+        if (!q || A.resWar.dead[q.id] || q.id === c.id) continue;
+        if (D.atWar(c.id, q.id)) continue;
+        if (A.resIsAlly && A.resIsAlly(c.id, q.id)) continue;
+        if (A.resIsNap && A.resIsNap(c.id, q.id)) continue;
+        a = c.id; b = q.id; break;
+      }
+      if (a) break;
+    }
+    if (!a) { return [{ name: '⑨ 找到一对可宣战的相邻国', ok: false, detail: '没有' }]; }
+
+    /* 放开闸以外的一切 */
+    W.every = 1; W.threshold = -999; W.maxWars = 99; W.powerRatio = 0;
+    if (W.declare) W.declare.minGold = 0;
+    D.ensureCentral(a).gold = 5000;
+
+    /* ① 清空所有武将 → 不能宣战 */
+    for (const k in A.resWar.generals) delete A.resWar.generals[k];
+    const has0 = A.resHasGeneral(a);
+    const r1 = AI.declare(a, AI.personaOf(a), { war: 1 });
+    const war0 = D.atWar(a, b);
+
+    /* ② 给一位武将（待命、不带兵也算"国有将"）→ 同条件立刻能宣战 */
+    A.resWar.generals[990001] = { id: 990001, name: '测试将', traitKey: 'plain', owner: a, armyId: 0 };
+    const has1 = A.resHasGeneral(a);
+    const r2 = AI.declare(a, AI.personaOf(a), { war: 1 });
+    const war1 = D.atWar(a, b);
+
+    /* ③ 招兵不受影响：没武将照样能征兵（只影响"能不能开战"） */
+    for (const k in A.resWar.generals) delete A.resWar.generals[k];
+    const canRec = AI.canRecruit ? AI.canRecruit(a) : null;
+
+    /* 还原 */
+    W.every = keep.every; W.threshold = keep.threshold; W.maxWars = keep.maxWars;
+    W.powerRatio = keep.powerRatio;
+    if (W.declare && keep.minGold !== undefined) W.declare.minGold = keep.minGold;
+    delete A.resWar.generals[990001];
+
+    ok('⑨ 规则在代码里：AO.resHasGeneral 有输出（AI 与面板共用这一句）',
+      typeof A.resHasGeneral === 'function' && has0 === false && has1 === true,
+      '无将 ' + has0 + ' / 有将 ' + has1);
+    ok('⑨ 没武将：宣战决策直接放弃（r=0，没有开战）',
+      r1 === 0 && war0 === false, 'r=' + r1 + ' · 交战=' + war0);
+    ok('⑨ 给一位武将：同一局面立刻宣战（r=1）',
+      r2 === 1 && war1 === true, 'r=' + r2 + ' · 交战=' + war1);
+    ok('⑨ 招兵不受这条闸影响（没武将照样能征兵防守）',
+      canRec === true, 'canRecruit=' + canRec);
+    return o;
+  }));
+
   /* ---------------- 汇总 ---------------- */
   if (errors.length) out.push({ name: '页面无 JS 错误', ok: false, detail: errors.slice(0, 3).join(' | ') });
   else out.push({ name: '页面无 JS 错误', ok: true, detail: '' });

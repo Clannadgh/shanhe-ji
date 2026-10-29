@@ -427,6 +427,194 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       'AI 动作数 ' + r.t0 + ' / ' + r.t1 + '（0 = 一次都没动）');
   }
 
+  /* ---------------- 10) 无官省不投资（v19.4） ----------------
+   * 口径（任务书四条）：
+   *   ① 无官省：AI 不开新矿 / 不扩地 / 不在建造表里挑它（provScore 淘汰）
+   *   ② 有官（含开局吏）之后立刻恢复 —— 派官不花建造格，所以不会死锁
+   *   ③ 玩家不受影响（玩家点建造不查官员；这条由 UI 侧零改动保证，这里不断言）
+   *   ④ 新占领省（官被清空）能自己恢复：池里有人 → 下一回合就派 → 派完就能建
+   * 全部手工摆状态，不挂机：挂机 100 回合读到的是"概率"，读不出"规则"。 */
+  {
+    const r = await ev(() => {
+      const AO = window.AO, D = AO.resDebug, AI = AO.aiDebug;
+      const out = { steps: [] };
+      const step = (k, v) => { out[k] = v; };
+
+      /* 开关在定义区（15-resources 的 AIECON.govReq） */
+      step('cfg', !!(AO.AIECON && AO.AIECON.govReq && AO.AIECON.govReq.on === true));
+
+      /* 挑一个 ≥3 省的活国；把它从所有战争里摘出来（战时建造表另有白名单） */
+      let cid = 0, list = [];
+      for (const c of window.__world.countries) {
+        if (!c || AO.resWar.dead[c.id]) continue;
+        const ps = AI.provsOf(c.id);
+        if (ps.length >= 3) { cid = c.id; list = ps; break; }
+      }
+      if (!cid) return out;
+      step('cid', cid);
+      for (const k in AO.resWar.wars) {
+        const ab = k.split('|');
+        if (+ab[0] === cid || +ab[1] === cid) delete AO.resWar.wars[k];
+      }
+
+      /* 目标省：一个还有铁矿的省（left 给足，别的省全标成"已有一座"） */
+      const target = list.find(p => AO.resSim[p.id] && AO.resSim[p.id].iron) || list[0];
+      step('pid', target.id);
+      for (const p of list) {
+        const bag = AO.resSim[p.id];
+        if (!bag || !bag.iron) continue;
+        bag.iron.stock = 0;
+        bag.iron.halted = false;
+        bag.iron.site = 0;
+        if (p.id === target.id) {
+          bag.iron.built = 0; bag.iron.gone = false; bag.iron.cool = 0; bag.iron.left = 100;
+        } else if (!(bag.iron.built > 0)) {
+          bag.iron.built = 1;                    // 只留目标省一个空位
+        }
+      }
+      /* 中央给足钱料（铁刻意留 0：要触发"缺矿"那条通道） */
+      const cen = D.ensureCentral(cid);
+      cen.gold = 500; cen.timber = 500; cen.grain = 500; cen.iron = 0;
+
+      /* 除目标省外，各省补一位"开局吏"，保证派官时池子里那位只会落在目标省 */
+      for (const p of list) {
+        if (p.id === target.id) continue;
+        if (!AO.resOfficial[p.id]) {
+          AO.resOfficial[p.id] = { id: 900000 + p.id, name: '吏' + p.id, traitKey: 'plain',
+            owed: 0, rank: 0, ten: 0, griev: 0, salAcc: 0, warned: 0, at: 0, seed: 1 };
+        }
+      }
+      /* 目标省 = 新占领省（annex 清空官员的那一步） */
+      delete AO.resOfficial[target.id];
+      const T = AO.resTalent[cid] || (AO.resTalent[cid] = { pts: 0, pool: [], total: 0 });
+      T.pool = [];                               // 池里没人 → 还不能派官
+      T.pts = 0;
+
+      /* ① 无官：分数淘汰、挑省跳过、开矿不开工 */
+      step('scoreNoOff', AI.provScore(target, 'school'));
+      step('scoreNoOffRes', AI.provScore(target, 'iron'));
+      const pick = AI.pickProv(cid, 'school');
+      step('pickOther', !!pick && pick.id !== target.id);
+      AI.build(cid);
+      step('siteNoOff', AO.resSim[target.id].iron.site | 0);
+
+      /* ② 池里有人 → 派官（不花建造格、不花金） */
+      T.pool.push({ id: 990001, name: '测试官', traitKey: 'plain', owed: 0, rank: 0,
+        ten: 0, griev: 0, salAcc: 0, warned: 0 });
+      const got = AI.officers(cid, AI.personaOf ? AI.personaOf(cid) : 'balanced');
+      step('assigned', !!AO.resOfficial[target.id]);
+      step('officersRet', !!got);
+
+      /* ③ 派完就能建（同一条缺矿通道） */
+      step('scoreWithOff', AI.provScore(target, 'iron'));
+      AO.resSim[target.id].iron.site = 0;
+      AI.build(cid);
+      step('siteWithOff', AO.resSim[target.id].iron.site | 0);
+      return out;
+    });
+    ck('无官省不投资：开关在定义区（AIECON.govReq.on）', r.cfg === true, 'govReq.on=' + r.cfg);
+    ck('无官省：provScore 直接淘汰（−1，资源 / 民用同一道闸）',
+      r.scoreNoOff === -1 && r.scoreNoOffRes === -1,
+      '学校 ' + r.scoreNoOff + ' · 铁矿 ' + r.scoreNoOffRes);
+    ck('无官省：pickProv 不会挑中它', r.pickOther === true, '挑中了别的省=' + r.pickOther);
+    ck('无官省：缺矿通道也不在那儿开矿（tryMineOpen 直连遍历那条）',
+      r.siteNoOff === 0, '工地=' + r.siteNoOff);
+    ck('新占领省：池里有人 → AI 下一回合就派官（派官不吃建造格）',
+      r.assigned === true && r.officersRet === true, '在任=' + r.assigned);
+    ck('派完官：同一条缺矿通道立刻恢复建造（不会死锁）',
+      r.scoreWithOff > -1 && r.siteWithOff > 0,
+      '分数 ' + Math.round(r.scoreWithOff) + ' · 工地=' + r.siteWithOff);
+  }
+
+  /* ---------------- 11) 活路 + 宰相例外（v19.4 的收口） ----------------
+   * ① 宰相是替玩家干活的（管国库与兵），玩家国的"无官不投资"不该卡他
+   * ② 开不了科的小国不能永远没官：兜底补一位"吏"（无加成），让省恢复建造
+   * ③ 这条活路有开关（govReq.backfill），关掉就是"没科场就烂掉"的版本 */
+  {
+    const r = await ev(() => {
+      const AO = window.AO, D = AO.resDebug, AI = AO.aiDebug;
+      const out = {};
+      out.cfg = !!(AO.AIECON.govReq && AO.AIECON.govReq.backfill !== false);
+
+      /* 复用第 10 节摆好的局面：cid / 目标省 / 中央有钱 / 铁见底 */
+      let cid = 0, list = [];
+      for (const c of window.__world.countries) {
+        if (!c || AO.resWar.dead[c.id]) continue;
+        const ps = AI.provsOf(c.id);
+        if (ps.length >= 3) { cid = c.id; list = ps; break; }
+      }
+      if (!cid) return out;
+      const target = list.find(p => AO.resSim[p.id] && AO.resSim[p.id].iron) || list[0];
+      for (const k in AO.resWar.wars) {
+        const ab = k.split('|');
+        if (+ab[0] === cid || +ab[1] === cid) delete AO.resWar.wars[k];
+      }
+      const cen = D.ensureCentral(cid);
+      cen.gold = 500; cen.timber = 500; cen.grain = 500; cen.iron = 0;
+      for (const p of list) {
+        const bag = AO.resSim[p.id];
+        if (!bag || !bag.iron) continue;
+        bag.iron.stock = 0; bag.iron.halted = false; bag.iron.site = 0;
+        if (p.id === target.id) {
+          bag.iron.built = 0; bag.iron.gone = false; bag.iron.cool = 0; bag.iron.left = 100;
+        } else if (!(bag.iron.built > 0)) bag.iron.built = 1;
+        if (p.id !== target.id && !AO.resOfficial[p.id]) {
+          AO.resOfficial[p.id] = { id: 800000 + p.id, name: '吏' + p.id, traitKey: 'plain',
+            owed: 0, rank: 0, ten: 0, griev: 0, salAcc: 0, warned: 0, at: 0, seed: 1 };
+        }
+      }
+      const T = AO.resTalent[cid] || (AO.resTalent[cid] = { pts: 0, pool: [], total: 0 });
+
+      /* ① 同一局面、同一条缺矿通道：普通 AI 不建，宰相代劳照建 */
+      delete AO.resOfficial[target.id];
+      T.pool = []; T.pts = 0;
+      AI.decide(cid, { build: 1 }, { slots: 1 });
+      out.aiSite = AO.resSim[target.id].iron.site | 0;
+      AO.resSim[target.id].iron.site = 0;
+      AI.decide(cid, { build: 1 }, { slots: 1, byChancellor: true });
+      out.chSite = AO.resSim[target.id].iron.site | 0;
+
+      /* ② 兜底补吏：池空 + 点不够开科 → 这一位"吏"补上（seed=1、无加成） */
+      AO.resSim[target.id].iron.site = 0;
+      delete AO.resOfficial[target.id];
+      T.pool = []; T.pts = 0;
+      const got = AI.officers(cid, AI.personaOf ? AI.personaOf(cid) : 'balanced');
+      const off = AO.resOfficial[target.id];
+      out.backfill = !!off;
+      out.isSeed = !!(off && off.seed === 1);
+      out.mul = off ? AO.resOffMul(off) : -1;
+      out.officersRet = !!got;
+      /* 补完就能建（和第 10 节同一条通道） */
+      AO.resSim[target.id].iron.site = 0;
+      AI.build(cid);
+      out.siteAfter = AO.resSim[target.id].iron.site | 0;
+
+      /* ③ 易主的省不给吏：标成 CONQ（annex 会这么记）→ 池空点空也不补，
+       *    必须派真官才恢复建造 —— 这是用户定的口径"占领省不给吏" */
+      delete AO.resOfficial[target.id];
+      AO.resConq[target.id] = D.turn();
+      AO.resSim[target.id].iron.site = 0;
+      T.pool = []; T.pts = 0;
+      AI.officers(cid, AI.personaOf ? AI.personaOf(cid) : 'balanced');
+      out.conqSeed = !!AO.resOfficial[target.id];
+      AI.build(cid);
+      out.conqSite = AO.resSim[target.id].iron.site | 0;
+      delete AO.resConq[target.id];
+      return out;
+    });
+    ck('活路开关在定义区（AIECON.govReq.backfill）', r.cfg === true, 'backfill=' + r.cfg);
+    ck('宰相代劳不受"无官不投资"限制（同一局面：AI 不建、宰相建）',
+      r.aiSite === 0 && r.chSite > 0, 'AI 工地 ' + r.aiSite + ' · 宰相工地 ' + r.chSite);
+    ck('老国土的无官省：会被补一位"吏"（无加成，不是真官）',
+      r.backfill === true && r.isSeed === true && Math.abs(r.mul - 1) < 1e-9,
+      '在任=' + r.backfill + ' · seed=' + r.isSeed + ' · 倍率 ' + r.mul);
+    ck('补了吏之后：这一省恢复建造（死结真的解开了）',
+      r.siteAfter > 0, '工地=' + r.siteAfter);
+    ck('易主的省不给吏（必须派真官）：无官 + 无科场 → 不补、也不建',
+      r.conqSeed === false && r.conqSite === 0,
+      '补吏=' + r.conqSeed + ' · 工地=' + r.conqSite);
+  }
+
   /* ---------------- 收尾 ---------------- */
   const bad = checks.filter(c => !c[1]);
   console.log('');

@@ -224,6 +224,68 @@ function add(list) { for (const c of list) out.push(c); }
     return o;
   }));
 
+  /* ---------------- ②b 武将倒戈（v19.6） ----------------
+   * 规则：一次倒戈 / 独立，本国按 chance 走掉一位将，转投接收国。
+   * 走掉最后一位将的国家从此不能宣战（v19.5），只能招兵防守。
+   * 这里直接调 D.genDefectAt 把四个行为钉住：先走闲将 / 总数不变 /
+   * 带兵的将走时兵留下 / chance=0 时一个都不走。 */
+  add(await page.evaluate(() => {
+    const AO = window.AO, D = AO.resDebug, w = D.world(), o = [];
+    const ok = (n, c, d) => o.push({ name: n, ok: !!c, detail: d === undefined ? '' : String(d) });
+    const C = AO.UNREST && AO.UNREST.genDefect;
+    ok('②b 规则在定义区（on / chance）',
+      !!C && C.on === true && C.chance > 0 && C.chance <= 1, JSON.stringify(C));
+
+    const alive = w.countries.filter(x => x && !D.deadMap[x.id]);
+    if (alive.length < 2 || !C) return o.concat([{ name: '②b 找到两个活国', ok: false, detail: '不够' }]);
+    const a = alive[0].id, b = alive[1].id;
+    const cnt = (cid) => Object.keys(AO.resWar.generals)
+      .filter(k => AO.resWar.generals[k] && AO.resWar.generals[k].owner === cid).length;
+    const total = () => Object.keys(AO.resWar.generals)
+      .filter(k => AO.resWar.generals[k]).length;
+
+    /* 清空两国的将，重摆：一位闲将 + 一位带兵将 */
+    for (const k in AO.resWar.generals) {
+      const g = AO.resWar.generals[k];
+      if (g && (g.owner === a || g.owner === b)) delete AO.resWar.generals[k];
+    }
+    D.milPoolOf(a).length = 0; D.milPoolOf(b).length = 0;
+    const g1 = { id: 880001, name: '闲将', traitKey: 'm_plain', owner: a, armyId: 0 };
+    const g2 = { id: 880002, name: '带兵将', traitKey: 'm_plain', owner: a, armyId: 0 };
+    AO.resWar.generals[g1.id] = g1; AO.resWar.generals[g2.id] = g2;
+    D.milPoolOf(a).push(g1, g2);
+    const prov = D.country(a).provinces[0];
+    const ar = D.newArmy(a, prov, { type: 'army', men: 1000 });
+    D.assignGeneral(ar.id, g2.id, true);
+    const t0 = total();
+
+    C.chance = 1;
+    const mv1 = D.genDefectAt(a, b);
+    ok('②b 先走闲将（不带兵的那位）', !!mv1 && mv1.id === g1.id && g1.owner === b,
+      mv1 ? (mv1.name + ' → ' + b) : '没人走');
+    ok('②b 接收国候选池里拿到他（和武科抽出来的将同一条路）',
+      D.milPoolOf(b).indexOf(g1) >= 0, '池 ' + D.milPoolOf(b).length + ' 位');
+    ok('②b 将的总数不变（不是复制、也不是凭空消失）',
+      total() === t0 && cnt(a) === 1 && cnt(b) === 1,
+      '总数 ' + total() + '（原 ' + t0 + '）· a=' + cnt(a) + ' b=' + cnt(b));
+
+    const mv2 = D.genDefectAt(a, b);
+    ok('②b 只剩带兵的将：兵留下、将走（军队 generalId 清 0）',
+      !!mv2 && mv2.id === g2.id && ar.generalId === 0 && g2.owner === b,
+      mv2 ? (mv2.name + ' → ' + b + ' · 军队将领=' + ar.generalId) : '没人走');
+
+    C.chance = 0;
+    const g3 = { id: 880003, name: '留守', traitKey: 'm_plain', owner: a, armyId: 0 };
+    AO.resWar.generals[g3.id] = g3; D.milPoolOf(a).push(g3);
+    const mv3 = D.genDefectAt(a, b);
+    ok('②b chance=0：一个都不走（开关真的在管）', mv3 === null && cnt(a) === 1,
+      '走人=' + (mv3 ? mv3.name : '无') + ' · a 还剩 ' + cnt(a));
+
+    C.chance = 0.4;      // 还原
+    for (const k of [g1.id, g2.id, g3.id]) delete AO.resWar.generals[k];
+    return o;
+  }));
+
   /* 新国可交互（单独一段：自己造一个，保证它活着） */
   add(await page.evaluate(() => {
     const AO = window.AO, D = AO.resDebug, w = D.world(), o = [];
