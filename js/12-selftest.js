@@ -313,79 +313,40 @@
     add('河网落在陆地上', rvs.length > 0 && offLand === 0,
       rvs.length + ' 条河 / ' + rvPts + ' 个点，不在陆地上的点 ' + offLand);
 
-    /* 17. 资源层（15-resources）—— 七种齐全 / 储量合法 / 地形偏好 / 汇总一致 / 可复现 */
-    var rTot = 0, rBadN = 0, rMissing = 0, rUnsorted = 0, rKinds = 0, rSumP = 0;
-    var rMtnN = 0, rMtnG = 0, rPlnN = 0, rPlnG = 0;
-    var rCoastN = 0, rCoastBy = {}, rSeq = [];
-    var rFull = (1 << (AO.RESOURCES ? AO.RESOURCES.length : 7)) - 1;
+    /* 17. AoC2 数据模型（15-aoc2）—— 阶段一换骨架后的新字段
+     * 旧制的"七种资源"已退役，这条断言改成查新模型：省字段齐全、经济不超人口
+     * （岗位逻辑）、发展度落在 0.01~2.0、核心表有主、同 seed 逐省一致。 */
+    var aTot = 0, aMiss = 0, aEcon = 0, aDev = 0, aCore = 0, aSeq = [];
     for (i = 0; i < world.provinces.length; i++) {
       var pr = world.provinces[i];
       if (!pr) continue;
-      rTot++;
-      var rs = pr.resources || [];
-      var topK = rs.length ? rs[0].key : null;
-      /* 逐省签名：种类 + 储量，用于同 seed 比对 */
-      var sig = '', mask = 0, prev = 101;
-      for (k = 0; k < rs.length; k++) {
-        sig += rs[k].key + rs[k].n + ';';
-        rSumP += rs[k].n;
-        if (!(rs[k].n >= 1 && rs[k].n <= 100) || rs[k].n !== Math.round(rs[k].n)) rBadN++;
-        if (rs[k].n > prev) rUnsorted++;              // 必须按储量降序
-        prev = rs[k].n;
-        mask |= 1 << (AO.RESOURCE_INDEX[rs[k].key] || 0);
-        rKinds++;
-      }
-      if (mask !== rFull) rMissing++;                 // 七种资源必须齐全
-      rSeq.push(sig);
-      if (pr.terrain === 'mountains') {
-        rMtnN++;
-        if (topK === 'iron' || topK === 'gold') rMtnG++;
-      }
-      if (pr.terrain === 'plains') {
-        rPlnN++;
-        if (topK === 'iron' || topK === 'gold') rPlnG++;
-      }
-      /* 岸线类别用 coastDirs 判，不看 terrain —— 地形里已经没有"沿海"这种东西，
-       * "临不临海"是岸线画像（几面临海 / 陡岸 / 河口）的事。 */
-      if (pr.coastDirs > 0) {
-        rCoastN++;
-        rCoastBy[topK] = (rCoastBy[topK] || 0) + 1;
-      }
+      aTot++;
+      var a = pr.aoc;
+      if (!a || !a.pop || typeof a.econ !== 'number' || typeof a.dev !== 'number' ||
+        typeof a.stab !== 'number' || typeof a.happy !== 'number' || !a.core) { aMiss++; continue; }
+      var tp = 0;
+      for (var nk in a.pop) tp += a.pop[nk] || 0;
+      if (a.econ > tp + 0.001) aEcon++;
+      if (!(a.dev >= AO.AOC2.DEV_MIN && a.dev <= AO.AOC2.DEV_MAX)) aDev++;
+      if (!a.core[pr.owner]) aCore++;
+      aSeq.push(a.econ + '|' + a.dev + '|' + a.stab + '|' + a.happy);
     }
-    var rMtnPct = rMtnN ? rMtnG / rMtnN : -1;
-    var rPlnPct = rPlnN ? rPlnG / rPlnN : -1;
-    var rCoastTop = null, rCoastMax = -1;
-    for (var rck in rCoastBy) if (rCoastBy[rck] > rCoastMax) { rCoastMax = rCoastBy[rck]; rCoastTop = rck; }
-    var rSumC = 0;
-    for (i = 0; i < world.countries.length; i++) {
-      var crs = world.countries[i].resources || [];
-      for (k = 0; k < crs.length; k++) rSumC += crs[k].n;
-    }
-    /* 逐省可复现：拿第 8 条已经生成好的两个世界比，不再多算一遍 */
-    var rSame = true, rSameNote = '（未复现：缺少 opts）';
+    var aSame = true, aSameNote = '（未复现：缺少 opts）';
     if (rep) {
-      var rSeq2 = [];
+      var aSeq2 = [];
       for (i = 0; i < rep.a.provinces.length; i++) {
         var pa2 = rep.a.provinces[i];
-        if (!pa2) continue;
-        var sig2 = '', rs2 = pa2.resources || [];
-        for (k = 0; k < rs2.length; k++) sig2 += rs2[k].key + rs2[k].n + ';';
-        rSeq2.push(sig2);
+        if (!pa2 || !pa2.aoc) continue;
+        aSeq2.push(pa2.aoc.econ + '|' + pa2.aoc.dev + '|' + pa2.aoc.stab + '|' + pa2.aoc.happy);
       }
-      rSame = rSeq2.length === rSeq.length;
-      for (i = 0; rSame && i < rSeq2.length; i++) if (rSeq2[i] !== rSeq[i]) rSame = false;
-      rSameNote = rSame ? '同 seed 逐省一致' : '同 seed 出现分歧';
+      aSame = aSeq2.length === aSeq.length;
+      for (i = 0; aSame && i < aSeq2.length; i++) if (aSeq2[i] !== aSeq[i]) aSame = false;
+      aSameNote = aSame ? '同 seed 逐省一致' : '同 seed 出现分歧';
     }
-    var coastOK = !(rCoastN > 0) || rCoastTop === 'fish';
-    add('资源层（七种齐全 / 储量 / 地形偏好 / 汇总 / 可复现）',
-      rMissing === 0 && rBadN === 0 && rUnsorted === 0 && rMtnPct > rPlnPct && coastOK &&
-      rSumC === rSumP && rSame,
-      rTot + ' 省 × ' + AO.RESOURCES.length + ' 种（缺项 ' + rMissing + '）；' +
-      '储量越界 ' + rBadN + ' 条、乱序 ' + rUnsorted + ' 条（应 1~100 且降序）' +
-      '；山地主导铁金 ' + (rMtnPct < 0 ? 'n/a' : (rMtnPct * 100).toFixed(1) + '%') +
-      ' vs 平原 ' + (rPlnPct < 0 ? 'n/a' : (rPlnPct * 100).toFixed(1) + '%') +
-      '；海岸主导 ' + (rCoastTop || 'n/a') + (rCoastN ? '（' + rCoastMax + '/' + rCoastN + '）' : '') +
-      '；国家储量合计 ' + rSumC + ' / 省合计 ' + rSumP + '；' + rSameNote);
+    add('AoC2 省模型（人口表 / 经济≤人口 / 发展度区间 / 核心 / 可复现）',
+      aMiss === 0 && aEcon === 0 && aDev === 0 && aCore === 0 && aSame,
+      aTot + ' 省：缺字段 ' + aMiss + ' · 经济超人口 ' + aEcon + ' · 发展度越界 ' + aDev +
+      ' · 无核心 ' + aCore + '；' + aSameNote);
 
     var pass = checks.every(function (c) { return c.ok; });
     return { pass: pass, checks: checks, meta: m };

@@ -2571,6 +2571,24 @@
     /* 长按 = 看说明（11-ui.js 的 bindTouchTips）：别让系统把长按当成选字/callout */
     [title] { -webkit-touch-callout: none; }
   }
+
+/* ---------------- AoC2：敕令行与预算滑条 ----------------
+ * 滑条用原生 input[type=range]，不引任何库：file:// 下也一定跑得动。
+ * 数字一律右对齐等宽，扫一眼能对齐 —— 这一页就是拿来比大小的。 */
+.aocrow { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 6px; }
+.aocrow button { flex: 1 1 auto; min-width: 92px; padding: 6px 8px; font-size: 12px;
+  border: 1px solid var(--line, #d8d2c4); border-radius: 6px; background: #fffdf7;
+  color: inherit; cursor: pointer; line-height: 1.3; }
+.aocrow button b { display: block; font-size: 12px; font-weight: 600; }
+.aocrow button em { display: block; font-style: normal; font-size: 11px; opacity: .72; margin-top: 1px; }
+.aocrow button:hover:not(:disabled) { border-color: #b9ac8e; background: #fff8e8; }
+.aocrow button:disabled { opacity: .45; cursor: not-allowed; }
+.aocslider { display: grid; grid-template-columns: 52px 1fr 42px; align-items: center;
+  gap: 6px; padding: 2px 0; font-size: 12px; }
+.aocslider input[type=range] { width: 100%; height: 16px; accent-color: #8a6d34; }
+.aocslider .v { text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
+.aocslider.sum { border-top: 1px dashed var(--line, #d8d2c4); margin-top: 3px; padding-top: 4px; }
+.aocslider.sum .v { font-weight: 600; }
 </style>
 </head>
 <body>
@@ -2592,8 +2610,6 @@
     <div class="segs" id="viewSeg">
       <button data-view="political" class="on">政治</button>
       <button data-view="terrain">地形</button>
-      <button data-view="faith">宗教</button>
-      <button data-view="resources">资源</button>
     </div>
   </div>
 
@@ -2659,78 +2675,44 @@
 <section class="card" id="info">
   <div class="empty" id="infoEmpty">未选中省份</div>
   <div id="infoBody" style="display:none">
-    <!-- 迷雾黄条（v6）：只有 seen 态会出现 —— 写着情报截止第几回合、陈旧几回合 -->
+    <!-- 迷雾黄条（阶段五接三档迷雾，先留着壳） -->
     <div id="iFogBar" class="fogbar" hidden></div>
     <div class="ipanes">
-    <!-- 信息 -->
     <div class="col info-col">
-      <!-- 概要区（常显）：名字 → 快照 → 归属 → 人口 → 民心 → 安定 → 收支 → 条件行动行 -->
+      <!-- 概要区（AoC2 口径）：归属 → 人口 → 经济 → 发展度 → 稳定 → 幸福 → 增长 -->
       <div class="isum">
         <h2><span class="sw" id="iSw"></span><span id="iName"></span></h2>
         <div class="en" id="iNameEn"></div>
-        <!-- 情报快照（v6）：seen 态下替代人口/民心/建筑那几行 —— 只有上回所见。
-             放在概要区顶部（名字之后、归属之前），**不进「测绘详情」**：
-             它是警告，不能被折叠吞掉 —— 先知道"这是旧闻"，再谈这个省长什么样。 -->
         <div class="fogsnap" id="iFogSnap"></div>
         <div class="kv"><span>归属</span><span id="iOwner" title="点击查看该国资料"></span></div>
-        <div class="kv" id="kvPop"><span>人口</span><span id="iPop"></span></div>
-        <!-- 民心：数字 + 收税系数；悬停看 drivers 逐项（基准/税率/缺粮/停产/官员/市场） -->
-        <div class="kv" id="kvHappy"><span>民心</span><span id="iHappy" title="民心明细"></span></div>
-        <!-- 安定（不安值）：数字 + 小色条。≥40 黄、≥70 红；未整合省另有「整合」行。
-             悬停逐项列出六个驱动（民心塌陷/停产/未整合/异信仰/贪墨/匪患）—— 见 15-resources 的 UNREST -->
-        <div class="kv" id="kvUnrest"><span>安定</span><span id="iUnrest" title="不安明细"></span></div>
-        <!-- 收支小结：一行只放非零项，title 给明细（居民吃 / 抽税 / 维护） -->
-        <div class="kv flow" id="iFlow" title="上一回合的实际进出"></div>
-        <!-- 两个条件行动行：只在"该出手"的时候出现（本来就地 hidden 切换，留在概要） -->
-        <div class="kv" id="kvInteg" style="display:none"><span>整合</span><span id="iInteg" title="占领整合进度"></span></div>
-        <!-- 安抚（B3）：金能买人心。只在"未整合 或 不安 ≥40"的省出现 -->
-        <div class="kv" id="kvPacify" style="display:none"><span>安抚</span><span id="iPacifyBox"></span></div>
+        <div class="kv"><span>人口</span><span id="iPop"></span></div>
+        <div class="kv"><span>经济</span><span id="iEcon" title="经济 = 岗位；上限 = 人口（规则书第二章、第三章）"></span></div>
+        <div class="kv"><span>发展度</span><span id="iDev" title="0.01 ~ 2.0；自然增长到 1.0 封顶，再往上只能投资发展"></span></div>
+        <div class="kv"><span>稳定</span><span id="iStab" title="1% ~ 100%：国籍占比 / 驻军 / 疾病 / 幸福 / 占领"></span></div>
+        <div class="kv"><span>幸福</span><span id="iHappy" title="0 ~ 100%：税率 + 物资 + 节日 + 厌战"></span></div>
+        <div class="kv"><span>增长</span><span id="iGrowth" title="人口每回合自然增长率（地形 × 政体 × 幸福）"></span></div>
+        <div class="kv"><span>核心</span><span id="iCore" title="这省是谁的核心领土（历史主张）"></span></div>
+        <div class="kv"><span>价值</span><span id="iValue" title="省份价值：贸易定价用（购省价 = 40000 × 价值）"></span></div>
       </div>
 
       <!-- 「测绘详情」：查资料才展开的那一叠 -->
       <div class="detbar" id="detBar" role="button" tabindex="0"
-        title="地形 / 岸线 / 官员 / 信仰 / 城防 / 可开发 / 面积 / 质心 / 邻接 —— 点开查资料，再点收起">
+        title="地形 / 岸线 / 面积 / 质心 / 邻接 —— 点开查资料，再点收起">
         <span>测绘详情</span><i class="dcar">▸</i><em class="dsum" id="detSum"></em>
       </div>
       <div class="detwrap" id="detWrap">
         <div class="kv"><span>地形</span><span id="iTerrain"></span></div>
         <div class="kv"><span>岸线</span><span id="iWater"></span></div>
-        <!-- 官员：在任 → 名字+词条（点击开治理面板撤换）；空缺 → 提示裸税系数 -->
-        <div class="kv" id="kvOfficial"><span>官员</span><span id="iOfficial" title="点击打开治理面板"></span></div>
-        <!-- 信仰：符号 + 名 + 是否国教角标（信息归省卡，操作归治理面板） -->
-        <div class="kv" id="kvFaith"><span>信仰</span><span id="iFaith" title="本省信仰"></span></div>
-        <!-- 城防（城墙）：有墙才显示（没墙这一行整个隐藏）。迷雾遮蔽时也隐藏 ——
-             墙的耐久是真实数据，不该从旧情报里漏出来。 -->
-        <div class="kv" id="iWallRow" style="display:none"><span>城防</span><span id="iWall" title="城墙耐久"></span></div>
-        <div class="sec" id="secRes" title="这地方天然有什么、还剩多少没挖（未开发）/ 已经产出多少（已开发）。点某一行，右边看它能盖什么">可开发
-          <span class="st2" id="resState"><button data-st="raw" class="on">未开发</button><button data-st="dev">已开发</button></span>
-        </div>
-        <div class="reslist" id="iResList"></div>
-        <div class="kv" id="kvArea"><span>面积</span><span id="iArea"></span></div>
-        <div class="kv" id="kvCentroid"><span>质心</span><span id="iCentroid"></span></div>
-        <div class="kv" id="kvDeg"><span>邻接</span><span id="iDeg"></span></div>
+        <div class="kv"><span>面积</span><span id="iArea"></span></div>
+        <div class="kv"><span>质心</span><span id="iCentroid"></span></div>
+        <div class="kv"><span>邻接</span><span id="iDeg"></span></div>
         <div class="chips" id="iNeighbors"></div>
       </div>
     </div>
-    <!-- 右栏：建筑（＋ 在这里；建造吃国家资源） -->
-    <div class="col bld-col">
-      <div class="sec gsec" data-grp="gen" title="通用设施：不绑在某一种资源上。学校产科研点（攒满解锁科技树）；市场把资源换成金（手动卖）；建造坊让工地能冲刺工期 —— 它停产，这个省的冲刺钮就消失；粮仓给粮/渔加库存上限（每座 +100，3 座封顶）；大学每回合 +6 科研点、+2 人才点（要累计教育 60）">通用<i class="gcar">▸</i><em class="gsum" id="gsumGen"></em><i class="gdot"></i></div>
-      <div class="reslist bldlist gbd" id="iSchoolList"></div>
-      <div class="sec gsec" data-grp="bld" title="＋ 建造：先从本省库存扣，不够向中央申请，中央再从富裕省份调拨（有调拨损耗）。建造要花几个回合，货运等级越高工期越短；每座建筑每回合还要吃铁+金维护，付不起就停产。铁矿脉枯竭之后，那一行的 ＋ 会变成「改建熔旧坊」（木材 10 · 金 14，2 回合；每座 0.5~0.6 铁/回合，金耗 = 产量 × 0.5，1 铁 = 0.5 金锁死）">建筑<i class="gcar">▸</i><em class="gsum" id="gsumBld"></em><i class="gdot"></i></div>
-      <div class="reslist bldlist gbd" id="iBldList"></div>
-      <div class="bldmsg" id="bldMsg"></div>
-      <!-- 军备（v3）：五种装备厂 + 本省驻军。兵营征兵、军械坊产军械、驯马场产战马、铸炮厂产炮、造船厂产舰 -->
-      <div class="sec gsec" data-grp="mil" title="军备：兵营（征兵入口）· 军械坊（订单产军械，需本省有铁矿）· 驯马场（产战马，需牧场）· 铸炮厂（需铁矿 + 累计教育 ≥ 35）· 造船厂（需沿海缓岸）· 工厂（累计教育 15，本省军械产出 ×2）。全部吃铁+金维护，付不起停产。城墙（城防值）排在最后：守方的额外血条，会战与轰击先扣它，围城无视它">军备<i class="gcar">▸</i><em class="gsum" id="gsumMil"></em><i class="gdot"></i></div>
-      <div class="reslist bldlist gbd" id="iMilList"></div>
-      <div class="sec gsec" data-grp="frt" title="货运：升级后调拨更快（损耗更低）、工期更短">货运<i class="gcar">▸</i><em class="gsum" id="gsumFrt"></em><i class="gdot"></i></div>
-      <div class="reslist bldlist gbd" id="iFreightList"></div>
     </div>
-    </div>
-    <!-- 两个入口：先给选择，再给内容（点哪个展开哪个，再点收起） -->
-    <div class="itabs" id="infoTabs">
-      <button class="itab" type="button" data-tab="info">信息</button>
-      <button class="itab" type="button" data-tab="bld">建筑</button>
-    </div>
+    <!-- 敕令（规则书第二十一章）：本阶段三条，都花移动点 -->
+    <div class="sec">敕令<span class="st2" id="iMP"></span></div>
+    <div class="aocrow" id="iDecree"></div>
   </div>
 </section>
 
@@ -2752,57 +2734,42 @@
       <div class="ls" id="cLeaderSub"></div>
     </div>
   </div>
-  <!-- 迷雾（v6）：别国只给情报档允许的那几个字段。**不进页签** ——
-       它是警告，不是资料，任何时候都压在最上面。 -->
   <div id="cFogBar" class="fogbar" hidden></div>
   <div id="cFogInfo" class="foginfo" hidden></div>
-  <!-- 三个页签（v16）：概览 / 内政 / 外交。样式和省份卡的「信息 / 建筑」同一套，
-       只切容器类名，所有 renderXXX 照旧往原 id 写。 -->
+  <!-- 两个页签（AoC2 口径）：概览 / 内政。外交要到阶段四才回来 -->
   <div class="itabs" id="cTabs">
-    <button class="itab" type="button" data-ctab="ov" title="疆域与国情：政体、人口、地形构成、信仰构成、邻国">概览</button>
-    <button class="itab" type="button" data-ctab="gov" title="钱与人：国库、科技、治理（税率 / 官员 / 民心）">内政</button>
-    <button class="itab" type="button" data-ctab="dip" title="刀兵与盟约：交战对象、宣战停战、群龙无首、投降线">外交</button>
+    <button class="itab" type="button" data-ctab="ov" title="疆域与国情：政体、人口、经济、发展度、幸福、稳定、邻国">概览</button>
+    <button class="itab" type="button" data-ctab="gov" title="钱与政策：国库、贷款、税率滑条、四条预算滑条、移动点 / 外交点">内政</button>
   </div>
   <div class="cpane cpane-ov">
     <div class="kv"><span>政体</span><span id="cGov"></span></div>
-    <div class="kv"><span>经济</span><span id="cEcon"></span></div>
     <div class="kv"><span>人口</span><span id="cPop"></span></div>
-    <!-- 承载力（v18.2）：总人口 / 总上限。人口是活的（POP 表），上限按各省现算 -->
-    <div class="kv"><span>承载</span><span id="cPopCap"></span></div>
+    <div class="kv"><span>经济</span><span id="cEcon" title="全国经济值合计；每省上限 = 该省人口"></span></div>
+    <div class="kv"><span>发展度</span><span id="cDev" title="全国各省平均发展度"></span></div>
+    <div class="kv"><span>幸福</span><span id="cHappy" title="按人口加权"></span></div>
+    <div class="kv"><span>稳定</span><span id="cStab" title="按人口加权"></span></div>
+    <div class="kv"><span>国库</span><span id="cTreasuryShort"></span></div>
     <div class="kv"><span>面积</span><span id="cArea"></span></div>
     <div class="kv"><span>首都</span><span id="cCapital"></span></div>
     <div class="kv"><span>省份</span><span id="cProv"></span></div>
-    <!-- 安定（A 批）：这个国里有几省在骚动（不安 ≥ 40）/ 叛乱中（≥ 80） -->
-    <div class="kv"><span>安定</span><span id="cUnrest" title="不安 ≥40 = 骚动，≥80 = 随时爆发叛乱"></span></div>
     <div class="sec">地形构成</div>
     <div class="bar" id="cBar"></div>
     <div class="legend" id="cLegend"></div>
-    <div class="sec">信仰构成</div>
-    <div class="bar" id="cFaithBar"></div>
-    <div class="flist" id="cFaithList"></div>
-    <div class="tenet" id="cTenet"></div>
     <div class="sec">邻国</div>
     <div class="chips" id="cNeighbors"></div>
   </div>
-  <!-- 内政：国库 / 科技 / 治理 —— 三节都是"能动手"的，所以单独一页 -->
+  <!-- 内政：国库 / 五条滑条 / 点数 —— 全是"能动手"的，所以单独一页 -->
   <div class="cpane cpane-gov">
-    <!-- 国库：中央各资源库存 + 全国每回合净流（抽税两边相抵，所以是真实增减） -->
-    <div class="sec" title="库存 = 中央国库现有量（维护与科技都从这里扣）；净流 = 全国每回合实际进出 = Σ省(产出 − 支出) + 中央(税入 − 垫付)">国库</div>
+    <div class="sec" title="国库 = 国家金库；税收滑条那一份扣掉行政费、军费、贷款利息之后进这里">国库</div>
     <div id="cTreasury" class="treasury"></div>
-    <!-- 科技：国家卡里**唯一可操作**的一节，所以放在政体信息正下方 ——
-         原来挂在「邻国」之后，卡片一滚就看不见，玩家找不到「研究」钮 -->
-    <div class="sec" title="科研：学校每回合产科研点；攒满解锁科技树，之后花科研点+国库资源研究。研究完的建筑可以盖/升 Lv2">科技</div>
-    <div id="cTech" class="techbox"></div>
-    <!-- 治理：和「科技」并排的一节 —— 科技管国家工程，治理管人和钱（税率 / 民心 / 官员） -->
-    <div class="sec" title="治理：税率三档（税入 ↔ 民心）· 学校产人才点 → 开科取士 → 派官员上任。人口税进省库（本省金锭库存 + 民间铁器熔缴的少量铁锭），生产抽税进中央国库，两本账不混"><img
-        class="seci" src="assets/res/item-official.png" alt=""
-        onerror="this.style.display='none'">治理</div>
-    <div id="cGovern" class="govbox"></div>
-  </div>
-  <!-- 外交：交战对象 / 宣战停战（只有玩家国能用）/ 群龙无首 / 投降线 / 傀儡横幅 -->
-  <div class="cpane cpane-dip">
-    <div class="sec" title="外交：宣战之后两国军队才会交战、才能占领对方省份；剩省降到投降线以下就全境并入对方（群龙无首时投降线放宽到 2/3）">外交</div>
-    <div id="cDiplo" class="govbox"></div>
+    <div class="sec" title="四条预算滑条把总收入切开，合计不超过 100%；没分配的部分自动进国库">预算分配</div>
+    <div id="cSliders"></div>
+    <div class="sec" title="税率决定各省征税强度，上限由政体决定（君主制 25%）；抬税降幸福">税率</div>
+    <div id="cTaxRow"></div>
+    <div class="kv"><span>移动点</span><span id="cMP" title="每回合刷新；军队移动与敕令都花它"></span></div>
+    <div class="kv"><span>外交点</span><span id="cDIP" title="外交行动用（阶段四接）"></span></div>
+    <div class="kv"><span>研究点</span><span id="cRP" title="科研滑条那一份转成研究点（阶段四接科技）"></span></div>
+    <div class="kv"><span>投资款</span><span id="cIP" title="投资滑条那一份攒成投资款（投资敕令用）"></span></div>
   </div>
 </section>
 
@@ -2816,24 +2783,12 @@
   <div id="menuWrap">
     <button id="menuBtn" class="ghost" title="菜单：科技 · 治理 · 编年史 · 纪要 · 存档 · 读档" aria-haspopup="true" aria-expanded="false">☰</button>
     <div id="menuPop" role="menu">
-      <button id="techBtn" class="ghost" role="menuitem" title="科技树：花科研点研究，解锁建筑 Lv2">科技</button>
-      <button id="govBtn" class="ghost" role="menuitem" title="治理：税率 / 官员 / 民心 / 各省税入（全屏总览）">治理</button>
       <button id="chronoBtn" class="ghost" role="menuitem" title="编年史：这一局的年表 / 三张地图 / 终局数据与称号。随时可开，随时可定稿">编年史</button>
       <button id="notesBtn" class="ghost" role="menuitem" title="纪要：这一回合攒下的提示与世界新闻（可只看自己的 / 只看世界的）">纪要</button>
       <button id="saveBtn" class="ghost" role="menuitem" title="存档：会覆盖当前存档（存在浏览器 localStorage 里，不含地图，只存 seed + 状态）">存档</button>
       <button id="loadBtn" class="ghost" role="menuitem" title="读档：会替换当前世界（按存档的 seed 重新生成，再灌回库存/建筑/科技/回合数）">读档</button>
     </div>
   </div>
-  <button id="warBtn" class="ghost" title="军务：将领 / 军队 / 命令与战术 / 战报（和治理同一块面板的第二个页签）">军务</button>
-  <!-- 经营（19-repair.js + 20-balance.js）：维修与平衡合在一张浮层里，两个页签。
-       徽标上的红点 = 有几处失修（主动停掉的不算）。
-       为什么不叫「内政」：国家卡里已经有一个「内政」页签（国库/科技/治理），
-       重名会让玩家以为是同一块东西。 -->
-  <button id="repBtn" class="ghost" title="经营：维修（按城决定每类建筑留几座在跑）+ 平衡（收支折线图与外推）">经营<i class="nbadge" id="repBadge"></i></button>
-  <!-- 产能 / 武库（v19）：全国三个产能池 + 19 条产线；武库是成品（队份）与发配。
-       两个都是"全国口径"的页 —— 和「经营」一样是全屏纸面。 -->
-  <button id="millBtn" class="ghost" title="产能：军械 / 马厩 / 船坞 三个池，19 条产线怎么分点（全国一张表）">产能</button>
-  <button id="arsBtn" class="ghost" title="武库：全国库存（队份）+ 驻军清单 + 点部队发装备">武库</button>
   <button id="playBtn" class="ghost" title="选一个国家开始游戏：别国的省卡与面板会置灰，你只能操作自己的国">开始游戏</button>
   <button id="nextTurn" class="primary" title="结算本回合，进入下一回合（空格）">下一回合 ▸</button>
 </div>
@@ -3160,6 +3115,7 @@
 <script src="js/08b-society.js"></script>
 <script src="js/09-export.js"></script>
 <script src="js/15-resources.js"></script>
+<script src="js/15-aoc2.js"></script>
 <script src="js/16-events.js"></script>
 <script src="js/17-chrono.js"></script>
 <script src="js/13-main.js"></script>

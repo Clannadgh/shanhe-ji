@@ -364,6 +364,7 @@ const COLOR_COUNT = `(cv) => {
       hasChrono: !!raw.CHRONO,
       years: (raw.CHRONO.YEARLOG || []).length,
       fin: !!(raw.CHRONO.FINAL && raw.CHRONO.FINAL.data),
+
       bytes: JSON.stringify(raw).length
     };
   });
@@ -403,7 +404,7 @@ const COLOR_COUNT = `(cv) => {
   });
   ck('读档后定稿三图仍能画出来', restored.length === 3 && restored.every(n => n > 60), restored.join('/'));
 
-  /* 旧档（v4，没有 CHRONO）→ 空年表起步，不炸 */
+  /* 旧档（v6 及以下）→ **拒读**并提示 legacy-v19（阶段一换血后的新政策） */
   const old = await page.evaluate(() => {
     const raw = JSON.parse(localStorage.getItem(AO.SAVE_KEY));
     raw.v = 4;
@@ -420,8 +421,9 @@ const COLOR_COUNT = `(cv) => {
     flags: AO.chronoFlags(),
     turn: AO.resDebug.turn()
   }));
-  ck('读 v4 旧档：年表空档起步、不炸', old && oldLoad.years === 0 && oldLoad.turn > 0,
-    JSON.stringify(oldLoad));
+  ck('读 v6 旧档：拒读，年表保持原样、世界不重建',
+    old && oldLoad.years === 8 && oldLoad.turn === 8,
+    JSON.stringify(oldLoad) + '（旧档被挡在版本闸门外）');
 
   /* ================= ⑧ 灭亡：亡国史书 + 悲情末帝 ================= */
   await smallWorld('chrono-spec-3');

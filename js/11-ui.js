@@ -189,11 +189,9 @@
         state.opts = opts;
         state.world = world;
         root.__world = world;                    // 调试用
-        seedAllSims(world);                      // 整张图进后台模拟
-        /* 外交关系与 AI 情报预算（v6）：每局重掷 —— 关系值是"这一局"的局势，
-         * 和种子一样属于存档状态（玩家那份进档，AI 的运行时重长）。 */
-        initRel(world);
-        rollAiBudgets(world);
+        /* AoC2 数据模型已经由 AO.generate 挂好（15-aoc2 的 initWorld）。
+         * 旧的 seedAllSims（每省铺资源 / 建筑 / 官员）随七种资源一起退役 ——
+         * 现在一个省只有人口、经济、发展度、稳定、幸福、革命风险这几项。 */
         /* 事件 / 信仰（v4）：换世界必须全清 —— 冷却表、传教中、政策、国教
          * 都是"这一局"的，留着会让新世界的第 3 回合突然跳出上一局的旧事件。 */
         if (AO.evtReset) AO.evtReset();
@@ -1950,419 +1948,39 @@
   AO.resFinishSite = finishSite;
 
   /* 结算一回合：所有省的资源与工地各走一步 */
+  /* =============================================================
+   * 结算一回合（AoC2 口径，阶段一）
+   *
+   * 旧制的四百行逐省循环（维护 / 停产 / 产出 / 抽税 / 上解 / 官员 / 科研 /
+   * 战争 / 叛乱 / 情报 / 外交 / 事件 / 物价）整体退役 —— 换血不是"把新规则
+   * 插进旧循环"，那会得到一套两本账互相打架的怪物。
+   *
+   * 现在的顺序全在 AO.aoc2.settle 里（规则书第三、八章）：
+   *   省收入 → 国库 → 行政费/军费/利息 → 物资 → 幸福 → 稳定 → 增长
+   * 这里只做三件事：推进回合号、给玩家一条能读的反馈、归档编年史。
+   *
+   * 本阶段**没有军队、没有战争** —— 世界是纯经济沙盒，这是刻意的中间态
+   * （任务书阶段一末句）。军队与战争在阶段二回来。
+   * ============================================================= */
   function settleTurn() {
     turnNo++;
-    var selPid = state.renderer ? state.renderer.selected : 0;
-    var pid, key, s, def, sch, prov, owner, was, ki;
+    var w = state.world;
+    if (!w) return;
+    AO.aoc2.settle(w);
 
-    /* ⓿ 流水清零：收支小结只说"这一回合"的事，跨回合累加会变成一本糊涂账。
-     * d.cap 是内政批新加的一格：**被库存上限吃掉的量**（满仓损耗）。
-     * 它不进 gain / loss —— 那两份记的是真正落袋与真正流出的钱粮，
-     * 满仓浪费的东西从来没进过库存，混进去会让库存变化对不上账。 */
-    for (pid in SIM) {
-      FLOW[pid] = newFlow();
+    /* 给玩家一条能读的反馈：自己国这一回合的钱怎么来的、怎么没的 */
+    var me = PLAYER ? w.countries[PLAYER - 1] : null;
+    if (me && me.aoc && me.aoc.last) {
+      var L = me.aoc.last;
+      var sign = L.net >= 0 ? '+' : '−';
+      NOTES.push({
+        owner: me.id, cls: L.net >= 0 ? '' : 'warn',
+        text: '国库 ' + (L.net >= 0 ? '+' : '−') + Math.abs(Math.round(L.net)) + ' 金' +
+          '（毛收入 ' + Math.round(L.gross) + ' · 入库 ' + Math.round(L.taxIn) +
+          ' · 行政 ' + Math.round(L.admin) + '）'
+      });
     }
-    for (var co in CENTRAL) {
-      FLOWC[co] = { gain: Object.create(null), loss: Object.create(null),
-                    d: { eat: Object.create(null), tax: Object.create(null),
-                         maint: Object.create(null), maintC: Object.create(null) } };
-    }
-    /* ⓪b 中央拨款：每个国家批一笔"这回合能动的维护钱"（见 js/19-repair.js）。
-     * 必须**在 ① 维护之前**批好 —— 批的额度按上一回合各档实付估，
-     * 所以它是"回合开始时的存量"，和本回合的产出无关。 */
-    if (AO.repTurnStart) {
-      var owners = Object.create(null);
-      for (pid in SIM) {
-        prov = state.world ? state.world.provinces[(pid | 0) - 1] : null;
-        if (prov && prov.owner) owners[prov.owner] = 1;
-      }
-      for (var ow in owners) AO.repTurnStart(+ow);
-    }
-
-    for (pid in SIM) {
-      var bag = SIM[pid];
-      prov = state.world ? state.world.provinces[(pid | 0) - 1] : null;
-      owner = prov ? prov.owner : 0;
-      /* 记账上下文：payMaint / settlePop / 抽税都从这里取，省得给每个函数加参数 */
-      CUR.pid = pid | 0; CUR.owner = owner | 0;
-      CUR.F = FLOW[pid]; CUR.FC = FLOWC[owner] || null;
-      var mods = MODS(owner);
-      /* 官员加成（科技加成 + 这一省在任官员的词条）每省算一次，③④⑤ 共用 */
-      var pmod = PMOD(pid, owner);
-
-      /* ①-0 养得起几座就养几座（v18.5）：按库存把"能养的座数"写进保留表。
-       * 必须在 ① 维护**之前** —— 这一回合就按新座数收钱，否则先按全座收一遍，
-       * 收不起再改成 0 座，等于白停一回合。 */
-      trimKeep(pid, owner);
-
-      /* ① 维护：**在产出之前**算，按建筑类型各自付、各自停。
-       * 付得起 → 当回合照常出产；付不起 → 这一类当回合起产量 0，凑齐了自动复工。
-       * 枯竭的不收维护（矿脉都没了，没什么可养的），否则那些省会永远失血。
-       * 维护只按**在跑的座数**收（玩家在右上「维修」里按城调保留几座）。 */
-      var haltedNow = [];      // { t: 名字, obj: 状态袋, fresh: 这一回合刚停, iron: 铁需求 }
-      for (key in bag) {
-        s = bag[key];
-        def = AO.RESOURCE_BY_KEY[key];
-        if (!def) continue;
-        if (!s.built || s.gone) { s.halted = false; continue; }
-        /* 铁矿「深层休眠」（v18 追加一补课）：和枯竭一样不产、不收维护 ——
-         * 48 回合的等待期还要按座收铁收金，那不是在等矿醒，是在等死。
-         * 别的资源的冷静期照旧收（3~9 回合的短休耕，是"地还在，只是歇一季"）。 */
-        if (key === 'iron' && s.cool > 0) { s.halted = false; continue; }
-        was = s.halted;
-        var rDue = maintDue(s, def, owner, pid, key);
-        s.halted = !payMaint(pid, owner, rDue, s.mAcc, key);
-        if (s.halted) {
-          haltedNow.push({ t: def.build, cls: 'res', obj: s, fresh: !was,
-            iron: rDue.iron || 0, def: def, key: key });
-        }
-      }
-      /* 学校 / 市场 / 建造坊…：同一种形状，一遍循环处理完。
-       * 通用设施的产出是**离散**的（学校产科研点、兵营征兵、工厂开一条产线），
-       * "留半座"没有意义 —— 所以它们的保留座数只有两态：全开 / 全停（见面板）。
-       * 全停的时候直接把 halted 挂上：下面所有 `!st.halted` 的产出判断
-       * 就自动全关了，不必在二十几处产出点各加一个 if。 */
-      for (ki = 0; ki < UNIV_KINDS.length; ki++) {
-        var kind = UNIV_KINDS[ki], udef = univDef(kind), ust = UNIV[kind][pid];
-        if (!ust) continue;
-        var wasU = ust.halted;
-        /* kind 就是这一类的设施键（school / market / …），19-repair 拿它查保留座数 */
-        var uk = kind;
-        var uoff = keepOff(pid, uk);
-        if (!(ust.n > 0)) ust.halted = false;
-        else if (uoff) ust.halted = true;              // 玩家停的：不缴费、不产出
-        else {
-          var uDue = {
-            iron: (udef.maint.iron || 0) * ust.n,
-            gold: (udef.maint.gold || 0) * ust.n
-          };
-          ust.halted = !payMaint(pid, owner, uDue, ust.mAcc, uk);
-          if (ust.halted && !uoff) {
-            haltedNow.push({ t: udef.cn, cls: 'uni', obj: ust, fresh: !wasU,
-              iron: uDue.iron, def: udef, key: uk });
-          }
-        }
-      }
-      /* 城墙维护（铁 + 金）：和资源建筑同一套 payMaint —— 付不起就 halted，
-       * 区别是墙"停产"的表现是**年久失修**（耐久每回合 −5），不是产量归零。
-       * 耐久本身的涨落放在战争段末尾（settleWalls）：要先知道"这回合打没打仗"。 */
-      var wst = WALL[pid];
-      if (wst && wst.lv > 0) {
-        var wasW = wst.halted;
-        /* 城墙也是"开/停"二态：停了就不缴维护，耐久原地不动（不烂，但也不修） */
-        if (keepOff(pid, 'wall')) wst.halted = true;
-        else {
-          var wDue = wallMaintDue(wst, owner);
-          wst.halted = !payMaint(pid, owner, wDue, wst.mAcc, 'wall');
-          if (wst.halted) {
-            haltedNow.push({ t: '城墙', cls: 'wall', obj: wst, fresh: !wasW, iron: wDue.iron || 0 });
-          }
-        }
-      } else if (wst) {
-        wst.halted = false;
-      }
-
-      /* ①-c 缺铁自救（v18.4）：这一回合**真有**建筑因为没铁停下来了，才去世界市场
-       * 按缺口买几单位铁，然后当场补缴（payMaint 只会再要"还差的那部分"—— acc 已经扣过）。
-       *
-       * 为什么是"事后 + 按缺口零买"，而不是"事前按阈值预买一手"：
-       * 预买的铁常常被这一回合的建造吃掉（AI 就在同省开工，铁从省库出），下回合
-       * 又是 0，于是每回合买、每回合停 —— 探针实测：整手预买 100 回合买掉 2660 铁
-       * （4668 金），停产仍有 151；按缺口零买把同一批停产的钱降到四分之一。
-       * 四道闸（AO.GOV.selfBuy）都在 selfBuyIron 里，这里只管"什么时候叫它、叫多少"。 */
-      if (haltedNow.length) {
-        var needU = 0, hi;
-        for (hi = 0; hi < haltedNow.length; hi++) {
-          var he = haltedNow[hi];
-          if (!he.obj.halted || !(he.iron > 0)) continue;
-          /* acc.iron 里剩的就是"这一回合还欠几单位铁"（第一次缴费没付成，acc 没减）。
-           * 不能拿"这一回合的需求"当缺口：停的是**金**那一段时，铁的需求早付清了，
-           * 再买铁就是白花金（探针里那批省库金不足 5 的省全是这种）。 */
-          var macc = (he.obj.mAcc && he.obj.mAcc.iron) || 0;
-          needU += Math.floor(macc + 1e-9);
-        }
-        if (needU > 0 && selfBuyIron(pid, owner, CUR.F, needU) > 0) {
-          /* 补缴：按现在的 acc 余额重算一遍需求，付得起就复工。
-           * 只能补"铁"那部分缺口 —— 金的缺口买铁治不了，别假装治了。 */
-          for (hi = 0; hi < haltedNow.length; hi++) {
-            var hn = haltedNow[hi];
-            if (!hn.obj.halted) continue;
-            if (hn.cls === 'wall') {
-              hn.obj.halted = !payMaint(pid, owner, wallMaintDue(hn.obj, owner), hn.obj.mAcc, 'wall');
-            } else if (hn.cls === 'res') {
-              hn.obj.halted = !payMaint(pid, owner,
-                maintDue(hn.obj, hn.def, owner, pid, hn.key), hn.obj.mAcc, hn.key);
-            } else {
-              hn.obj.halted = !payMaint(pid, owner, {
-                iron: (hn.def.maint.iron || 0) * hn.obj.n,
-                gold: (hn.def.maint.gold || 0) * hn.obj.n
-              }, hn.obj.mAcc, hn.key);
-            }
-          }
-        }
-      }
-      /* 一个省一回合只报一条：七类建筑一起停的时候，逐条报会刷屏。
-       * 只报**这一回合刚停**且补缴后仍然停着的（不然纪要会说一句假话）。 */
-      var haltLabels = [];
-      for (var hl = 0; hl < haltedNow.length; hl++) {
-        if (haltedNow[hl].obj.halted && haltedNow[hl].fresh) haltLabels.push(haltedNow[hl].t);
-      }
-      if (haltLabels.length && (pid | 0) === selPid) {
-        NOTES.push({ owner: owner, pid: pid | 0,
-          text: haltLabels.join('、') + ' 维护欠费，停产中（铁/金见底 —— 右上「维修」里调优先档或点「修」）', cls: 'warn' });
-      }
-      /* ①b 中央拨款位次（19-repair 的 repStep：批"这一回合能动的维护钱"）。
-       * 拨款额度按上回合实付估，必须每个省轮到之前都批着。 */
-      if (AO.repStep) AO.repStep(owner | 0);
-
-      /* ② 工地推进（枯竭了也照盖完，不半路烂尾） */
-      if (WALL[pid] && WALL[pid].site > 0) {
-        WALL[pid].site--;
-        if (!WALL[pid].site) finishWall(pid | 0);
-      }
-      /* 熔旧坊改建：和工地同一位次。枯竭矿本身不再有工地（建不了），
-       * 所以这一条和上面那段 for (key in bag) 不会抢同一个省。 */
-      if (SMELT[pid] && SMELT[pid].site > 0) {
-        SMELT[pid].site--;
-        if (!SMELT[pid].site) finishSmelt(pid | 0);
-      }
-      /* 淘金场改建：和熔旧坊同一位次（金矿枯竭后金矿场行不再有工地） */
-      if (WASH[pid] && WASH[pid].site > 0) {
-        WASH[pid].site--;
-        if (!WASH[pid].site) finishWash(pid | 0);
-      }
-      for (ki = 0; ki < UNIV_KINDS.length; ki++) {
-        var u2 = UNIV[UNIV_KINDS[ki]][pid];
-        if (u2 && u2.site > 0) { u2.site--; if (!u2.site) finishSite(pid, UNIV_KINDS[ki]); }
-      }
-      for (key in bag) {
-        s = bag[key];
-        if (!(s.site > 0)) continue;
-        s.site--;
-        if (!s.site) finishSite(pid, key);
-      }
-
-      /* ③ 产出 + 抽税。
-       * 冷静期与「采空 → 冷静/枯竭」这两个计时**不受停产影响**：
-       * 停产只掐产量，不该把倒计时也冻住。 */
-      var foodProd = 0;
-      for (key in bag) {
-        s = bag[key];
-        def = AO.RESOURCE_BY_KEY[key];
-        if (!def) continue;
-        if (!s.built || s.gone) continue;
-
-        if (s.cool > 0) {                       // 冷静期：只走回合数
-          s.cool--;
-          if (s.cool <= 0) { s.cool = 0; s.left = s.n; }
-          continue;
-        }
-        if (s.left <= 0) {                      // 采空 → 冷静 或 枯竭
-          if ((def.cool || 0) > 0) s.cool = def.cool;
-          else s.gone = true;
-          continue;
-        }
-        if (s.halted) continue;                 // 停产：产量 0，工地照走、冷静照走
-        /* 战争层两刀（都写在产出之前，所以"归零"是真的零，不是事后扣）：
-         *   围城  被围的省产出全归零 —— 这是围城最狠的一条，也是"围而不打"的意义；
-         *   封锁  沿海省被舰队封锁 → 打不到鱼（其余照产）。
-         * 占领省不是归零，而是 ×0.6（见下面的 mul）—— 打下来的地方还能用，只是不顺手。 */
-        if (SIEGE[pid]) continue;
-        if (key === 'fish' && BLOCKADE[pid]) continue;
-        /* 匪乱：爆发后的**下一回合**产出归零（此刻产出已经算完，只能挂在下一回合）。
-         * 只看"上一回合爆发的"那一条 —— 标记本身还要挂 3 回合给不安 +10，
-         * 但那 3 回合里只有第一回合断产（否则一次匪乱等于三回合绝收，太狠）。 */
-        if (BANDIT[pid] && BANDIT[pid].turn === turnNo - 1) continue;
-        /* 官员产量加成（劝农使）：乘在**毛产**上，再攒整成整数。
-         * 为什么要 pAcc 攒零头：3 × 1.25 = 3.75，直接 round 成 4 等于白送 25%，
-         * floor 成 3 等于白干 —— 攒起来下一回合补上，长期平均才真是 1.25 倍。
-         * （和 eatAcc / mAcc 是同一套办法，见 payMaint 的注释。） */
-        var mul = (pmod.prodMul && pmod.prodMul[key]) || 1;
-        /* 占领省：产出乘数随**整合度**爬（0.4 → 0.6），整合完成（OCCUPY 删除）
-         * 才回到正式国土的 ×1.0。旧档没有 INTEG 的占领省按 0 算 = ×0.4，
-         * 于是"读旧档"和"刚打下来"是同一条路。 */
-        if (OCCUPY[pid]) {
-          var itg = INTEG[pid];
-          mul *= AO.INTEG.prodMul(itg ? itg.v : 0);
-        }
-        /* 事件带来的临时乘数（渔汛 ×2 / 大旱 ×0.5），和官员加成同一层。
-         * 放在这里而不是改 def.per：乘数是有回合数的，改表就回不去了。 */
-        if (AO.evtProdMul) mul *= AO.evtProdMul(pid, key);
-        var grossF = simPerTurn(s, def, pid, key) * mul;
-        var gross = Math.floor(grossF + (s.pAcc || 0));
-        s.pAcc = grossF + (s.pAcc || 0) - gross;
-        if (!gross) continue;
-        var take = Math.min(s.left, gross);      // 不够一回合的产出就只拿剩下的
-        /* 本地居民先吃掉一份（农场/渔港/盐场/伐木场/牧场），剩下才进省库存。
-         * 小数用 eatAcc 攒着：每回合 0.4 个看着像没吃，攒五回合就是 2 个。 */
-        s.eatAcc = (s.eatAcc || 0) + take * (def.eat || 0);
-        var eaten = Math.floor(s.eatAcc);
-        s.eatAcc -= eaten;
-        s.eaten = eaten;
-        var net = take - eaten;
-        /* 入库受**省库上限**约束（AO.CAP.base，粮/渔另加粮仓）：
-         * 超出上限的当场损耗，记进 d.cap，收支小结写「满仓 −N」。
-         * gainStock 只掐增量、不吞已有存量（粮仓停产时上限会回落）。 */
-        var kept = gainStock(pid, key, net, CUR.F);
-        /* 流水：落袋的才算 gain（居民吃掉的、满仓损耗的都没进过库存） */
-        CUR.F.gain[key] = (CUR.F.gain[key] || 0) + kept;
-        /* gain 里"纯产出"的那一份单独记一格（d.prod）：gain 还混着熔旧坊/淘金场
-         * 的涓流和出口卖货，不拆开的话，20-balance 的干跑预测永远对不出残差。 */
-        CUR.F.d.prod[key] = (CUR.F.d.prod[key] || 0) + kept;
-        /* 人口增速看的是**真进了仓**的粮：满仓浪费掉的粮不养人，
-         * 否则"囤到上限就停"这条规则对人口完全无效。 */
-        if (key === 'grain' || key === 'fish') foodProd += kept;
-        s.left -= take;
-        s.pop = Date.now();
-        /* 抽税（v18.12）：按**比例**分成，不再是"每笔固定 1 单位"。
-         * 旧规则是累退的（产出 2 抽 1 = 50%，产出 12 抽 1 = 8%），
-         * 小农被抽一半、大矿几乎免税，中央反而收不上来。
-         * 新规则：中央拿 `share`（默认 1/3），省留其余；小数走 RESACC 攒整，
-         * 和 TAXACC / IRONACC / REMITACC 同一套办法（0.33 单位 floor 掉就永远没有）。
-         * 抽的是**这一回合的产出**，不碰省里原有库存 —— 省不会因上缴而养不起房。 */
-        var T = AO.TAX;
-        var sh = (T.share === undefined ? 1 / 3 : T.share) +
-          (mods.tax || 0) * (T.bonus === undefined ? 0.1 : T.bonus);
-        if (sh > 1) sh = 1;
-        if (sh > 0) {
-          var akey = (pid | 0) + '|' + key;
-          RESACC[akey] = (RESACC[akey] || 0) + take * sh;
-          var taxN = Math.floor(RESACC[akey] + 1e-9);
-          if (taxN > 0 && s.stock >= taxN) {
-            RESACC[akey] -= taxN;
-            s.stock -= taxN;
-            var cen = ensureCentral(owner);
-            cen[key] = (cen[key] || 0) + taxN;
-            CUR.F.loss[key] = (CUR.F.loss[key] || 0) + taxN;
-            CUR.F.d.tax[key] = (CUR.F.d.tax[key] || 0) + taxN;
-            if (CUR.FC) {
-              CUR.FC.gain[key] = (CUR.FC.gain[key] || 0) + taxN;
-              CUR.FC.d.tax[key] = (CUR.FC.d.tax[key] || 0) + taxN;
-            }
-          }
-        }
-        if (s.left <= 0) {
-          if ((def.cool || 0) > 0) s.cool = def.cool;
-          else s.gone = true;
-        }
-      }
-      /* ③a 熔旧坊：枯竭铁矿场的涓流。
-       * 放在资源产出之后 —— 它和矿场产出同属"这一回合的 gain"，
-       * 但不吃储量、不吃维护，只吃"每炼一块铁半块钱"。 */
-      settleSmelt(pid | 0, owner | 0);
-      /* ③a 淘金场：枯竭金矿场的涓流（金的熔旧坊，和上面同一位次）。
-       * 它产金、吃省库木材 —— 木不够就这一回合不出金，不扣料不倒扣。 */
-      settleWash(pid | 0, owner | 0);
-
-      /* ③b 军工产线（v19）：**不在这里算** —— 产能是全国的，
-       * 逐省算会把"同一个池"拆成 1100 份。全国那一遍在省循环之后（见 ④a）。 */
-
-      /* ④ 人口税：省向人民收金 → **省库**（就是本省的金锭库存，不另开池子）。
-       * 和生产抽税（③ 里那一段，产出去中央）是两本账：这里收的金留在省里，
-       * 用来发俸禄、买货、建东西；中央那份一分不动。 */
-      settleTax(pid, owner, prov, pmod);
-
-      settlePop(pid, foodProd);       // 资源产完之后，人口吃粮、涨落
-
-      /* ⑤ 民心：用本回合**已经发生**的事实（吃没吃饱、停了几类产）算 target，
-       * 再往它靠 30%。放在 settlePop 之后是因为"缺粮"要看 eat / need。 */
-      settleHappy(pid, prov);
-      /* ⑤b 不安（A 批）：吃民心 + 停产 + 未整合 + 异信仰 + 贪墨 + 匪患六项。
-       * 必须排在 settleHappy **之后** —— 它的基线项就是本回合刚算出来的民心，
-       * 停产类数也直接借 happy.drivers.haltN（两处数出不同的数会很难解释）。 */
-      settleUnrest(pid, prov);
-      /* ⑤c 整合推进（B 批）：占领省往"正式国土"爬一步，满 100 就删 OCCUPY。
-       * 排在产出之后 —— 这一回合的产量仍按**推进前**的整合度算，下回合才涨。 */
-      settleInteg(pid, prov);
-    }
-
-    CUR.pid = 0; CUR.owner = 0; CUR.F = null; CUR.FC = null;
-
-    /* ④a 军工产线（v19，全国口径）：三个产能池 → 20 条线 → 出单。
-     * 排在省循环**之后**：这一回合的料（含刚抽完的税）才有着落；
-     * 排在人口税之前那一位次的口径不变 —— 它不碰省库金。 */
-    if (state.world) {
-      for (var co2 = 0; co2 < state.world.countries.length; co2++) {
-        var cw2 = state.world.countries[co2];
-        if (cw2 && !countryDead(cw2.id)) settleIndustry(cw2.id);
-      }
-    }
-
-    /* ④b 官员资历与怨气（v11）：ten++ / 怨气累积 / 每 24 回合掷一次去留。
-     * 必须排在省循环**之后** —— 怨气要看"这一回合到底欠没欠饷"（owed 在
-     * settleTax 里才定下来）。偷金那一步留在 settleTax 里（那里有 FLOW 上下文）。 */
-    settleOfficials();
-
-    /* ④d 匠人俸禄（v17）：和官员同一位次 —— 都是"人"的开销。
-     * 从**省库**发、发不起就欠着（和官员的 owed 一个口径），
-     * 因为停发匠人 = 装备线全锁，那等于"没钱就别玩这一层"，太硬。 */
-    for (var aow in ARTISANS) settleArtisans(+aow);
-
-    /* ④c 宰相（v12）：俸禄 / 权相偷金 / 贤相罢工与进言 / 权相弹劾。
-     * 和官员同一位次（人口税段）—— 都是"人"的开销，先把账算清再谈干活。 */
-    settleChancellor();
-
-    /* ⑥ 科研：学校产点 → 条满解锁 → 在研科技倒计时 → 队列拉下一条。
-     * 人才点也在这一步累加（同一批学校，见 settleResearch） */
-    settleResearch();
-
-    /* ⑦ 战争：粮食补给 → 敌国动员 → 行军/会战/占领 → 围城 → 投降。
-     * 放在最后：这一回合的产出/人口/民心都算完了，战斗才拿得到"现在的兵和粮"。 */
-    settleWar();
-
-    /* ⑦a 叛乱（A2）：所有 UNREST ≥ 80 的省各掷一次（玩家与 AI 同规则）。
-     * 必须排在战争之后 —— 倒戈/独立会改归属，得看到**打完之后的版图**；
-     * 也要排在内政 AI 之前 —— 新独立出来的国这一回合就能被 AI 接管。 */
-    settleRevolt();
-
-    /* ⑦b 情报署（v6）：扣经费 → 自动织网 → AI 密探。
-     * 排在战争之后（要看到打完之后的新版图）、事件之前（事件弹窗不该挡住情报提示）。 */
-    settleIntel();
-
-    /* ⑦b2 外交缓释（v9）：条约表清理 → 关系值向 0 走 1（同盟有地板托住）。
-     * 排在 AI 内政之前：下一批 AI 的缔约/求和判断读的是**这一回合**的 REL，
-     * 先缓释再决策，面板上看到的数和 AI 用的是同一个。 */
-    settleDiplo();
-
-    /* ⑦b3 傀儡与朝贡（v13）：清死表 → 朝贡（FLOWC 双方记账）→ 补跟战 → 独立掷点。
-     * 排在 settleDiplo 之后：那一回合的 REL 锁刚写完，属国这一侧读到的是一致的；
-     * 也排在 AI 内政/战争之前 —— 这一回合的朝贡先落袋，AI 的军费护栏读到的
-     * 收入才是"上贡之后"的那个数（不然属国永远以为自己很有钱）。
-     * 独立掷点会宣战（改 WARSET），排在战争段之后是刻意的：揭竿而起这一回合
-     * 不打，下一回合才见血 —— 消息和战报才对得上。 */
-    settlePuppets();
-
-    /* ⑦c 敌国内政 AI（v7）：建造 / 研究 / 调税 / 开科派官，每国每回合最多两个动作。
-     * 排在情报 tick 之后 —— AI 的决策只看**自己省**的实时数据（SIM / HAPPY 里
-     * owner 是自己那份），既不需要别国的情报，也不该读（迷雾框架下那是偷看）。
-     * 排在事件之前：这一回合刚盖好的学校，下回合才产科研点，和玩家的时序一致。
-     * 工坊模式（PLAYER = 0）里 18-ai.js 自己会立刻返回，AI 全静止。 */
-    if (AO.aiEconTick) AO.aiEconTick();
-
-    /* ⑦c2 宰相（v12）：AI 走完之后，玩家国由宰相代劳"你还没做的"。
-     * 排在 AI 之后：同一回合里世界先动、你家的宰相后动 —— 这样他读到的
-     * 已经是这一回合打完之后的版图（和玩家的时序一致）。
-     * 排在世界纪要之前：他的进言要走同一条 flush（不然要等下一回合才见报）。 */
-    chancellorAct();
-
-    /* ⑦d 世界消息（v15，v10 起是"当回合直推"）：AI 之间这一回合出的大事
-     * 里**到期的那几条**才放出来，最多 AIWAR.newsPerTurn 条，其余留队。
-     * 排在 AI tick 之后 —— 不然这一回合刚打起来的仗要晚一整轮才排进队。 */
-    flushWorldNews();
-
-    /* ⑧ 事件：传教倒计时 → 产量 buff 倒计时 → 重算国教 → 掷一件事件。
-     * 也放在最后 —— 它要看到**打完之后的版图**（占领会让传教作废，
-     * 新占的省会改掉"该国信仰占比最大者"）。 */
-    if (AO.evtSettle) AO.evtSettle();
-
-    /* ⑨ 物价（v14）：每国每种资源按"库存 / 需求"分档，v 向目标靠 25%。
-     * **排在事件之后是刻意的** —— 大旱 / 丰年这些事当回合就进价格，
-     * 不然玩家看到"旱情"要再等一回合才见价动，因果就断了。
-     * AI 与面板读的是这一回合结算出来的价（等于"拿昨天的行情做决定"）。 */
-    settlePrices();
-
-    /* ⓫ 编年史归档（v5）：把这一回合攒下的 NOTES 全量抄进年表，顺带判一次
-     * 统一 / 灭亡。放在最后一行 —— 它要看到"打完之后"的版图和纪要。 */
+    /* 编年史归档（平台层，保留） */
     if (AO.chronoArchive) AO.chronoArchive();
   }
 
@@ -7201,8 +6819,7 @@
         /* 迷雾下的省卡不能直接 renderInfoLists（那会按真实数据重画）——
          * 交给 showInfo 自己回到遮蔽版 */
         if (p) {
-          if (fogOn() && visCode(id) !== VIS_REAL) showInfo(id);
-          else renderInfoLists(p);
+          showInfo(id);
         }
       }
       /* 国家卡开着就跟着刷（科研条/在研倒计时都要动） */
@@ -7214,9 +6831,6 @@
     /* 维修面板开着就跟着刷（失修清单/拨款额度每回合都变），徽标也重算一次 */
     if (typeof refreshRepBadge === 'function') refreshRepBadge();
     if (REPU && REPU.open) renderRepPanel();
-    /* 平衡分析（20-balance.js）：**必须排在 settleTurn 之后** ——
-     * 它读的是这一回合刚记完的两本流水；排前面采到的会是上一回合的账。 */
-    if (AO.balStep) AO.balStep();
     flushNotes();
     /* 纪要卡开着就跟着刷（这一回合新攒的提示 / 邸报都在里面） */
     var np = $('notesPanel');
@@ -7673,51 +7287,124 @@
     if (state.renderer) state.renderer.selected = 0;
   }
 
+  /* =============================================================
+   * 省份卡（AoC2 口径，阶段一）
+   *
+   * 信息区只放规则书第一章的省字段：人口 / 经济 / 发展度 / 稳定 / 幸福 / 增长
+   * + 核心 / 价值。旧制的七种资源、建筑、军备、货运整块下掉 —— 那些是"省里
+   * 有几座矿、几座坊"的世界，AoC2 的省只有一个数字（经济）和一群人（人口）。
+   *
+   * 卡上唯一的操作是三条敕令（规则书第二十一章），都花移动点。
+   * ============================================================= */
+  function fmtGold(n) { return Math.round(n || 0).toLocaleString(); }
+
+  function coreText(w, p) {
+    var out = [], k;
+    for (k in p.aoc.core) {
+      var cc = w.countries[(k | 0) - 1];
+      if (cc) out.push(cc.name);
+    }
+    return out.length ? out.join('、') : '无主';
+  }
+
+  function renderAocDecree(p) {
+    var box = $('iDecree');
+    if (!box) return;
+    box.innerHTML = '';
+    var w = state.world, c = w.countries[p.owner - 1];
+    if (!c || !c.aoc) return;
+    var mine = canAct(p.owner);
+    var kinds = [
+      { k: 'festival', cn: '节日', d: '幸福 +0.1 / 2 万人口' },
+      { k: 'econ', cn: '投资经济', d: '上限 = 人口' },
+      { k: 'dev', cn: '投资发展', d: '发展度 +0.02' }
+    ];
+    for (var i = 0; i < kinds.length; i++) {
+      var kd = kinds[i];
+      var cost = AO.aoc2.decreeCost(w, p.id, kd.k) || 0;
+      var mp = AO.AOC2.MP_COST[kd.k] || 0;
+      var btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.innerHTML = '<b>' + kd.cn + '</b><em>' + kd.d + '</em><em>' +
+        fmtGold(cost) + ' 金 · ' + mp + ' 点</em>';
+      var why = '';
+      if (!mine) why = '不是你的国家';
+      else if (c.aoc.mp < mp) why = '移动点不够';
+      else if (c.aoc.treasury < cost) why = '国库不足';
+      else if (kd.k === 'econ' && p.aoc.econ >= AO.aoc2.totalPop(p) - 0.5) why = '经济已到人口上限';
+      else if (kd.k === 'dev' && p.aoc.dev >= AO.AOC2.DEV_MAX - 1e-9) why = '发展度已到 2.0';
+      btn.disabled = !!why;
+      btn.title = (why ? why + '　／　' : '') + '花 ' + mp + ' 移动点';
+      if (!why) {
+        (function (kind) {
+          btn.addEventListener('click', function () {
+            var r = AO.aoc2.decree(state.world, p.owner, kind, p.id);
+            toast(r.msg, r.ok ? 2200 : 3000);
+            if (r.ok) {
+              AO.aoc2.recomputeCountry(state.world, c);
+              showInfo(p.id);
+              if ($('country').classList.contains('on')) showCountry(p.owner);
+            }
+          });
+        })(kd.k);
+      }
+      box.appendChild(btn);
+    }
+    var mpEl = $('iMP');
+    if (mpEl) mpEl.textContent = '移动点 ' + c.aoc.mp + ' / ' + c.aoc.mpMax;
+  }
+
   function showInfo(id) {
     var w = state.world;
     if (!id) { clearInfo(); return; }
     var p = w.provinces[id - 1];
-    if (!p) { clearInfo(); return; }
+    if (!p || !p.aoc) { clearInfo(); return; }
     /* 换省份时收起上一省的问号面板；同一省重绘（计时器刷新）则保持展开 */
     if (state.infoId !== id) {
       state.infoId = id;
       state.openKey = null;
       state.selKey = null;
-      /* 页签**不重置**（v17）：正开着「建筑」去点另一块地，就该直接给我看那个省的建筑。
-       * 换一个省不是"退出省卡" —— 以前这里把 infoTab 清成 null，点一下就缩回两个词，
-       * 想看邻省的同一种建筑得重新点两次。 */
       bldMsg('');
     }
     $('info').classList.add('on');
-    /* 迷雾（v6）：先判可见性。unknown / seen 走遮蔽版省卡，
-     * 只有 realtime（自己的省、脚下的省、友好邻省）才是原来的全透明卡片。 */
-    var vs = fogOn() ? visCode(id) : VIS_REAL;
-    $('info').classList.toggle('fog-seen', vs === VIS_SEEN);
-    $('info').classList.toggle('fog-unknown', vs === VIS_UNKNOWN);
-    if (vs !== VIS_REAL) { showFogInfo(p); return; }
+    $('info').classList.remove('fog-seen', 'fog-unknown');
     $('infoEmpty').style.display = 'none';
     $('infoBody').style.display = '';
-    /* 迷雾快照是 seen 态的产物：回到实时态就得把上一省的快照擦掉，
-     * 否则它会留在概要区顶部，看着像"这个省也是旧情报"。 */
+    /* 省卡只剩一页：CSS 里 .info-col 只在 .tab-info 下显示（原来靠两个页签切），
+     * 页签拆掉之后这里必须把类名钉死，否则整块信息区是空的。 */
+    $('infoBody').classList.add('tab-info');
+    $('infoBody').classList.remove('tab-bld');
     var snap0 = $('iFogSnap');
     if (snap0) snap0.innerHTML = '';
-    applyInfoTab();
-    applyDetail();             // 测绘详情：收起 / 展开（跨刷新记在 localStorage）
-    applyGroups();             // 建筑四组：各开各的
+    applyDetail();
+
     $('iSw').style.background = p.ownerColor;
     $('iName').textContent = p.name;
     $('iNameEn').textContent = p.name_en;
     $('iOwner').textContent = p.ownerName + ' (#' + p.owner + ')';
+
+    var tp = AO.aoc2.totalPop(p);
+    $('iPop').textContent = AO.formatPop(tp);
+    $('iPop').title = Math.round(tp).toLocaleString() + ' 人（本国 ' +
+      Math.round(p.aoc.pop[p.owner] || 0).toLocaleString() + '）';
+    $('iEcon').textContent = fmtGold(p.aoc.econ) + ' / ' + AO.formatPop(tp);
+    $('iEcon').title = '经济 = 岗位：' + fmtGold(p.aoc.econ) + '，人口 ' +
+      Math.round(tp).toLocaleString() + '；上限 = 人口';
+    $('iDev').textContent = p.aoc.dev.toFixed(2);
+    $('iStab').textContent = p.aoc.stab.toFixed(0) + '%';
+    $('iHappy').textContent = p.aoc.happy.toFixed(0) + '%';
+    $('iGrowth').textContent = (p.aoc.growth * 100).toFixed(2) + '% / 回合';
+    $('iCore').textContent = coreText(w, p);
+    $('iValue').textContent = p.aoc.value.toFixed(1);
+
     $('iTerrain').textContent = (AO.TERRAIN_CN[p.terrain] || p.terrain) + ' · ' + p.terrain;
     var wt = waterText(p);
     $('iWater').textContent = wt;
-    $('iWater').title = wt + '　|　渔获：' + fishWhy(p);
-    renderPop(p);
-    renderInfoLists(p);
-    renderWallRow(p);          // 城防（有墙才显示；迷雾遮蔽时在 showFogInfo 里隐藏）
+    $('iWater').title = wt;
     $('iArea').textContent = p.area.toLocaleString() + ' px²';
     $('iCentroid').textContent = p.centroid[0].toFixed(1) + ', ' + p.centroid[1].toFixed(1);
     $('iDeg').textContent = p.neighbors.length + ' 个';
+    updateDetSum();
 
     var box = $('iNeighbors');
     box.innerHTML = '';
@@ -7737,7 +7424,10 @@
         box.appendChild(s);
       })(p.neighbors[i]);
     }
-    // 国家卡开着的时候，点省份也跟着换成该省所属国
+
+    renderAocDecree(p);
+
+    /* 国家卡开着的时候，点省份也跟着换成该省所属国 */
     if ($('country').classList.contains('on') && state.renderer) {
       state.renderer.selectedCountry = p.owner;
       showCountry(p.owner);
@@ -10089,12 +9779,116 @@
     state.renderer.requestDraw();
   }
 
+  /* =============================================================
+   * 国家卡（AoC2 口径，阶段一）
+   *
+   * 概览：政体 / 人口 / 经济 / 发展度 / 幸福 / 稳定 / 国库 / 面积 / 首都 / 省份
+   * 内政：国库（含上回合收支）+ 四条预算滑条 + 税率滑条 + 点数
+   *
+   * 滑条为什么"即时生效"而不是等下一回合：规则书第三章 —— 预算滑条是玩家
+   * 每回合的手动项，改完立刻按新比例结算。所以滑条只改状态，不弹确认。
+   * 合计超过 100% 时从"投资"往回砍（AO.aoc2.setSliders 里那条顺序），
+   * 玩家看到的是"推这根，那根自己退"—— 比弹一句"不能超过 100"好用。
+   * ============================================================= */
+  function sliderRow(label, key, val, max, title, onInput) {
+    var row = doc.createElement('div');
+    row.className = 'aocslider';
+    var lb = doc.createElement('span'); lb.textContent = label;
+    var inp = doc.createElement('input');
+    inp.type = 'range'; inp.min = '0'; inp.max = String(max); inp.step = '1'; inp.value = String(val);
+    inp.title = title || '';
+    var vv = doc.createElement('span'); vv.className = 'v'; vv.textContent = val + '%';
+    inp.addEventListener('input', function () {
+      vv.textContent = this.value + '%';
+      onInput(+this.value);
+    });
+    row.appendChild(lb); row.appendChild(inp); row.appendChild(vv);
+    return row;
+  }
+
+  function renderAocSliders(c) {
+    var box = $('cSliders');
+    if (!box) return;
+    box.innerHTML = '';
+    var sl = c.aoc.sliders;
+    var mine = canAct(c.id);
+    var lock = function (inp) { if (!mine) inp.disabled = true; };
+    var sumRow = doc.createElement('div');
+    sumRow.className = 'aocslider sum';
+    var updateSum = function () {
+      var sum = AO.aoc2.sliderSum(c);
+      sumRow.innerHTML = '<span>合计</span><span></span><span class="v">' + sum + '%</span>';
+      sumRow.title = sum > 100 ? '超过 100% 的部分会被从"投资"往回砍' : '没分配的部分自动进国库';
+    };
+    var mk = function (label, key, title) {
+      var r = sliderRow(label, key, sl[key], 100, title, function (v) {
+        var o = { tax: sl.tax, goods: sl.goods, research: sl.research, invest: sl.invest };
+        o[key] = v;
+        AO.aoc2.setSliders(c, o);
+        /* 归一化可能把别的滑条也压下去 → 整块重画（滑条只有四根，重画很便宜） */
+        renderAocSliders(c);
+        renderAocTreasury(c);
+      });
+      lock(r.querySelector('input'));
+      return r;
+    };
+    box.appendChild(mk('税收', 'tax', '直接进国库的比例'));
+    box.appendChild(mk('物资', 'goods', '补给人口的消费品；充足 → 幸福高（社区推荐 65%~85%）'));
+    box.appendChild(mk('科研', 'research', '转成研究点（阶段四接科技）'));
+    box.appendChild(mk('投资', 'invest', '转成投资款（投资敕令用）'));
+    updateSum();
+    box.appendChild(sumRow);
+
+    var tr = $('cTaxRow');
+    if (tr) {
+      tr.innerHTML = '';
+      var g = AO.aoc2.govOf(c);
+      var row = sliderRow('税率', 'taxRate', c.aoc.taxRate, g.taxCap,
+        '上限 ' + g.taxCap + '%（' + g.cn + '）；抬税降幸福、压人口增长',
+        function (v) {
+          AO.aoc2.setTaxRate(c, v);
+          renderAocTreasury(c);
+        });
+      lock(row.querySelector('input'));
+      tr.appendChild(row);
+      var tip = doc.createElement('div');
+      tip.className = 'hint';
+      tip.textContent = g.cn + '：税收上限 ' + g.taxCap + '% · 行政费 ' +
+        (g.admin >= 0 ? '+' : '') + g.admin + '% · 研究成本 +' + g.research + '%';
+      tr.appendChild(tip);
+    }
+  }
+
+  function renderAocTreasury(c) {
+    var box = $('cTreasury');
+    if (!box) return;
+    var L = c.aoc.last;
+    var html = '<div class="kv"><span>国库</span><span>' + fmtGold(c.aoc.treasury) + ' 金</span></div>' +
+      '<div class="kv"><span>贷款</span><span>' + fmtGold(c.aoc.loans) + ' 金' +
+      (c.aoc.loans > 0 ? '（利息 ' + fmtGold(c.aoc.loans * AO.AOC2.LOAN_RATE) + '/回合）' : '') +
+      '</span></div>';
+    if (L) {
+      html += '<div class="kv"><span>毛收入</span><span>' + fmtGold(L.gross) + '</span></div>' +
+        '<div class="kv"><span>入库</span><span>' + fmtGold(L.taxIn) + '</span></div>' +
+        '<div class="kv"><span>行政费</span><span>−' + fmtGold(L.admin) + '</span></div>' +
+        '<div class="kv"><span>军费</span><span>−' + fmtGold(L.upkeep) + '</span></div>' +
+        '<div class="kv"><span>利息</span><span>−' + fmtGold(L.interest) + '</span></div>' +
+        '<div class="kv"><span>净额</span><span><b>' + (L.net >= 0 ? '+' : '') + fmtGold(L.net) +
+        '</b> / 回合</span></div>';
+    } else {
+      html += '<div class="hint">还没结算过：点「下一回合」看第一笔账</div>';
+    }
+    box.innerHTML = html;
+    var shortEl = $('cTreasuryShort');
+    if (shortEl) shortEl.textContent = fmtGold(c.aoc.treasury) + ' 金';
+  }
+
   function showCountry(cid) {
     var w = state.world;
     var c = w && w.countries[cid - 1];
-    if (!c) { clearCountry(); return; }
+    if (!c || !c.aoc) { clearCountry(); return; }
     $('country').classList.add('on');
-    applyCountryTab();          // 概览 / 内政 / 外交：只切容器类名，下面的渲染照旧
+    applyCountryTab();
 
     $('cFlag').style.background = c.color;
     $('cName').textContent = c.name;
@@ -10103,116 +9897,76 @@
     $('cPortrait').innerHTML = c.portrait;
     $('cTitle').textContent = c.leader.title;
     $('cLeader').textContent = c.leader.name;
-
     var isRepublic = /共和|联邦|联盟/.test(c.govCn);
     var sub = [c.leader.gender === 'f' ? '女' : '男', c.leader.age + ' 岁'];
     if (c.house) sub.push(c.house);
     sub.push((isRepublic ? '在任 ' : '在位 ') + c.leader.reign + ' 年');
     $('cLeaderSub').textContent = sub.join(' · ');
 
-    $('cGov').textContent = c.govCn;
-    $('cEcon').textContent = c.economy;
-    renderFaiths(c);
-
-    $('cPop').textContent = AO.formatPop(c.population) + '（' + c.density + ' 人/km²）';
-    /* 承载（v18.2）：总人口取**活的** POP 表 —— c.population 是开局的静态数，
-     * 而人口每回合都在涨落；总上限把各省现算的承载力加起来（同一份公式，
-     * 省卡上写多少、这里就加多少，不会两处对不上）。 */
-    var capEl = $('cPopCap');
-    if (capEl) {
-      var tPop = 0, tCap = 0, fullN = 0, overN = 0, pi, q2;
-      for (pi = 0; pi < c.provinces.length; pi++) {
-        q2 = w.provinces[c.provinces[pi] - 1];
-        if (!q2) continue;
-        var pv2 = POP[q2.id] ? POP[q2.id].v : (q2.population || 0);
-        var cv2 = popCapOf(q2.id);
-        tPop += pv2; tCap += cv2;
-        if (cv2 > 0 && pv2 > cv2) overN++;
-        else if (cv2 > 0 && pv2 >= cv2) fullN++;
-      }
-      var ld = tCap > 0 ? Math.round(tPop / tCap * 100) : 0;
-      capEl.innerHTML = AO.formatPop(Math.round(tPop)) + ' / ' + AO.formatPop(Math.round(tCap)) +
-        (overN ? ' <b style="color:#b5563f">' + overN + ' 省溢出</b>'
-          : fullN ? ' <em style="color:#4f9d78">' + fullN + ' 省满员</em>' : '');
-      capEl.title = '总人口 ' + Math.round(tPop).toLocaleString() + ' 人 / 总承载力 ' +
-        Math.round(tCap).toLocaleString() + ' 人（负载 ' + ld + '%）' +
-        '\n满员 ' + fullN + ' 省 · 人满为患 ' + overN + ' 省' +
-        '\n每省上限 = （地形基础 × 首都 ' + AO.POPCAP.capMul + ' ＋ 农场/渔港/粮仓/牧场加成）' +
-        ' × 铁犁深耕 ' + AO.POPCAP.plowMul +
-        '\n到顶就不再涨（人丁兴旺）；溢出的每回合 −' +
-        Math.round(AO.POPCAP.overRate * 100) + '% 往回落，并扣民心 ' + AO.POPCAP.overHappy;
-    }
+    var g = AO.aoc2.govOf(c);
+    $('cGov').textContent = g.cn;
+    $('cPop').textContent = AO.formatPop(c.aoc.pop) + '（' + c.provinces.length + ' 省）';
+    $('cEcon').textContent = fmtGold(c.aoc.econ);
+    $('cDev').textContent = c.aoc.dev.toFixed(2);
+    $('cHappy').textContent = c.aoc.happy.toFixed(0) + '%';
+    $('cStab').textContent = c.aoc.stab.toFixed(0) + '%';
     $('cArea').textContent = c.areaKm2.toLocaleString() + ' km²';
     var cap = w.provinces[c.capital - 1];
     $('cCapital').textContent = cap ? cap.name : '—';
     $('cProv').textContent = c.provinces.length + ' 个';
-    /* 安定（A 批）：几省在骚动 / 几省随时爆发。数字小但信息量大 ——
-     * 一个国"3 省骚动"意味着它正在失血（产出打折、税收不上来）。 */
-    var cu = $('cUnrest');
-    if (cu) {
-      var U = AO.UNREST, riot = 0, hot = 0, i2;
-      for (i2 = 0; i2 < c.provinces.length; i2++) {
-        var vv = unrestOf(c.provinces[i2]).v;
-        if (vv >= U.revoltAt) hot++;
-        else if (vv >= U.riotLine) riot++;
-      }
-      cu.innerHTML = (hot ? '<b style="color:#a8523b">' + hot + ' 省叛乱在即</b>　' : '') +
-        (riot ? '<b style="color:#8a6d34">' + riot + ' 省骚动</b>' : (hot ? '' : '太平'));
-      cu.title = '不安 ≥' + U.riotLine + ' = 骚动（再往上就该安抚、派官或驻军了）；≥' + U.revoltAt +
-        ' = 每回合 ' + Math.round(U.revoltChance * 100) + '% 爆发叛乱（匪乱 / 倒戈 / 独立）';
-    }
 
     var bar = $('cBar'), leg = $('cLegend');
-    bar.innerHTML = ''; leg.innerHTML = '';
-    for (var i = 0; i < c.terrainComp.length; i++) {
-      var t = c.terrainComp[i];
-      var seg = doc.createElement('i');
-      seg.style.width = (t.pct * 100).toFixed(2) + '%';
-      seg.style.background = t.color;
-      seg.title = t.cn + ' ' + (t.pct * 100).toFixed(1) + '%';
-      bar.appendChild(seg);
-
-      var row = doc.createElement('div');
-      var dot = doc.createElement('span');
-      dot.className = 'dot';
-      dot.style.background = t.color;
-      row.appendChild(dot);
-      row.appendChild(doc.createTextNode(t.cn));
-      var em = doc.createElement('em');
-      em.textContent = Math.round(t.pct * 100) + '%';
-      row.appendChild(em);
-      leg.appendChild(row);
+    if (bar && leg) {
+      bar.innerHTML = ''; leg.innerHTML = '';
+      for (var i = 0; i < c.terrainComp.length; i++) {
+        var t = c.terrainComp[i];
+        var seg = doc.createElement('i');
+        seg.style.width = (t.pct * 100).toFixed(2) + '%';
+        seg.style.background = t.color;
+        seg.title = t.cn + ' ' + (t.pct * 100).toFixed(1) + '%';
+        bar.appendChild(seg);
+        var row = doc.createElement('div');
+        var dot = doc.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = t.color;
+        row.appendChild(dot);
+        row.appendChild(doc.createTextNode(t.cn));
+        var em = doc.createElement('em');
+        em.textContent = Math.round(t.pct * 100) + '%';
+        row.appendChild(em);
+        leg.appendChild(row);
+      }
     }
 
     var nb = $('cNeighbors');
-    nb.innerHTML = '';
-    if (!c.neighbors.length) {
-      nb.innerHTML = '<span class="hint">四周皆海，没有陆上邻国</span>';
-    }
-    for (var k = 0; k < c.neighbors.length; k++) {
-      (function (nid) {
-        var nc = w.countries[nid - 1];
-        if (!nc) return;
-        var s2 = doc.createElement('span');
-        s2.className = 'chip';
-        s2.textContent = nc.name;
-        s2.style.borderLeft = '3px solid ' + nc.color;
-        s2.addEventListener('click', function () {
-          state.renderer.selectCountry(nid);
-          centerOnCountry(nid);
-        });
-        nb.appendChild(s2);
-      })(c.neighbors[k]);
+    if (nb) {
+      nb.innerHTML = '';
+      if (!c.neighbors.length) {
+        nb.innerHTML = '<span class="hint">四周皆海，没有陆上邻国</span>';
+      }
+      for (var k = 0; k < c.neighbors.length; k++) {
+        (function (nid) {
+          var nc = w.countries[nid - 1];
+          if (!nc) return;
+          var s2 = doc.createElement('span');
+          s2.className = 'chip';
+          s2.textContent = nc.name;
+          s2.style.borderLeft = '3px solid ' + nc.color;
+          s2.addEventListener('click', function () {
+            state.renderer.selectCountry(nid);
+            centerOnCountry(nid);
+          });
+          nb.appendChild(s2);
+        })(c.neighbors[k]);
+      }
     }
 
-    renderTreasury(c);      // 国库：库存 + 每回合净流
-    renderTech(c);          // 科技节：科研条 + 一行状态 + 「打开科技树」
-    renderGovern(c);        // 治理节：税率 / 民心 / 在任官员 / 人才点 + 「打开治理面板」
-    renderDiplo(c);         // 外交节（v3）：交战对象 / 宣战停战 / 群龙无首 / 投降线
-    /* 迷雾遮蔽（v6）放最后：上面的渲染照旧按真实数据走（自己的国要全透明），
-     * 最后由这一层按情报档把不该给你看的块整个藏起来。
-     * 遮蔽是**接口层**的事，和 canAct 的"能不能按"完全是两回事。 */
-    applyCountryMask(c);
+    renderAocTreasury(c);
+    renderAocSliders(c);
+    $('cMP').textContent = c.aoc.mp + ' / ' + c.aoc.mpMax;
+    $('cDIP').textContent = c.aoc.dip + ' / ' + c.aoc.dipMax;
+    $('cRP').textContent = c.aoc.rp.toFixed(1);
+    $('cIP').textContent = fmtGold(c.aoc.investPool) + ' 金';
   }
 
   function centerOn(id) {
@@ -13307,7 +13061,9 @@
    * ============================================================= */
   var FOG = AO.INTEL;
 
-  function fogOn() { return PLAYER > 0 && !!state.world; }
+  /* 迷雾三档是阶段五的事。这一阶段先整层关掉：否则选了国之后省卡会走
+   * "旧情报"分支（showFogInfo），而新卡没有那一套字段。 */
+  function fogOn() { return false; }
   /* 迷雾版本号：渲染层拿它做缓存键（建 Path2D 很贵，只在真的变了时重建）。
    * 任何"可见性可能变了"的操作都要走 fogInvalidate —— 它顺手把版本 +1。 */
   var FOGVER = 0;
@@ -15685,7 +15441,7 @@
    * FLOW / FLOWC 不存：那是"上一回合"的流水，读回来应该从零开始。 */
   var SAVE_KEY = AO.SAVE_KEY || 'sj.save';
   var SAVE_KEY_V1 = AO.SAVE_KEY_V1 || 'sj.save.v1';
-  var SAVE_VER = AO.SAVE_VER || 2;
+  var SAVE_VER = (AO.AOC2 && AO.AOC2.SAVE_VER) || 7;
 
   /* file:// 下有些浏览器会禁 localStorage。探一次，禁了就把两个钮置灰。 */
   function lsOK() {
@@ -15736,6 +15492,17 @@
     return out;
   }
 
+  /* =============================================================
+   * 存档（v7）
+   *
+   * 换血 = 升版。旧档里的 SIM / CENTRAL / OFFICIAL / ARMY 在新模型里没有对应物，
+   * 迁移它们只会把玩家送进一个两套账都算不清的世界 —— 所以 v6 及以下直接拒读，
+   * 并告诉他去哪儿找旧版（legacy-v19）。这条判断在 15-aoc2 的
+   * checkSaveVersion 里，UI 和测试共用同一句话。
+   *
+   * 存什么：seed + 滑杆（重建同一个世界）+ 回合数 + AO.aoc2.save 的那两张表。
+   * 不存地图（地图由 seed 重建，这是这套引擎一贯的做法）。
+   * ============================================================= */
   function saveGame(silent) {
     if (!state.world) { if (!silent) toast('还没有世界可以存', 2200); return; }
     var payload = {
@@ -15743,664 +15510,40 @@
       seed: $('seed').value,
       opt: { prov: +$('prov').value, ctry: +$('ctry').value, land: +$('land').value, size: state.size },
       turnNo: turnNo,
-      SIM: SIM, SCHOOL: SCHOOL, MARKET: MARKET, BUILDER: BUILDER,
-      /* 内政批：粮仓 / 大学 / 工厂（三张和学校同形状的表）。
-       * **不升 SAVE_VER** —— 旧档没有这三个键，读进来 fill 成空表、
-       * 后面那条"缺了就补 newSchool()"会补成 0 座，等同"还没盖过"，
-       * 和"新开一局"完全同一条路。
-       * 存的是**瘦身版**（sparseUniv）：只留盖过/在建的省，不然 1100 个省
-       * 每张表 84KB，三张就吃掉 252KB 配额。 */
-      GRANARY: sparseUniv(GRANARY), UNIVERSITY: sparseUniv(UNIVERSITY),
-      FACTORY_BLD: sparseUniv(FACTORY_BLD),
-      FREIGHT_LV: FREIGHT_LV, CENTRAL: CENTRAL, RESEARCH: RESEARCH, POP: POP,
-      /* 城墙（本批新增，不升 SAVE_VER）：pid -> { lv, site, hp, halted, mAcc }。
-       * 只存**有墙的省**（惰性创建），1100 个省里通常只有几十条。
-       * 读旧档时缺这一块 → 按"没墙"补默认，不炸（见 applySave 的兜底）。 */
-      WALL: WALL,
-      /* 熔旧坊 + 铁税零头（本批新增，不升 SAVE_VER）：
-       * SMELT 只存**有炉或有工地**的省（sparseSmelt，1100 省里通常只有几十条）；
-       * IRONACC 和 TAXACC 一个道理 —— 不存的话读档后每省的铁税零头归零。 */
-      SMELT: sparseSmelt(), IRONACC: IRONACC,
-      /* 上解零头（v18.3，**不升 SAVE_VER**）：pid → 小数，只有累进那两段
-       * 乘出零头的省才有值；旧档缺这个键 → 空表，零头从 0 起。 */
-      REMITACC: REMITACC,
-      /* 物资上解零头（v19.1，**不升 SAVE_VER**）：键是 `pid|key`。旧档缺这个键
-       * → 空表，零头从 0 攒起（最多丢每种不到 1 单位，和 RESACC 同一个代价）。 */
-      REMITACC_R: REMITACC_R,
-      /* 淘金场（v18 / A，**不升 SAVE_VER**）：和 SMELT 一个瘦身法（sparseWash），
-       * 旧档没有这个键 → 读进来是空表，等于"这一局还没人改建过"。 */
-      WASH: sparseWash(),
-      /* 治理层（v2 新增）：官员池、在任、税率、民心 + 人口税零头。
-       * TAXACC 也存 —— 不存的话读档后每省的小数零头归零，
-       * 长期看只是慢一点点，但"存档前后税入不一样"会被玩家当成 bug。 */
-      TALENT: TALENT, OFFICIAL: OFFICIAL, TAXRATE: TAXRATE, HAPPY: HAPPY,
-      /* 宰相（v12，**不升 SAVE_VER**）：owner -> { id,name,traitKey,grade,perms,owed,paused,… }。
-       * 旧档没有这个键 → fill 之后是空表，等于"还没拜相"，和新开一局同一条路。 */
-      CHANCELLOR: CHANCELLOR,
-      TAXACC: TAXACC, GOV_ID: GOV_ID,
-      /* 战争层（v3）：五座装备厂（和学校同形状）+ 军队 / 将领 / 外交 / 占领 / 围城 /
-       * 封锁 / 灭亡 / 战报 / 征兵队列 + 两个 id 计数器 + 玩家国。
-       * 全部是"按 id 挂的普通对象"，JSON 原样进出；id 计数器必须存 ——
-       * 不存的话读档后新征的军队会拿到已经用过的 id，两支军队会互相覆盖。 */
-      BARRACKS: BARRACKS, ARMORY: ARMORY, STABLE: STABLE, SHIPYARD: SHIPYARD,
-      /* 军工产线（v17，**不升 SAVE_VER**）：产线分配 / 装备库存 / 工匠池与派驻。
-       * MILLS 只存"有过分配或零头"的省（一间空坊不占档）；
-       * EQUIPS 只存有货的国；ARTISANS 只存有人的国 —— 三张表都按需落笔。 */
-      MILL: sparseMill(), MILLV: 19, ARSENAL: sparseArsenal(),
-      EQUIP: EQUIPS, ARTISAN: ARTISANS, ARTISAN_ID: ARTISAN_ID,
-      ARMY: ARMY, GENERALS: GENERALS, ARMY_ID: ARMY_ID, GEN_ID: GEN_ID,
-      PLAYER: PLAYER, WARSET: WARSET, WARBASE: WARBASE,
-      OCCUPY: OCCUPY, SIEGE: SIEGE, BLOCKADE: BLOCKADE, DEAD: DEAD,
-      /* 不安 / 整合 / 匪患 / 安抚冷却 / 预警档（A、B 两批，**不升 SAVE_VER**）。
-       * 旧档没有这五块 → fill 之后是空表：不安 0、没有整合记录、没有匪患 ——
-       * 等于"这一局还没人闹过事"，和新开一局走同一条路，不写迁移函数。
-       * 唯一的例外是**旧档里已经有 OCCUPY 的省**：它们没有 INTEG，
-       * 读档后按"刚打下来"（×0.4）算，见产出那一处的兜底。 */
-      INTEG: INTEG, CONQ: CONQ, UNREST: sparseUnrest(), BANDIT: BANDIT, PACIFY: PACIFY, UNWARN: UNWARN,
-      /* 动态市场（v14，**不升 SAVE_VER**）：物价指数 / 事件冲击 / 卖货零头 / 出口闸。
-       * 旧档没有这四块 → fill 之后是空表：物价一律回基准 1.0（等价于"这一局还没
-       * 交易过"），出口闸 EXP1 空 → 本回合谁都能出口一笔，和"新开一局"同一条路。 */
-      PRICES: sparsePrices(), PRICESHOCK: PRICESHOCK, SELLACC: SELLACC, EXP1: EXP1,
-      RECRUITQ: RECRUITQ, WARLOG: WARLOG,
-      /* v4：事件系统 + 信仰（冷却表 / 一次性 / 产量 buff / 传教中 / 政策 /
-       * 国教 / 挂起未选的事件）。全部按 id 挂的普通对象，JSON 原样进出；
-       * 挂起事件只存 key+pid+cid —— ctx 里全是闭包，存不了也读不回来。
-       * v5：编年史（年表 / 定稿快照与称号 / 自动触发 flag）。年表一条几十字节，
-       * 定稿的三张图是 dataURL（~100KB），随档走。 */
-      EVT: AO.evtSave ? AO.evtSave() : null,
-      CHRONO: AO.chronoState ? AO.chronoState() : null,
-      /* v6：战争迷雾。**只存玩家自己那份认知**（EXPLORED / LASTSEEN / 预算 /
-       * 探测冷却 / 关系值）。AI 的认知是运行时长出来的，不进档 ——
-       * 存了反而会在读档后和 re-roll 的预算档打架。 */
-      FOG: fogSave(),
-      /* v7：敌国性格（PERSONA）。**不升版本号，只加字段** ——
-       * 老档没有这一块，读进来是 undefined，18-ai.js 的 load 什么都不做，
-       * 性格第一次被问到的时候按 seed + cid 的散列补上（同一个种子永远同一个性格）。 */
-      AI: AO.aiEconSave ? AO.aiEconSave() : null,
-      /* v9：外交层（条约 / 战争分 / 冷却 / 提案状态 / 贸易累计）。
-       * **不升版本号**，老档缺这一块 → diploLoad(undefined) 全补默认，
-       * 等于"这一局还没人签过条约"，和"新开一局"同一条路。 */
-      DIPLO: diploSave(),
-      /* 维修档（19-repair.js）：每类建筑每个城的保留座数 / 停修名单。
-       * **不升版本号**，老档缺这一块 → repLoad(undefined) 全补默认（= 全开）。 */
-      REP: AO.repSave ? AO.repSave() : null,
-      /* 平衡分析（20-balance.js）：每回合的收支采样（一国最多 160 点，几十 KB）。
-       * **不升版本号** —— 老档缺这一块就从空曲线开始，走几回合又有线了。 */
-      BAL: AO.balSave ? AO.balSave() : null,
-      /* 世界消息（v15）：待送达队列 + 待更正的账 + bench 统计。
-       * **不升版本号** —— 老档缺这一块 → newsLoad(undefined) 空队起步，
-       * 和"新开一局"同一条路；存了它才能做到"存档前在路上的一条消息，
-       * 读档后还在路上，而且不会凭空变快"。 */
-      NEWS: newsSave()
+      player: PLAYER,
+      aoc2: AO.aoc2.save(state.world),
+      /* 编年史是平台层（不随规则退役）：年表 / 定稿快照 / 称号随档走 */
+      CHRONO: AO.chronoState ? AO.chronoState() : null
     };
     var text;
     try { text = JSON.stringify(payload); }
-    catch (e) { return toast('存档失败：' + e.message, 3200); }
+    catch (e) { return toast('存档序列化失败：' + e.message, 3200); }
     try {
       localStorage.setItem(SAVE_KEY, text);
-      if (!silent) toast('已存档：第 ' + turnNo + ' 回合 · ' + ((text.length / 1024) | 0) + ' KB', 2600);
+      if (!silent) toast('已存档（v' + SAVE_VER + '，' + Math.round(text.length / 1024) + ' KB）', 2200);
     } catch (e) {
-      if (!silent) toast('存档失败（这个环境禁用了 localStorage）', 3600);
+      toast('存档写不进去：' + (e && e.name === 'QuotaExceededError' ? 'localStorage 配额满了' : e.message), 3400);
     }
   }
 
-  /* 产线分配表的稀疏版：只留"有分配 / 有零头 / 选过品种"的省。
-   * 1100 个省的空记录加起来也有几十 KB，而玩家真正摆过产线的通常只有十几省。
-   * 零头（prog / acc）也算信息 —— 攒到一半的一炉货不能读档就清零。 */
-  function sparseMill() {
-    var out = Object.create(null), M = AO.MILL, ow, k, i, has;
-    for (ow in MILLS) {
-      var m = MILLS[ow];
-      if (!m) continue;
-      has = false;
-      for (k in m.alloc) if ((m.alloc[k] | 0) > 0) has = true;
-      for (k in m.prog) if ((m.prog[k] || 0) > 0) has = true;
-      if (has) out[ow] = m;
-    }
-    return out;
-  }
-  /* 武库：只存有货的国（一张空表不进档） */
-  function sparseArsenal() {
-    var out = Object.create(null), ow;
-    for (ow in ARSENAL) {
-      var A = ARSENAL[ow];
-      if (!A) continue;
-      var has = false, k;
-      for (k in A.wpn) if (A.wpn[k] > 0) has = true;
-      for (k in A.mount) if (A.mount[k] > 0) has = true;
-      for (k in A.gun) if (A.gun[k] > 0) has = true;
-      for (k in A.ship) if (A.ship[k] > 0) has = true;
-      if (has) out[ow] = A;
-    }
-    return out;
-  }
-
-  /* 旧档迁移（v19，**不升 SAVE_VER**）：v17 的 MILLS 是 **pid 级**的，
-   * v19 起是 **owner 级**。折算规则（任务书第九节）：
-   *   · 按线合计：同国所有省的 alloc[线] 加起来（封顶到当时的池容量）
-   *   · prog 随线走：取同国最大值（同一国只有一条进度）
-   *   · 旧 st.order（单订单制）：那一坊没有任何分配时，按"全产能给原产线"折
-   * 另外 foundry.n 折进军械坊 1:1（铸炮厂整条删了，它的产能并进同一口锅）。 */
-  function millMigrateOld(d) {
-    if (!state.world) return 0;
-    var n = 0, old = d && d.MILL, pid, i, j, k, g;
-    /* foundry → armory 1:1 */
-    var fd = d && d.FOUNDRY;
-    if (fd) {
-      for (pid in fd) {
-        var f0 = fd[pid];
-        if (!f0 || !(f0.n > 0)) continue;
-        var a0 = ARMORY[pid];
-        if (!a0) a0 = ARMORY[pid] = newSchool();
-        a0.n = (a0.n | 0) + (f0.n | 0);
-        if (!n) n = 0;
-        n++;
-      }
-    }
-    if (!old) return n;
-    var per = Object.create(null);       // owner -> { alloc:{}, prog:{} }
-    for (pid in old) {
-      var mr = old[pid];
-      if (!mr || typeof mr !== 'object') continue;
-      var p = pOf(+pid);
-      if (!p || !p.owner) continue;
-      var ow = p.owner | 0;
-      var acc = per[ow] || (per[ow] = { alloc: {}, prog: {} });
-      for (k in AO.MILL.poolOf) {
-        g = AO.MILL.poolOf[k];
-        var src = mr[g] || mr[k] || null;
-        if (!src) continue;
-        var lines = AO.MILL.lines[g];
-        for (j = 0; j < lines.length; j++) {
-          var ln = lines[j], v = Math.max(0, src[ln] | 0);
-          if (v > 0) acc.alloc[ln] = (acc.alloc[ln] || 0) + v;
-        }
-        /* 旧线名 → 新线名：v17 的「兵刃」是一条线（wpn），v19 拆成四种类型；
-         * 旧档那一份统统算成「刀」（默认类型，AI 也是这么选的）。 */
-        var oldWpn = Math.max(0, src.wpn | 0);
-        if (oldWpn > 0) acc.alloc.dao = (acc.alloc.dao || 0) + oldWpn;
-      }
-      for (k in (mr.prog || {})) {
-        var pv = +(mr.prog[k] || 0);
-        if (!(pv > 0)) continue;
-        var short = k.split('.').pop();
-        if (short === 'wpn') short = 'dao';
-        if (!AO.MILL.kindOf[short]) continue;
-        acc.prog[short] = Math.max(acc.prog[short] || 0, pv);
-      }
-      /* 旧铸炮厂的线（fnd）并进军械池：炮线在 v19 是军械池里的四条线 */
-      if (mr.fnd) {
-        for (j = 0; j < AO.GUN_ORDER.length; j++) {
-          var gl = AO.GUN_ORDER[j], gv = Math.max(0, mr.fnd[gl] | 0);
-          if (gv > 0) acc.alloc[gl] = (acc.alloc[gl] || 0) + gv;
-        }
-      }
-      /* 单订单：这一坊没分配 → 全产能给原来那条线 */
-      for (i = 0; i < MILL_KINDS.length; i++) {
-        var kind = MILL_KINDS[i], st = UNIV[kind][pid];
-        if (!st || !st.order) continue;
-        var line0 = kind === 'armory' ? 'dao' : st.order;
-        if (!AO.MILL.kindOf[line0]) continue;
-        if (acc.alloc[line0] > 0) continue;
-        acc.alloc[line0] = Math.max(1, millCap(pid, kind));
-      }
-    }
-    for (var ow2 in per) {
-      var mm = millOf(+ow2), src2 = per[ow2];
-      for (k in src2.alloc) {
-        if (!AO.MILL.kindOf[k]) continue;
-        mm.alloc[k] = Math.max(0, src2.alloc[k] | 0);
-      }
-      for (k in src2.prog) {
-        if (!AO.MILL.kindOf[k]) continue;
-        mm.prog[k] = Math.min(lineWork(+ow2, k), src2.prog[k]);
-      }
-      /* 封顶到当时的池容量（按工作量从高到低扣） */
-      for (i = 0; i < MILL_POOLS.length; i++) {
-        var pool = MILL_POOLS[i], cap = poolCap(+ow2, pool), sum = 0;
-        var lines2 = AO.MILL.lines[pool];
-        for (j = 0; j < lines2.length; j++) sum += mm.alloc[lines2[j]] | 0;
-        while (sum > cap) {
-          var hi = -1, hiW = -1;
-          for (j = 0; j < lines2.length; j++) {
-            var l2 = lines2[j], a2 = mm.alloc[l2] | 0;
-            if (!a2) continue;
-            if (lineWork(+ow2, l2) > hiW) { hiW = lineWork(+ow2, l2); hi = j; }
-          }
-          if (hi < 0) break;
-          mm.alloc[lines2[hi]]--; sum--;
-        }
-      }
-      n++;
-    }
-    if (n && PLAYER) {
-      NOTES.push({ owner: PLAYER, cls: 'ok',
-        text: '军工产线已改制（全国口径）：' + n + ' 个国家的旧分配按线合计搬进了新表 —— 打开顶栏「产能」重新分配' });
-    }
-    return n;
-  }
-
-  /* 把存档里的状态灌回当前世界。世界已经按同一个 seed 重建好了，
-   * 所以 pid / owner 都是同一套编号，逐键覆盖即可。
-   *
-   * v1 → v2 的迁移全在**默认值**里，不写迁移函数：
-   * v1 的档里没有 TALENT / OFFICIAL / TAXRATE / HAPPY，fill 之后是空对象，
-   * 后面那段兜底会把税率补成 1、民心补成 60、官员池补成空 ——
-   * 于是"读到旧档"和"新开一局"走的是同一条代码路径，不会出现两套逻辑。 */
+  /* 读档：世界按 seed 重建，然后把 AoC2 那两张表灌回去 */
   function applySave(d, keepPid, keepCid) {
-    function wipe(o) { for (var k in o) delete o[k]; }
-    function fill(dst, src) { wipe(dst); if (src) for (var k in src) dst[k] = src[k]; }
-    fill(SIM, d.SIM);
-    /* 铁矿「深层休眠」迁移（v18 追加一补课，不升存档号）：
-     * cool 0 → 48 之后，旧档里那些 `gone: true` 的铁袋读进来就是"刚睡下"——
-     *   gone 清掉、cool 起 48、left 留 0（到点由产出循环把 left 回满）。
-     * 不在读档时直接补满 left：那等于凭空白送 48 回合的矿，是"回溯重算"。
-     * **金袋不动**：金矿 cool 仍是 0，gone 就是永久枯竭（淘金场那一条闭环）。 */
-    for (var simPid in SIM) {
-      var simBag = SIM[simPid];
-      if (!simBag || !simBag.iron || typeof simBag.iron !== 'object') continue;
-      var ironS = simBag.iron;
-      if (ironS.gone) {
-        ironS.gone = false;
-        ironS.cool = AO.RESOURCE_BY_KEY.iron.cool;
-        ironS.left = 0;
-      }
-      if (typeof ironS.cool !== 'number' || !isFinite(ironS.cool)) ironS.cool = 0;
-    }
-    fill(SCHOOL, d.SCHOOL);
-    fill(GRANARY, d.GRANARY);
-    fill(UNIVERSITY, d.UNIVERSITY);
-    fill(FACTORY_BLD, d.FACTORY_BLD);
-    fill(MARKET, d.MARKET);
-    fill(BUILDER, d.BUILDER);
-    fill(FREIGHT_LV, d.FREIGHT_LV);
-    /* 城墙：旧档（v6 及更早）没有 WALL → fill 之后是空表，等于"这一局还没人砌墙"。
-     * 有 WALL 的档逐条过一遍，缺字段按 lv0/hp0 补齐（并行批约定：不升号 + 读档容错）。 */
-    fill(WALL, d.WALL);
-    for (var wpid in WALL) {
-      var wr = WALL[wpid];
-      if (!wr || typeof wr !== 'object') { delete WALL[wpid]; continue; }
-      wr.lv = AO.clamp(wr.lv | 0, 0, AO.WALL.maxLv);
-      wr.site = Math.max(0, wr.site | 0);
-      /* hp 缺失（只写了一部分的档）→ 按"完好的墙"补满；
-       * hp 明确写了 0 → 保留 0（那是一面被打塌的墙，不能凭空修好）。 */
-      var wmax0 = AO.WALL.maxHp(wr.lv);
-      wr.hp = (wr.hp === undefined || wr.hp === null || isNaN(+wr.hp))
-        ? wmax0 : AO.clamp(+wr.hp, 0, wmax0);
-      wr.halted = !!wr.halted;
-      if (!wr.mAcc) wr.mAcc = { iron: 0, gold: 0 };
-    }
-    /* 熔旧坊（本批新增，不升 SAVE_VER）：旧档没有 SMELT → fill 之后是空表，
-     * 等于"这一局还没人改建过"。有的话逐条归一化（n 夹紧、零头补 0），
-     * 手改过的档也不炸；空记录顺手剔掉，别让一张 1100 省的空表进档。 */
-    fill(SMELT, d.SMELT);
-    for (var spid in SMELT) {
-      var sr = SMELT[spid];
-      if (!sr || typeof sr !== 'object') { delete SMELT[spid]; continue; }
-      sr.n = AO.clamp(sr.n | 0, 0, AO.SMELT.maxPer);
-      sr.site = Math.max(0, sr.site | 0);
-      sr.halted = !!sr.halted;
-      if (!sr.mAcc || typeof sr.mAcc !== 'object') sr.mAcc = { iron: 0, gold: 0 };
-      if (typeof sr.mAcc.gold !== 'number' || !isFinite(sr.mAcc.gold)) sr.mAcc.gold = 0;
-      if (typeof sr.mAcc.iron !== 'number' || !isFinite(sr.mAcc.iron)) sr.mAcc.iron = 0;
-      if (typeof sr.iAcc !== 'number' || !isFinite(sr.iAcc)) sr.iAcc = 0;
-      if (!sr.n && !sr.site) delete SMELT[spid];
-    }
-    /* 淘金场（v18 / A，不升 SAVE_VER）：旧档没有 WASH → fill 之后是空表，
-     * 等于"这一局还没人改建过"。有的话逐条归一化（和 SMELT 同一套写法）。 */
-    fill(WASH, d.WASH);
-    for (var wpid2 in WASH) {
-      var wr2 = WASH[wpid2];
-      if (!wr2 || typeof wr2 !== 'object') { delete WASH[wpid2]; continue; }
-      wr2.n = AO.clamp(wr2.n | 0, 0, AO.WASH.maxPer);
-      wr2.site = Math.max(0, wr2.site | 0);
-      wr2.halted = !!wr2.halted;
-      if (!wr2.mAcc || typeof wr2.mAcc !== 'object') wr2.mAcc = { iron: 0, gold: 0 };
-      if (typeof wr2.mAcc.gold !== 'number' || !isFinite(wr2.mAcc.gold)) wr2.mAcc.gold = 0;
-      if (typeof wr2.mAcc.iron !== 'number' || !isFinite(wr2.mAcc.iron)) wr2.mAcc.iron = 0;
-      if (typeof wr2.iAcc !== 'number' || !isFinite(wr2.iAcc)) wr2.iAcc = 0;
-      if (typeof wr2.tAcc !== 'number' || !isFinite(wr2.tAcc)) wr2.tAcc = 0;
-      if (!wr2.n && !wr2.site) delete WASH[wpid2];
-    }
-    /* 铁税零头：和 TAXACC 一样存回来，否则读档后"税入比存档前少一点"会被当成 bug */
-    fill(IRONACC, d.IRONACC);    for (var ipid in IRONACC) {
-      if (typeof IRONACC[ipid] !== 'number' || !isFinite(IRONACC[ipid])) IRONACC[ipid] = 0;
-    }
-    /* 上解零头（v18.3）：同一套 —— 缺键就是空表，读档后从 0 攒起 */
-    fill(REMITACC, d.REMITACC);  for (var rmpid in REMITACC) {
-      var rmv = +REMITACC[rmpid];
-      REMITACC[rmpid] = (isFinite(rmv) && rmv > 0) ? rmv : 0;
-    }
-    /* 物资上解零头（v19.1）：同一个形状，键是 `pid|key`，校验也一样 */
-    fill(REMITACC_R, d.REMITACC_R);  for (var rrk in REMITACC_R) {
-      var rrv = +REMITACC_R[rrk];
-      REMITACC_R[rrk] = (isFinite(rrv) && rrv > 0) ? rrv : 0;
-    }
-    fill(CENTRAL, d.CENTRAL);
-    fill(RESEARCH, d.RESEARCH);
-    /* 工艺链折算（v19）：兵器名节点全下树，已研的旧键折成对应的工艺 ——
-     * 高级覆盖低级、**不退点数**（那笔账已经花掉了，退回去等于白送科研点）。
-     * 映射表只有一份：AO.CRAFT.alias。 */
-    for (var row in RESEARCH) {
-      var Rd = RESEARCH[row];
-      if (!Rd || !Rd.done) continue;
-      for (var ok3 in AO.CRAFT.alias) {
-        if (!Rd.done[ok3]) continue;
-        Rd.done[AO.CRAFT.alias[ok3]] = true;
-        delete Rd.done[ok3];
-      }
-      /* 队列里挂着的旧键也一起折（不然队头永远研不成） */
-      if (Rd.queue) {
-        for (var qi3 = 0; qi3 < Rd.queue.length; qi3++) {
-          var qk3 = AO.CRAFT.alias[Rd.queue[qi3]];
-          if (qk3) Rd.queue[qi3] = qk3;
-        }
-      }
-    }
-    fill(POP, d.POP);
-    fill(TALENT, d.TALENT);
-    fill(OFFICIAL, d.OFFICIAL);
-    /* 宰相（v12）：旧档没有 CHANCELLOR → 空表；有的话把缺的键补齐
-     * （perms / owed / paused 都是后加的字段，读到旧档不能是 undefined） */
-    fill(CHANCELLOR, d.CHANCELLOR);
-    for (var chk in CHANCELLOR) {
-      var ch0 = CHANCELLOR[chk];
-      if (!ch0 || typeof ch0 !== 'object') { delete CHANCELLOR[chk]; continue; }
-      if (typeof ch0.grade !== 'number' || !AO.CHANCELLOR_LV[ch0.grade]) {
-        var g0 = (AO.traitOf(ch0.traitKey) || {}).grade;
-        ch0.grade = AO.CHANCELLOR_LV[g0] ? g0 : 1;
-      }
-      if (!ch0.perms || typeof ch0.perms !== 'object') {
-        ch0.perms = { build: 1, research: 1, tax: 1, officials: 1 };
-      }
-      if (typeof ch0.owed !== 'number' || !isFinite(ch0.owed) || ch0.owed < 0) ch0.owed = 0;
-      if (typeof ch0.paused !== 'string') ch0.paused = '';
-      if (typeof ch0.adviseAt !== 'number') ch0.adviseAt = turnNo;
-    }
-    /* 官员的资历 / 怨气 / 俸禄零头（v11 新增字段，**不升版本号**）：
-     * 旧档里的官没有这四个键 —— 逐个补默认，和"新开一局"走同一条路。
-     * 不补的话 PMOD 里 off.rank 是 undefined，倍率会算出 NaN，整省产出归零。 */
-    for (var opid in OFFICIAL) if (OFFICIAL[opid]) offNorm(OFFICIAL[opid]);
-    fill(TAXRATE, d.TAXRATE);
-    fill(HAPPY, d.HAPPY);
-    fill(TAXACC, d.TAXACC);
-    /* 战争层（v3）。老档（v1/v2）没有这些键 → fill 之后是空表，
-     * 和"新开一局"完全一样，所以不需要写迁移函数。 */
-    fill(BARRACKS, d.BARRACKS);
-    fill(ARMORY, d.ARMORY);
-    fill(STABLE, d.STABLE);
-    fill(SHIPYARD, d.SHIPYARD);
-    /* 军工产线（v17）：旧档缺这三块 → 空表（= 还没摆过产线 / 还没打过装备 / 还没抽过匠人）。
-     * 读进来的记录要逐条归一化：手改过的档 / 别的版本的档可能带 NaN 或越界，
-     * 留着会让"产能 2 点"变成"产能 NaN 点"，然后整座坊静默停产。 */
-    /* 军工产线（v19：**owner 级**全国表）。MILLV 是"表结构版本"：
-     * 没有它（v17/v18 的档）→ 走 millMigrateOld 把 pid 级旧表按线合计搬过来；
-     * 有它 → 直接读，逐国归一化（手改过的档带 NaN / 越界也不炸）。 */
-    if (d.MILLV === 19) {
-      fill(MILLS, d.MILL);
-      for (var mow in MILLS) {
-        var mr1 = MILLS[mow];
-        if (!mr1 || typeof mr1 !== 'object') { delete MILLS[mow]; continue; }
-        var mfix = millOf(mow), Mk = AO.MILL, kk2, gg;
-        for (kk2 in mfix.alloc) {
-          var lv0 = +mr1.alloc[kk2];
-          mfix.alloc[kk2] = isFinite(lv0) && lv0 > 0 ? Math.min(99, Math.floor(lv0)) : 0;
-        }
-        for (kk2 in mfix.prog) {
-          var pv1 = +mr1.prog[kk2];
-          mfix.prog[kk2] = isFinite(pv1) && pv1 > 0 ? Math.min(99, pv1) : 0;
-        }
-        for (kk2 in (mr1.form || {})) {
-          if (AO.MILL.kindOf[kk2] !== 'blade') continue;
-          mfix.form[kk2] = AO.gearOf(AO.GEAR.forms, mr1.form[kk2]).key;
-        }
-        for (kk2 in (mr1.acc || {})) {
-          var av = +(mr1.acc[kk2] || 0);
-          mfix.acc[kk2] = isFinite(av) ? Math.max(0, Math.min(0.999, av)) : 0;
-        }
-        gg = null;
-      }
-    } else {
-      wipe(MILLS);
-      millMigrateOld(d);
-    }
-    /* 武库（v19）：旧档没有 ARSENAL → 空表（= 还没有成品），和"新开一局"同一条路 */
-    fill(ARSENAL, d.ARSENAL);
-    for (var aow2 in ARSENAL) {
-      var ar0 = ARSENAL[aow2];
-      if (!ar0 || typeof ar0 !== 'object') { delete ARSENAL[aow2]; continue; }
-      var afix = arsOf(aow2), kk3;
-      for (var gk in afix) {
-        for (kk3 in afix[gk]) {
-          var nv = +(ar0[gk] || {})[kk3];
-          if (!isFinite(nv) || nv <= 0) delete afix[gk][kk3];
-          else afix[gk][kk3] = Math.floor(nv);
-        }
-      }
-      /* v19 返工（任务书第九节）：武库里的旧键 '代|类型|形制|品质' 折算成
-       * '材质|类型|形制|品质'（ironwp/crossbow → 铁，matchlock…gw → 火器）。
-       * 折完撞键就**合并件数** —— 铁兵器与强弩·具装都并成"铁 · 刀/…"，不能丢。 */
-      if (afix.wpn) {
-        var wmerged = Object.create(null), wk;
-        for (wk in afix.wpn) {
-          var wp = wk.split('|'), wm = AO.matKeyOf(wp[0]);
-          var nk = [wm, wp[1] || 'dao', wp[2] || 'plain', wp[3] || 'plain'].join('|');
-          wmerged[nk] = (wmerged[nk] | 0) + (afix.wpn[wk] | 0);
-        }
-        afix.wpn = wmerged;
-      }
-    }
-    fill(EQUIPS, d.EQUIP);
-    for (var eoid in EQUIPS) {
-      var e0 = EQUIPS[eoid];
-      if (!e0 || typeof e0 !== 'object') { delete EQUIPS[eoid]; continue; }
-      equipOf(eoid);                    // 补槽、把非法数归零
-    }
-    fill(ARTISANS, d.ARTISAN);
-    for (var aoid in ARTISANS) {
-      var A0 = ARTISANS[aoid];
-      if (!A0 || typeof A0 !== 'object') { delete ARTISANS[aoid]; continue; }
-      var A1 = artisanPoolOf(aoid), i0;
-      A1.pool = (A0.pool || []).filter(function (x) { return x && typeof x === 'object'; });
-      A1.post = {};
-      for (i0 in (A0.post || {})) {
-        var pa = (A0.post || {})[i0];
-        if (!pa || typeof pa !== 'object') continue;
-        pa.lv = AO.clamp(pa.lv | 0, 0, AO.ARTISAN.lv.length - 1);
-        pa.pid = i0 | 0;
-        A1.post[i0 | 0] = pa;
-      }
-      for (i0 = 0; i0 < A1.pool.length; i0++) A1.pool[i0].lv = AO.clamp(A1.pool[i0].lv | 0, 0, AO.ARTISAN.lv.length - 1);
-    }
-    /* 匠人 id 计数器：接着存档最大值往后走（撞了"派/撤"会认错人） */
-    var maxArt = 0, ak3, ai3;
-    for (ak3 in ARTISANS) {
-      var A2 = ARTISANS[ak3];
-      if (!A2) continue;
-      for (ai3 = 0; ai3 < (A2.pool || []).length; ai3++) if (A2.pool[ai3] && A2.pool[ai3].id > maxArt) maxArt = A2.pool[ai3].id;
-      for (var apk in (A2.post || {})) if (A2.post[apk] && A2.post[apk].id > maxArt) maxArt = A2.post[apk].id;
-    }
-    ARTISAN_ID = Math.max(d.ARTISAN_ID || 1, maxArt + 1);
-    fill(ARMY, d.ARMY);
-    /* v19 返工：军队身上的"代"折算成材质（weapon.tier 也要跟着改，
-     * 否则面板按旧键查不到材质，会退回"皮"）。 */
-    for (var aid2 in ARMY) {
-      var a2 = ARMY[aid2];
-      if (!a2 || a2.type === 'navy') continue;
-      var oldTier2 = a2.tier;
-      a2.tier = AO.matKeyOf(a2.tier);
-      if (a2.weapon) {
-        var wm2 = AO.matKeyOf(a2.weapon.tier);
-        var wty2 = a2.weapon.type || 'dao', wfo2 = a2.weapon.form || 'plain', wq2 = a2.weapon.q || 'plain';
-        a2.weapon = { key: [wm2, wty2, wfo2, wq2].join('|'),
-          tier: wm2, type: wty2, form: wfo2, q: wq2 };
-      } else if (a2.weapon === undefined && oldTier2) {
-        /* v18 及更早的档：军队只有 tier / arms，没有 weapon 槽 —— 按"已发对应队份"补上
-         * （arms:'art' 的补一门投石机）。新档的裸兵是 `weapon: null`，不会被这条碰到。 */
-        if (a2.arms === 'art') a2.gun = { key: 'catapult|plain', tier: 'catapult', q: 'plain' };
-        a2.weapon = { key: [a2.tier, 'dao', 'plain', 'plain'].join('|'),
-          tier: a2.tier, type: 'dao', form: 'plain', q: 'plain' };
-      }
-    }
-    fill(GENERALS, d.GENERALS);
-    fill(WARSET, d.WARSET);
-    fill(WARBASE, d.WARBASE);
-    fill(OCCUPY, d.OCCUPY);
-    /* 不安 / 整合 / 匪患 / 安抚冷却 / 预警档：旧档缺这五块 → 空表（见 save 里的说明）。
-     * 有个细节要补：旧档里 OCCUPY 有、INTEG 没有的省，直接补一条 v:0 ——
-     * 否则它在存档里"没有整合记录"，而产出那边按 0 算，两边看着是同一个数，
-     * 但省卡的「整合」行会整行消失（判据是 integOf 非空），玩家会以为坏了。 */
-    fill(INTEG, d.INTEG);
-    /* 易主记录（v19.4）：旧档缺这块 → 空表（见 save 里的说明） */
-    fill(CONQ, d.CONQ);
-    fill(UNREST, d.UNREST);
-    fill(BANDIT, d.BANDIT);
-    fill(PACIFY, d.PACIFY);
-    fill(UNWARN, d.UNWARN);
-    /* 动态市场（v14）：旧档缺这四块 → 空表（物价回基准、没有冲击、没有零头）。
-     * 读进来的价格要逐条归一化：手改过的档 / 别的版本的档可能带 NaN 或越界值，
-     * 留着会让价格板显示 "NaN" 并传染到所有买卖。 */
-    fill(PRICES, d.PRICES);
-    var PCFG = AO.PRICES_CFG;
-    for (var pcid in PRICES) {
-      var prow = PRICES[pcid];
-      if (!prow || typeof prow !== 'object') { delete PRICES[pcid]; continue; }
-      for (var pkey in prow) {
-        var pit = prow[pkey];
-        if (!pit || typeof pit !== 'object') { delete prow[pkey]; continue; }
-        pit.v = AO.clamp(isFinite(+pit.v) ? +pit.v : PCFG.base, PCFG.lo, PCFG.hi);
-        pit.target = AO.clamp(isFinite(+pit.target) ? +pit.target : PCFG.base, PCFG.lo, PCFG.hi);
-        pit.trend = pit.trend > 0 ? 1 : pit.trend < 0 ? -1 : 0;
-      }
-    }
-    fill(PRICESHOCK, d.PRICESHOCK);
-    fill(SELLACC, d.SELLACC);
-    fill(EXP1, d.EXP1);
-    for (var sak in SELLACC) {
-      if (!isFinite(+SELLACC[sak]) || +SELLACC[sak] < 0) SELLACC[sak] = 0;
-      else SELLACC[sak] = +SELLACC[sak];
-    }
-    for (var exk in EXP1) { if (!isFinite(+EXP1[exk])) delete EXP1[exk]; else EXP1[exk] = +EXP1[exk]; }
-    for (var ocp in OCCUPY) {
-      if (!INTEG[ocp]) INTEG[ocp] = { v: 0 };
-      unrestOf(ocp);
-    }
-    fill(SIEGE, d.SIEGE);
-    fill(BLOCKADE, d.BLOCKADE);
-    fill(DEAD, d.DEAD);
-    fill(RECRUITQ, d.RECRUITQ);
-    /* 事件 / 信仰（v4）。老档（v1~v3）没有这一块 → evtLoad(undefined) 全补默认：
-     * 冷却表空、政策一律强制、国教重算，于是"读到旧档"和"新开一局"同一条路。 */
-    if (AO.evtLoad) AO.evtLoad(d.EVT);
-    /* 编年史（v5）。老档没有 CHRONO → chronoLoad(undefined) 补空年表，
-     * 于是"读到旧档"和"新开一局"走同一条路（和 EVT 一个道理）。 */
+    if (!d || !d.aoc2 || !state.world) return;
+    AO.aoc2.load(state.world, d.aoc2);
     if (AO.chronoLoad) AO.chronoLoad(d.CHRONO);
-    /* 战报是数组：fill 只按 key 遍历，数组得单独灌（否则 length 会留成旧的长度） */
-    WARLOG.length = 0;
-    if (d.WARLOG && d.WARLOG.length) for (var wi = 0; wi < d.WARLOG.length; wi++) WARLOG.push(d.WARLOG[wi]);
-    /* 流水是"上一回合"的，读档后清空（否则省卡会显示上一局的收支） */
-    wipe(FLOW);
-    wipe(FLOWC);
-    /* 兜底：更早的存档没有 queue / 市场 / 建造坊 / 治理层，补空结构而不是崩掉 */
-    for (var o in RESEARCH) {
-      var R = RESEARCH[o];
-      if (!R.queue) R.queue = [];
-      if (!R.done) R.done = Object.create(null);
-    }
-    for (var pid in SIM) {
-      if (!SCHOOL[pid]) SCHOOL[pid] = newSchool();
-      if (!MARKET[pid]) MARKET[pid] = newSchool();
-      if (!BUILDER[pid]) BUILDER[pid] = newSchool();
-      /* 战争层的五座厂同形状，缺了就补一个空的（v1/v2 档走到这里就是"还没建过厂"） */
-      if (!BARRACKS[pid]) BARRACKS[pid] = newSchool();
-      if (!ARMORY[pid]) ARMORY[pid] = newSchool();
-      if (!STABLE[pid]) STABLE[pid] = newSchool();
-      if (!SHIPYARD[pid]) SHIPYARD[pid] = newSchool();
-      /* 内政批：粮仓 / 大学 / 工厂。旧档没有这三张表 → 补 0 座（等同"还没盖过"） */
-      if (!GRANARY[pid]) GRANARY[pid] = newSchool();
-      if (!UNIVERSITY[pid]) UNIVERSITY[pid] = newSchool();
-      if (!FACTORY_BLD[pid]) FACTORY_BLD[pid] = newSchool();
-      happyOf(pid);                       // v1 档：民心补 60
-    }
-    if (state.world) {
-      for (var ci2 = 0; ci2 < state.world.countries.length; ci2++) {
-        var cid2 = state.world.countries[ci2].id;
-        talentOf(cid2);                   // v1 档：人才池补空
-        if (TAXRATE[cid2] === undefined) TAXRATE[cid2] = 1;   // v1 档：默认常规税
-      }
-    }
-    /* 官员 id 计数器要接着存档里的最大值往后走，否则新抽的官会撞 id
-     * （撞了之后"派/撤"会认错人 —— 这种 bug 只在读档后才出现，最难查） */
-    var maxId = 0, kk;
-    for (kk in OFFICIAL) if (OFFICIAL[kk] && OFFICIAL[kk].id > maxId) maxId = OFFICIAL[kk].id;
-    for (kk in TALENT) {
-      var pool = (TALENT[kk] && TALENT[kk].pool) || [];
-      for (var pi = 0; pi < pool.length; pi++) if (pool[pi] && pool[pi].id > maxId) maxId = pool[pi].id;
-    }
-    GOV_ID = Math.max(d.GOV_ID || 1, maxId + 1);
-    /* 军队 / 将领的 id 计数器同理：老档没有就从头开始，
-     * 有的话至少要比现有最大 id 大 —— 否则新征的军队会覆盖旧的那支。 */
-    var maxArmy = 0, maxGen = 0, ak2, gk;
-    for (ak2 in ARMY) if (ARMY[ak2] && +ak2 > maxArmy) maxArmy = +ak2;
-    for (gk in GENERALS) if (GENERALS[gk] && GENERALS[gk].id > maxGen) maxGen = GENERALS[gk].id;
-    ARMY_ID = Math.max(d.ARMY_ID || 1, maxArmy + 1);
-    GEN_ID = Math.max(d.GEN_ID || 1, maxGen + 1);
-    PLAYER = d.PLAYER || 0;
     turnNo = d.turnNo || 1;
-    /* 迷雾（v6）：PLAYER 与回合数都落定之后再灌 ——
-     * LASTSEEN 的陈旧度是拿 turnNo 现算的，先灌迷雾会得到一张"未来情报"。
-     * 旧档没有 d.FOG → fogLoad(undefined) 按"自国已探、其余 unknown"补初始化。 */
-    fogLoad(d.FOG);
-    /* 敌国性格（v7）：和迷雾同一位次 —— turnNo / PLAYER 都定完了。
-     * 旧档没有 d.AI → aiEconLoad(undefined) 只清空表，性格按 seed + cid 的散列补，
-     * 于是"读到旧档"和"新开一局"走同一条路。 */
-    if (AO.aiEconLoad) AO.aiEconLoad(d.AI);
-    /* 外交层（v9）：排在迷雾之后 —— 工坊模式那份 REL 要能盖住 fogLoad 清空的表，
-     * 而选了国的档里 REL 归 fogLoad 管（d.DIPLO.rel 是 null）。
-     * 旧档没有 d.DIPLO → 全补默认（空条约表）。 */
-    diploLoad(d.DIPLO);
-    /* 世界消息（v15）：排在迷雾与外交之后 —— PLAYER / turnNo / INTELB 都定完了，
-     * "在路上的一条消息还差几回合"才是拿这两个数算出来的。
-     * 旧档 d.NEWS 是 undefined → 空队起步（和"新开一局"同一条路）。 */
-    newsLoad(d.NEWS);
-    /* 维修档（19-repair.js）：SIM / WALL 都灌完了才补 —— 它要按 pid 剔掉
-     * 已经不存在的省。老档 d.REP 是 undefined → 全补默认。 */
-    if (AO.repLoad) AO.repLoad(d.REP);
-    /* 平衡分析：曲线随档走（老档没有 d.BAL → 空曲线起步） */
-    if (AO.balLoad) AO.balLoad(d.BAL);
-    /* 军工产线（v17）：必须排在 RESEARCH / UNIV / PLAYER 都落定之后 ——
-     * 迁移要按"研到哪一档"判断产线开不开，也要按产能算出该迁多少点。
-     * 旧档的 st.order 在这一步被翻译成"全产能 → 原产线"（拍板③）。 */
+    PLAYER = d.player | 0;
     updateTurnLabel();
-    state.infoId = 0;
-    state.openKey = null;
-    clearInfo();
-    clearCountry();
-    if (state.renderer) state.renderer.requestDraw();
-    /* 把读档前正在看的省/国接着显示出来（同 seed 重建，id 一定对得上） */
-    if (keepCid && state.world.countries[keepCid - 1]) {
-      if (state.renderer) state.renderer.selectedCountry = keepCid;
-      showCountry(keepCid);
-    }
-    if (keepPid && state.world.provinces[keepPid - 1]) {
-      if (state.renderer) { state.renderer.select(keepPid); }
-      showInfo(keepPid);
-    }
-    refreshLocks();          // PLAYER 可能变了：所有"非你的国家"的灰要重新算一遍
-    /* 存档里挂着一件没选完的事 → 重新弹出来（不弹的话 EPEND 有值、
-     * 下一回合按钮却没人置灰，玩家会卡在一件看不见的事上）。 */
-    if (AO.evtReopen) AO.evtReopen();
-    /* 维修面板：换了一局就重画（档位/失修都换了），徽标跟着重算 */
-    if (typeof refreshRepBadge === 'function') refreshRepBadge();
-    if (REPU && REPU.open) renderRepPanel();
-    toast('读档完成：第 ' + turnNo + ' 回合', 2400);
+    refreshLocks();
+    if (keepPid) { state.renderer.select(keepPid); showInfo(keepPid); }
+    if (keepCid && $('country').classList.contains('on')) showCountry(keepCid);
+    toast('读档完成：第 ' + turnNo + ' 回合', 2200);
   }
 
   function loadGame() {
     var raw = null;
     try {
       raw = localStorage.getItem(SAVE_KEY);
-      /* v1 旧档存在旧键上：找不到新键就回退找它，读到之后按 v1 补默认 */
       if (!raw) raw = localStorage.getItem(SAVE_KEY_V1);
     }
     catch (e) { return toast('这个环境不允许读 localStorage（file:// 被禁），读不了存档', 3400); }
@@ -16408,18 +15551,9 @@
     var d = null;
     try { d = JSON.parse(raw); }
     catch (e) { return toast('存档损坏，读不出来', 3200); }
-    /* 版本容忍：**读得进比读不进的档多**。v1（治理层之前）、v2（治理层）、
-     * v3（战争层）的字段是逐层叠加的 —— 老档缺的字段在 applySave 里补默认，
-     * 所以只要"不比当前版本新"就都能读。比当前版本新的才拒（那些字段我们不认识）。 */
-    if (!d || !(d.v >= 1) || d.v > SAVE_VER) {
-      return toast('存档版本不认识（v' + (d && d.v) + '，本版最高 v' + SAVE_VER + '）', 3200);
-    }
-    if (d.v < SAVE_VER) {
-      toast('读到 v' + d.v + ' 旧档：' +
-        (d.v < 2 ? '官员 / 税率 / 民心' : d.v < 3 ? '军队 / 外交 / 装备厂' :
-          d.v < 4 ? '事件 / 信仰' : d.v < 5 ? '编年史年表' :
-            '战争迷雾（按"自国已探、其余未知"补）') + '按默认补齐', 3000);
-    }
+
+    var chk = AO.aoc2.checkSaveVersion(d && d.v);
+    if (!chk.ok) return toast(chk.msg, 4200);
 
     /* 先按存档里的 seed + 滑杆值重建世界，世界建好之后再灌状态 */
     $('seed').value = d.seed || '';
@@ -16512,8 +15646,7 @@
       if (id) {
         var p = state.world.provinces[id - 1];
         if (p) {
-          if (fogOn() && visCode(id) !== VIS_REAL) showInfo(id);
-          else renderInfoLists(p);
+          showInfo(id);
         }
       }
       var shown = state.renderer.selectedCountry;
@@ -16782,11 +15915,13 @@
   function millPanelActions() {
     var mp = $('millPanel'), ap = $('arsPanel');
     if (!mp || !ap) return;
-    $('millBtn').addEventListener('click', function (e) {
+    var mb = $('millBtn');
+    if (mb) mb.addEventListener('click', function (e) {
       e.stopPropagation();
       if (MPU.open) closeMillPanel(); else { closeArsPanel(); openMillPanel(); }
     });
-    $('arsBtn').addEventListener('click', function (e) {
+    var ab = $('arsBtn');
+    if (ab) ab.addEventListener('click', function (e) {
       e.stopPropagation();
       if (APU.open) closeArsPanel(); else { closeMillPanel(); openArsPanel(); }
     });
@@ -16845,6 +15980,19 @@
     return state.world ? state.world.provinces[(x | 0) - 1] : null;
   }
   AO.resDebug = {
+    /* AoC2（阶段一）：探针只从这里进 —— diag/aoc2-idle-probe.js 靠它跑 100 回合。
+     * turn(n) 连跑 n 回合（不刷 UI，快），summary() 读分布，world() 拿世界对象。 */
+    aoc2: {
+      turn: function (n) {
+        n = n | 0 || 1;
+        for (var i = 0; i < n; i++) settleTurn();
+        updateTurnLabel();
+        return AO.aoc2.summary(state.world);
+      },
+      summary: function () { return state.world ? AO.aoc2.summary(state.world) : []; },
+      world: function () { return state.world; },
+      cfg: function () { return AO.AOC2; }
+    },
     talentOf: talentOf, researchOf: researchOf,
     /* 维护单价（逐座、逐类，可复算） */
     maintDue: maintDue,
@@ -16968,7 +16116,7 @@
     allocSum: allocSum, orderCost: orderCost, makeOrder: makeOrder,
     setMillLine: bumpLine,
 
-    millMigrateOld: millMigrateOld, arsBest: arsBest, sparseArsenal: sparseArsenal,
+    arsBest: arsBest,
     millPt: function (line) { return millPtOf(line); },
     hasTech: hasTech,
     equip: EQUIPS,
@@ -17367,19 +16515,8 @@
         });
       }
     }
-    /* 信息 / 建筑 两个入口：点开一个；再点当前这个 = 收起 */
-    var itabs = $('infoTabs').querySelectorAll('.itab');
-    for (var ti = 0; ti < itabs.length; ti++) {
-      itabs[ti].addEventListener('click', function () {
-        var tab = this.getAttribute('data-tab');
-        state.infoTab = (state.infoTab === tab) ? null : tab;
-        applyInfoTab();
-        if (state.infoTab && state.renderer && state.renderer.selected && state.world) {
-          var pp = state.world.provinces[state.renderer.selected - 1];
-          if (pp) renderInfoLists(pp);       // 展开时补一次内容
-        }
-      });
-    }
+    /* 省卡的「信息 / 建筑」两个入口随建筑一起退役（阶段一）：
+     * 现在省卡只有一页（人口 / 经济 / 发展度 / 稳定 / 幸福 / 增长 + 三条敕令）。 */
     /* ---- 界面收敛（v16）的四组交互 ---- */
     /* ① 省卡「测绘详情」开关：整行可点，键盘也能按 */
     var db = $('detBar');
@@ -17464,7 +16601,10 @@
       if (ld) { ld.disabled = true; ld.title = '这个环境禁用了 localStorage（file:// 常见），读不了档'; }
     }
     /* 科技：右上角一个入口，点开就是全屏科技树；节点上的点击在 bindTechTree 里 */
-    $('techBtn').addEventListener('click', function () {
+    /* 科技 / 治理入口已随阶段一退役（按钮从 index.html 拆掉）；
+     * 这里保留 if 只为兼容阶段四把入口装回来时不用改结构。 */
+    var tb = $('techBtn');
+    if (tb) tb.addEventListener('click', function () {
       if (TT.open) closeTechTree();
       else openTechTree(0);
     });
@@ -17520,8 +16660,7 @@
       var p = id && state.world ? state.world.provinces[id - 1] : null;
       if (p) openGovPanel(p.owner);
     }
-    if (ih) { ih.style.cursor = 'pointer'; ih.addEventListener('click', gotoGov); }
-    if (io) { io.style.cursor = 'pointer'; io.addEventListener('click', gotoGov); }
+    /* 治理面板已退役：省卡上的"民心/官员"不再往那儿跳（阶段一） */
     $('prov').addEventListener('input', function () { $('provVal').textContent = this.value; });
     $('ctry').addEventListener('input', function () { $('ctryVal').textContent = this.value; });
     $('land').addEventListener('input', function () { $('landVal').textContent = this.value + '%'; });
@@ -17967,7 +17106,8 @@
     var panel = $('repPanel');
     if (!panel) return;
 
-    $('repBtn').addEventListener('click', function (e) { e.stopPropagation(); toggleRepPanel(); });
+    var rb = $('repBtn');
+    if (rb) rb.addEventListener('click', function (e) { e.stopPropagation(); toggleRepPanel(); });
     millPanelActions();
     $('rpClose').addEventListener('click', closeRepPanel);
     /* 维修卡里同样挂一颗（和纪要一致）：调完优先级顺手就能结算，

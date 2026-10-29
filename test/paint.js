@@ -232,7 +232,6 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const ui = await page.evaluate((a) => {
     const R = window.__renderer, w = window.__world;
     R.select(a.pid);
-    document.querySelector('.itab[data-tab="info"]').click();
     R.selectCountry(w.provinces[a.pid - 1].owner);
     return {
       pop: document.getElementById('cPop').textContent,
@@ -246,11 +245,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     };
   }, setup);
   await page.screenshot({ path: shot('paint-after.png') });
+  /* 信仰构成随信仰一起退役（阶段一）；国家卡现在验的是 AoC2 那几行 */
   ck('涂色后国家卡 / 省份卡正常渲染',
     /万|亿/.test(ui.pop) && /km²/.test(ui.area) && /个/.test(ui.provN) &&
-    ui.faithRows >= 2 && ui.terrRows >= 1 && ui.iOwner.length > 0,
+    ui.terrRows >= 1 && ui.iOwner.length > 0,
     '人口 ' + ui.pop + ' · 面积 ' + ui.area + ' · ' + ui.provN +
-    ' · 首都 ' + ui.cap + ' · 信仰 ' + ui.faithRows + ' 行 · 邻国 ' + ui.neigh);
+    ' · 首都 ' + ui.cap + ' · 邻国 ' + ui.neigh);
 
   /* ---- 汇总 ---- */
   let pass = true;

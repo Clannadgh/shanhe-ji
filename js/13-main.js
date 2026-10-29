@@ -531,7 +531,7 @@
     var totalMs = AO.now() - t0;
     marks.total = totalMs;
 
-    return {
+    var world = {
       meta: {
         seed: seedText,
         seedInt: seedInt,
@@ -565,6 +565,14 @@
       hillshade: hs,
       stats: stats
     };
+
+    /* ---------- 10. AoC2 数据模型（15-aoc2）----------
+     * 省 / 国的新字段（人口表、经济、发展度、稳定、幸福、国库、滑条……）
+     * 在这里一次挂好：UI、探针、测试拿到的 world 形状完全一致。
+     * 挂载本身不消耗随机数，世界指纹不变。 */
+    if (AO.aoc2 && AO.aoc2.initWorld) AO.aoc2.initWorld(world);
+
+    return world;
   };
 
   /* 命中检测：直接查栅格标签。

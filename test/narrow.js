@@ -86,36 +86,8 @@ const flags = (page) => page.evaluate(() => ({
   ck('窄屏：「面板」钮在省卡之下（信息盖住面板）',
     c.zCard > c.zBtn, '省卡 z' + c.zCard + ' > 钮 z' + c.zBtn);
 
-  await page.evaluate(() => {
-    const t = document.querySelector('#infoTabs .itab[data-tab="bld"]');
-    if (t) t.click();
-  });
-  await sleep(250);
-  const d = await page.evaluate(() => {
-    const col = document.querySelector('#info .bld-col');
-    const r = col.getBoundingClientRect();
-    const tabs = document.getElementById('infoTabs').getBoundingClientRect();
-    return {
-      disp: getComputedStyle(col).display, h: Math.round(r.height),
-      tabsIn: tabs.bottom <= innerHeight + 1 && tabs.top >= 0
-    };
-  });
-  ck('窄屏：切「建筑」页 → 正文显示，页签仍留在视口里',
-    d.disp === 'block' && d.h > 100 && d.tabsIn, JSON.stringify(d));
-
-  /* 建筑行的图标和 ＋ 在手机上要够粗：桌面版是 22 / 19，指头点不准 */
-  const g = await page.evaluate(() => {
-    const row = document.querySelector('#info .rr.bld');
-    const h = (el) => (el ? Math.round(el.getBoundingClientRect().height) : 0);
-    return {
-      add: h(row && row.querySelector('.add')),
-      ico: h(row && row.querySelector('svg.bart, .bart-img')),
-      qbtn: h(row && row.querySelector('.qbtn'))
-    };
-  });
-  ck('窄屏：建筑行图标 27 / ＋ 28 / 问号 24（指头点得准）',
-    g.ico >= 26 && g.add >= 26 && g.qbtn >= 22,
-    '图标 ' + g.ico + ' · ＋ ' + g.add + ' · 问号 ' + g.qbtn);
+  /* 「建筑」页的窄屏断言随建筑一起退役（阶段一）：省卡现在只有一页。
+   * 剩下的省卡断言（铺满宽度 / 层级）仍然有效。 */
 
   await page.close();
 
