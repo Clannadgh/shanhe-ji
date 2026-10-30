@@ -2629,6 +2629,185 @@
 #cDipActs button b { font-size: 11.5px; }
 #cDipActs button em { font-size: 9.5px; }
 #cDipActs .hint { grid-column: 1 / -1; }
+
+  /* =============================================================
+   * AoC2 版式（2026-10-30）
+   *
+   * 这一层**只管东西摆在哪**，一个颜色都不重设 —— 配色沿用上面那张暖白纸。
+   * 参照的是《文明时代2》的主界面骨架：
+   *
+   *   顶栏一条横贯全屏：左边"我是谁 + 金/人/兵/移"，右边"年月 + 菜单 + 下一回合"
+   *   左缘一竖列地图模式（政治 / 地形）
+   *   左下角省卡、右下角小地图、右侧国卡、左侧世界生成抽屉
+   *
+   * 原来的界面是"三张浮卡各占一角"，地图被切得很碎；改成贴边的横条/竖条以后，
+   * 中间那块地图才是完整的。
+   * ============================================================= */
+
+  /* ---------------- 顶栏 ---------------- */
+  body #turnBox {
+    top: 0; left: 0; right: 0; height: 40px;
+    padding: 0 10px 0 0; gap: 0;
+    border-radius: 0; border: 0;
+    border-bottom: 1px solid var(--line);
+    background: rgba(252, 250, 246, .97);
+    box-shadow: 0 2px 12px rgba(16, 22, 28, .10);
+    backdrop-filter: blur(8px);
+    z-index: 12;
+  }
+  #turnBox .hud-l { display: flex; align-items: center; gap: 9px; padding-left: 10px; min-width: 0; }
+  #turnBox .hflag {
+    width: 20px; height: 12px; flex: none; border-radius: 2px;
+    background: #c9c2b4; box-shadow: 0 0 0 1px rgba(20, 26, 32, .18);
+  }
+  #turnBox .hid { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+  #turnBox .hid b {
+    font-size: 13px; font-weight: 650; letter-spacing: .3px; color: var(--ink);
+    white-space: nowrap; max-width: 190px; overflow: hidden; text-overflow: ellipsis;
+  }
+  #turnBox .hid em {
+    font-style: normal; font-size: 10px; letter-spacing: .3px; color: var(--ink-2);
+    white-space: nowrap; max-width: 190px; overflow: hidden; text-overflow: ellipsis;
+  }
+  #turnBox .hstats { display: flex; align-items: stretch; margin-left: 10px; }
+  #turnBox .hs {
+    display: flex; align-items: center; gap: 5px; padding: 0 9px;
+    border-left: 1px solid var(--line);
+  }
+  #turnBox .hs i {
+    font-style: normal; font-size: 9.5px; letter-spacing: .5px; color: var(--ink-2);
+    border: 1px solid rgba(20, 26, 32, .16); border-radius: 3px; padding: 0 2px; line-height: 13px;
+  }
+  #turnBox .hs b {
+    font-size: 12.5px; font-weight: 650; color: #8a5a1f;
+    font-variant-numeric: tabular-nums;
+  }
+  #turnBox .hs.warn b { color: var(--accent); }
+  #turnBox .tn {
+    margin-left: auto; padding: 0 12px; line-height: 1.2; text-align: right;
+    border-right: 1px solid var(--line);
+  }
+  #turnBox .tn b { font-size: 12.5px; letter-spacing: .6px; }
+
+  /* 左栏开关：塞进顶栏最左边那颗图标钮（原来是浮在左上角的一张卡） */
+  body #panelOpen {
+    top: 0; left: 0; z-index: 13; width: 40px; height: 40px; padding: 0;
+    display: grid; place-items: center; gap: 0; border-radius: 0;
+    background: transparent; border: 0; border-right: 1px solid var(--line);
+    box-shadow: none; color: var(--ink-2); font-size: 0;
+    transform: none; opacity: 1; pointer-events: auto;
+  }
+  body #panelOpen:hover { background: #f2ece1; color: var(--ink); }
+  body.panel-collapsed #panelOpen { transform: none; opacity: 1; pointer-events: auto; }
+  body:not(.panel-collapsed) #panelOpen { display: none; }
+  body.panel-collapsed #turnBox .hud-l { padding-left: 52px; }
+
+  /* ---------------- 左缘：地图模式条 ---------------- */
+  body #mapbar {
+    position: fixed; left: 0; top: 48px; z-index: 11;
+    display: flex; flex-direction: column; gap: 2px; padding: 4px 4px 4px 0;
+    background: rgba(252, 250, 246, .95);
+    border: 1px solid var(--line); border-left: 0; border-radius: 0 8px 8px 0;
+    box-shadow: 0 4px 16px rgba(16, 22, 28, .12);
+  }
+  body #mapbar button {
+    width: 34px; height: 30px; padding: 0; font-size: 11.5px; font-weight: 600;
+    border-radius: 5px; letter-spacing: .5px;
+  }
+  body #mapbar button.on { background: #24292e; border-color: #24292e; color: #fff; }
+  /* 左栏开着时这块让位（左栏里本来就有同一组「政治 / 地形」） */
+  body:not(.panel-collapsed) #mapbar { display: none; }
+
+  /* ---------------- 左栏：世界生成，挂在顶栏下面 ---------------- */
+  body #panel { top: 48px; left: 8px; }
+  body #panel h1 { padding-right: 26px; }
+
+  /* ---------------- 左下：省卡 ---------------- */
+  /* 位置挪到贴左下角，高度收到屏幕的 64%：AoC2 的省卡是一块"看一眼就收起"的板子，
+   * 让它顶到天花板会把地图压成一条缝。 */
+  body #info {
+    left: 8px; bottom: 8px; width: 344px;
+    max-height: 64vh;
+  }
+  /* 统计行改成两列：同样的信息只占一半高度，而且"人口/经济""稳定/幸福"
+   * 天然成对，横着扫比竖着读快。标题与迷雾快照仍然通栏。 */
+  body #info .isum { display: grid; grid-template-columns: 1fr 1fr; column-gap: 13px; }
+  body #info .isum h2,
+  body #info .isum .en,
+  body #info .isum .fogsnap { grid-column: 1 / -1; }
+  body #info .isum .kv { padding: 2.5px 0; }
+  body #info .isum .kv span:first-child { font-size: 11.5px; }
+  body #info .isum .kv span:last-child { font-size: 12px; }
+  /* 左栏展开时省卡整体右移让位（原来就是这条规矩，位置参数跟着新的宽度重算） */
+  @media (min-width: 1100px) {
+    body:not(.panel-collapsed) #info { left: 296px; }
+  }
+
+  /* ---------------- 右侧：国卡 ---------------- */
+  body #country {
+    top: 48px; right: 8px; width: 306px;
+    /* 让开右下角的小地图 */
+    max-height: calc(100% - 206px);
+  }
+  /* 页签贴在窗口顶上（AoC2 的窗口就是"标题条 + 一排页签 + 正文"） */
+  body #cTabs { margin: 0 0 9px; }
+
+  /* ---------------- 右上：纪要跟着顶栏下移 ---------------- */
+  body #notesPanel { top: 48px; right: 8px; }
+
+  /* ---------------- 窄屏 ---------------- */
+  @media (max-width: 1120px) {
+    #turnBox .hs:nth-child(n+3) { display: none; }
+    #turnBox .hid b, #turnBox .hid em { max-width: 130px; }
+  }
+  /* 手机上顶栏放不下一条：改成两行 —— 第一行"我是谁"，第二行"几月 + 三个钮"。
+   * 挤成一行只会把「下一回合」挤出屏幕，那是主线动作，不能被挤掉。 */
+  @media (max-width: 760px) {
+    body #turnBox {
+      height: auto; min-height: 34px; flex-wrap: wrap; row-gap: 3px;
+      padding: 4px 6px 5px 0;
+    }
+    body #turnBox .hud-l { flex: 1 1 100%; padding-left: 44px; }
+    body #turnBox .hstats { display: none; }
+    body #turnBox .tn {
+      margin-left: 0; padding-left: 44px; text-align: left; border-right: 0; flex: 1 1 auto;
+    }
+    body #panelOpen { height: 34px; width: 36px; }
+    /* 「退出游戏 · 丘巴帝国」在 390px 上会把「下一回合」挤出屏幕：
+     * 截断成「退出游戏 ·…」，title 里仍然写着完整的国名。 */
+    body #turnBox #playBtn {
+      max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    body #turnBox #nextTurn { padding: 0 12px; }
+    body #panel { top: 74px; left: 8px; width: calc(100% - 16px); max-height: 72vh; }
+    body #mapbar { top: 74px; }
+    body #info { left: 8px; bottom: 8px; width: calc(100% - 16px); max-height: 56vh; }
+    body #country { width: calc(100% - 16px); right: 8px; top: 74px; max-height: none; }
+    body #notesPanel { width: calc(100% - 16px); right: 8px; top: 74px; }
+    /* 手机上国卡是整屏，不需要"让开小地图"那套高度钳制 */
+    body #country { max-height: calc(100% - 82px) !important; }
+  }
+
+  /* 省卡右上角的收起钮：这张卡有 64vh 高，不给一个明确出口就只能靠
+   * "点空白处碰运气"。AoC2 的省卡小到不需要它，我们的省卡需要。 */
+  body #info .isum h2 { position: relative; padding-right: 26px; }
+  body #info #iClose {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    width: 20px; height: 20px; padding: 0; display: grid; place-items: center;
+    border: 0; background: transparent; color: var(--ink-2);
+    font-size: 15px; line-height: 1; cursor: pointer; border-radius: 5px;
+  }
+  body #info #iClose:hover { background: rgba(20, 26, 32, .08); color: var(--ink); }
+
+  /* 政体：改单列。306px 的窗口切成两列只剩 145px，而每个政体要写
+   * 「税 25% · 军 +18% · 官 4%」—— 两列一定溢出成两行还被裁掉。
+   * 单列以后一行一个政体，名字靠左、参数靠右，扫下来像一张价目表。 */
+  body #cGovBox { grid-template-columns: 1fr; }
+  body #cGovBox button { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  body #cGovBox button em { text-align: right; }
+
+  /* 提示条往上挪一档：原来贴在屏幕底边，正好压住比例尺 */
+  body #toast { bottom: 44px; }
 </style>
 </head>
 <body>
@@ -2721,7 +2900,7 @@
     <div class="col info-col">
       <!-- 概要区（AoC2 口径）：归属 → 人口 → 经济 → 发展度 → 稳定 → 幸福 → 增长 -->
       <div class="isum">
-        <h2><span class="sw" id="iSw"></span><span id="iName"></span></h2>
+        <h2><span class="sw" id="iSw"></span><span id="iName"></span><button id="iClose" type="button" title="收起省卡（Esc）">×</button></h2>
         <div class="en" id="iNameEn"></div>
         <div class="fogsnap" id="iFogSnap"></div>
         <div class="kv"><span>归属</span><span id="iOwner" title="点击查看该国资料"></span></div>
@@ -2852,6 +3031,21 @@
 
 
 <div id="turnBox" title="每回合结算一次资源产出；什么时候进入下一回合由你决定（快捷键：空格）">
+  <!-- 顶栏左半（AoC2 规格）：旗 + 国名 + 四个大数字。工坊模式下这格显示
+       「无主世界」，选了国就换成你自己的国 —— 它是"我现在是谁"的唯一常驻提示。 -->
+  <div class="hud-l">
+    <span class="hflag" id="hudFlag"></span>
+    <span class="hid">
+      <b id="hudName">未选择国家</b>
+      <em id="hudSub">上帝工坊模式</em>
+    </span>
+    <span class="hstats">
+      <span class="hs" title="国库（金）"><i>金</i><b id="hudGold">—</b></span>
+      <span class="hs" title="全国人口"><i>人</i><b id="hudPop">—</b></span>
+      <span class="hs" title="全国兵力"><i>兵</i><b id="hudArmy">—</b></span>
+      <span class="hs" title="移动点"><i>移</i><b id="hudMP">—</b></span>
+    </span>
+  </div>
   <span class="tn" title="每回合结算一次资源产出"><b id="turnNo">王国历 1 年 1 月</b></span>
   <!-- 菜单（v16）：科技 / 治理 / 编年史 / 纪要 / 存档 / 读档 —— "偶尔按一次"的钮
        收进 ☰ 的下拉里。钮的 id / 文案 / title 原样搬过来，外面点一下就关。 -->
@@ -2873,6 +3067,13 @@
   </svg>
   面板
 </button>
+
+<!-- 地图模式条（AoC2 左缘那一列）：对局中左栏（工坊段）是收起的，
+     换图层不能只靠那张卡 —— 这张条常驻，什么时候都能按 -->
+<div id="mapbar" role="toolbar" aria-label="地图模式">
+  <button type="button" data-view="political" class="on" title="政治视图：颜色 = 国家（快捷键 M 在两种视图间切换）">政治</button>
+  <button type="button" data-view="terrain" title="地形视图：按高程分带，河流按水量加粗">地形</button>
+</div>
 
 <!-- 纪要（v16）：这一回合攒下的 NOTES —— 提示条一次只报一条，想看全的就开这张卡。
      三档过滤只切"看得见哪几条"，不动数组、不清数据；迟报 / 风闻的样式照旧。 -->

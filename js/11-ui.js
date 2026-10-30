@@ -5235,6 +5235,44 @@
     el.textContent = AO.calLabel(turnNo);
     el.title = '第 ' + turnNo + ' 回合 · ' + AO.calLabel(turnNo) +
       '\n每一回合 = 一个月、一年 12 回合';
+    /* 顶栏那几个数字（金/人/兵/移）跟回合一起刷 —— 它们每一回合都会变，
+     * 而 updateTurnLabel 恰好是"过了一个月"的唯一收口。 */
+    updateHud();
+  }
+
+  /* 顶栏的"我是谁"：旗 → 国名 → 金 / 人 / 兵 / 移。
+   * 为什么每次结算都整块重画而不是增量更新：这四个数分别来自国库、
+   * 省人口合计、驻军合计、移动点，任何一处变化都可能连带别处，
+   * 而它的成本只有"扫一遍省表"（1100 次加法，实测 < 0.2ms）。 */
+  function updateHud() {
+    var w = state.world;
+    var flag = $('hudFlag'), name = $('hudName'), sub = $('hudSub');
+    if (!flag || !name) return;
+    var c = PLAYER ? coOf(PLAYER) : null;
+    if (!c || !c.aoc) {
+      flag.style.background = '#c9c2b4';
+      name.textContent = '未选择国家';
+      sub.textContent = '上帝工坊模式 · 全图可操作';
+      $('hudGold').textContent = '—';
+      $('hudPop').textContent = '—';
+      $('hudArmy').textContent = '—';
+      $('hudMP').textContent = '—';
+      return;
+    }
+    var army = 0, i, p;
+    for (i = 0; i < w.provinces.length; i++) {
+      p = w.provinces[i];
+      if (p && p.aoc && p.aoc.army > 0 && (p.aoc.armyOf || p.owner) === c.id) army += p.aoc.army;
+    }
+    flag.style.background = c.color || '#c9c2b4';
+    name.textContent = c.name;
+    sub.textContent = '#' + c.id + ' · ' + c.provinces.length + ' 省' +
+      (c.aoc.gd ? ' · 黄金时代' : '') + ((c.aoc.warWear || 0) > 0 ? ' · 厌战' : '');
+    $('hudGold').textContent = Math.round(c.aoc.treasury).toLocaleString();
+    $('hudGold').parentNode.classList.toggle('warn', c.aoc.treasury < 0);
+    $('hudPop').textContent = Math.round(c.aoc.pop || 0).toLocaleString();
+    $('hudArmy').textContent = Math.round(army).toLocaleString();
+    $('hudMP').textContent = Math.round(c.aoc.mp || 0) + '/' + Math.round(c.aoc.mpMax || 0);
   }
 
   function nextTurn() {
@@ -8187,12 +8225,28 @@
     if (shortEl) shortEl.textContent = fmtGold(c.aoc.treasury) + ' 金';
   }
 
+  /* 国卡的高度上限 = 到小地图上沿为止。
+   * 为什么不用一条固定的 vh：小地图是画在 canvas 上的，尺寸随窗口和世界宽高比变，
+   * 一行 CSS 猜不准 —— 猜大了盖住小地图，猜小了白丢一截。这里直接问渲染层
+   * 拿它这一帧的矩形（_mmRect，每帧绘制时更新），于是两块永远不打架。 */
+  function clampCountryHeight() {
+    var el = $('country');
+    if (!el) return;
+    var R = state.renderer;
+    var mm = R && R._mmRect;
+    var top = el.getBoundingClientRect().top;
+    var avail = mm ? (mm.y - 10 - top) : 0;
+    /* 兜底：小地图还没画过（或窗口很矮）时给一个"至少能看四行"的下限 */
+    el.style.maxHeight = Math.max(220, avail) + 'px';
+  }
+
   function showCountry(cid) {
     var w = state.world;
     var c = w && w.countries[cid - 1];
     if (!c || !c.aoc) { clearCountry(); return; }
     $('country').classList.add('on');
     applyCountryTab();
+    clampCountryHeight();
 
     $('cFlag').style.background = c.color;
     $('cName').textContent = c.name;
@@ -9812,6 +9866,9 @@
     if (GP.open) renderGovPanel();
     if ($('country').classList.contains('on')) showCountry(PLAYER);
     refreshLocks();
+    /* 开局把左栏收起来：那张卡是"造世界"用的，对局里它只会挡住地图。
+     * 顶栏最左边那颗 ☰ 随时能把它拉回来。 */
+    setPanel(false);
     saveGame(true);
     return { ok: true, msg: txt };
   }
@@ -9824,12 +9881,17 @@
     toast('已退出游戏 —— 回到上帝工坊：所有国家的按钮都能按了', 3200);
     if (GP.open) renderGovPanel();
     refreshLocks();
+    /* 退出 = 回到"造世界"那一屏，所以左栏要拉开 —— 否则玩家站在地图上，
+     * 唯一的入口是一颗不起眼的 ☰，而「生成新世界」正躲在它后面。 */
+    setPanel(true);
     saveGame(true);
     return { ok: true };
   }
   /* 锁权刷新：面板/卡片是每次重画新建的，所以"改 PLAYER 之后"只要重画一次。
    * 顶栏那颗按钮的文字也跟着变（开始游戏 / 退出游戏）。 */
   function refreshLocks() {
+    /* 换了国 → 顶栏那格「我是谁」要跟着换（旗色 / 国名 / 四个数字） */
+    updateHud();
     /* 换了国 → 「维修」面板看的是另一个国家：红点和面板一起重算 */
     if (typeof refreshRepBadge === 'function') refreshRepBadge();
     if (REPU && REPU.open) renderRepPanel();
@@ -11157,23 +11219,24 @@
     for (var i = 0; i < seg.length; i++) {
       seg[i].addEventListener('click', function () { applySize(this.dataset.size, true); });
     }
-    var vseg = $('viewSeg').querySelectorAll('button');
-    for (var vi = 0; vi < vseg.length; vi++) {
-      vseg[vi].addEventListener('click', function () {
-        var v = this.dataset.view;
-        for (var k2 = 0; k2 < vseg.length; k2++) vseg[k2].classList.toggle('on', vseg[k2] === this);
-        if (state.renderer) state.renderer.setView(v);
-        var md = state.renderer ? state.renderer.mode : 'view';
-        $('modeHint').textContent = v === 'terrain'
-          ? '地形视图：按高程分带，河流按水量加粗'
-          : v === 'faith'
-            ? '宗教视图：同一片颜色 = 同一个信仰'
-            : v === 'resources'
-              ? '资源视图：颜色 = 该省主资源，点省份看七种储量'
-              : (md === 'paint' ? '点击省份把它划给所选国家'
-                : md === 'country' ? '点击任意地块，查看该国资料'
-                : '点击省份查看信息');
-      });
+    /* 视图切换有两个入口：左栏那张卡里的「政治 / 地形」，和左缘常驻的模式条。
+     * 两处必须同步高亮 —— 否则按了一处、另一处还亮着旧档，玩家会以为没生效。 */
+    var viewBtns = doc.querySelectorAll('#viewSeg button, #mapbar button');
+    function applyView(v, hit) {
+      for (var k2 = 0; k2 < viewBtns.length; k2++) {
+        viewBtns[k2].classList.toggle('on', viewBtns[k2].dataset.view === v);
+      }
+      if (state.renderer) state.renderer.setView(v);
+      if (!$('modeHint')) return;
+      var md = state.renderer ? state.renderer.mode : 'view';
+      $('modeHint').textContent = v === 'terrain'
+        ? '地形视图：按高程分带，河流按水量加粗'
+        : (md === 'paint' ? '点击省份把它划给所选国家'
+          : md === 'country' ? '点击任意地块，查看该国资料'
+          : '点击省份查看信息');
+    }
+    for (var vi = 0; vi < viewBtns.length; vi++) {
+      viewBtns[vi].addEventListener('click', function () { applyView(this.dataset.view, this); });
     }
     /* 省卡「可开发」的两态开关：只换图标和名字，储量数字不动 */
     var rst = $('resState');
@@ -11354,6 +11417,12 @@
     $('expJson').addEventListener('click', exportJson);
     $('runTest').addEventListener('click', runTest);
     $('seed').addEventListener('keydown', function (e) { if (e.key === 'Enter') generate(); });
+    /* 省卡右上角的 ×：直接把卡收起（顺带取消地图上的选中） */
+    var ic = $('iClose');
+    if (ic) ic.addEventListener('click', function (e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      clearInfo();
+    });
     root.addEventListener('keydown', function (e) {
       /* ESC 先关最上层的全屏层（治理 → 科技树），再关国家卡。
        * 两个 overlay 同时开在实现上不会发生（各有各的入口），
@@ -11369,6 +11438,8 @@
         if (AO.chronoIsOpen && AO.chronoIsOpen()) { AO.chronoClose(); return; }
         if (GP.open) { closeGovPanel(); return; }
         if (TT.open) { closeTechTree(); return; }
+        /* ESC 逐层退：先收省卡，再收国卡 */
+        if (state.infoId) { clearInfo(); return; }
         clearCountry();
         return;
       }
@@ -11380,6 +11451,18 @@
         if (AO.chronoIsOpen && AO.chronoIsOpen()) return;
         e.preventDefault();
         nextTurn();
+      }
+      /* M = 政治 / 地形 两个视图来回切（左缘那条模式条上写着这个键）。
+       * 和空格同样的三条规矩：输入框里不抢、全屏页开着不抢、不带动页面滚动。 */
+      if (e.key === 'm' || e.key === 'M') {
+        var t2 = e.target;
+        if (t2 && /^(INPUT|TEXTAREA|SELECT)$/.test(t2.tagName)) return;
+        if (AO.chronoIsOpen && AO.chronoIsOpen()) return;
+        if (GP.open || TT.open) return;
+        var cur = state.renderer ? state.renderer.viewMode : 'political';
+        var nv = cur === 'terrain' ? 'political' : 'terrain';
+        var btn = doc.querySelector('#viewSeg button[data-view="' + nv + '"]');
+        if (btn) btn.click();      // 复用那条统一入口，两处高亮自然同步
       }
     });
     bindTouchTips();
@@ -11745,9 +11828,9 @@
     applyCountryTab();
     updateTurnLabel();
     chronoBoot();                      // 编年史层拿内部件（必须在第一次 generate 之前）
-    var savedOpen = null;
-    try { savedOpen = localStorage.getItem('sj.panelOpen'); } catch (e) { /* 忽略 */ }
-    setPanel(savedOpen === '1');       // 没记录过 → 默认收起
+    /* 启动这一屏永远是"造世界"：刷新之后没有正在进行的对局（存档要手动读），
+     * 所以左栏必须开着 —— 否则新玩家看到的是一张空地图和一颗不太明显的 ☰。 */
+    setPanel(true);
     generate();
     refreshLocks();                    // 顶栏那颗「开始游戏 / 退出游戏」的文字
   }

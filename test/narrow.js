@@ -71,20 +71,24 @@ const flags = (page) => page.evaluate(() => ({
   await sleep(350);
   const c = await page.evaluate(() => {
     const el = document.getElementById('info'), r = el.getBoundingClientRect();
-    const z = (id) => +getComputedStyle(document.getElementById(id)).zIndex;
+    /* 「面板」钮现在长在顶栏里（AoC2 版式），它和省卡的关系从"谁压谁"
+     * 变成了"两块根本不在一个角" —— 所以断言改成几何不相交。 */
+    const bb = document.getElementById('panelOpen').getBoundingClientRect();
     return {
       x: Math.round(r.x), w: Math.round(r.width), right: Math.round(r.right),
       vw: innerWidth, vh: innerHeight,
       on: el.classList.contains('on'),
-      zCard: z('info'), zBtn: z('panelOpen')
+      hit: !(bb.right <= r.left || bb.left >= r.right || bb.bottom <= r.top || bb.top >= r.bottom),
+      bx: Math.round(bb.x), by: Math.round(bb.y), bw: Math.round(bb.width)
     };
   });
   ck('窄屏：省卡铺满宽度（左右各留 8，不越界）',
     c.on && c.x === 8 && c.right === c.vw - 8,
     'x 14→' + c.x + '，右 ' + c.right + ' / 视口 ' + c.vw);
-  /* 「面板」那两个字曾经 z 11 压在省卡 z 10 上面，正好戳在省名上 —— 信息优先 */
-  ck('窄屏：「面板」钮在省卡之下（信息盖住面板）',
-    c.zCard > c.zBtn, '省卡 z' + c.zCard + ' > 钮 z' + c.zBtn);
+  /* 旧版那颗浮在左上角的「面板」钮曾经压在省名上。改成顶栏内的一颗图标钮以后，
+   * 它离省卡有一个顶栏的距离，永远不会盖住信息 —— 断言直接查重叠。 */
+  ck('窄屏：「面板」钮不压省卡',
+    !c.hit, '钮 ' + c.bx + ',' + c.by + ' (' + c.bw + 'px) / 省卡 y' + c.y + ' 起');
 
   /* 「建筑」页的窄屏断言随建筑一起退役（阶段一）：省卡现在只有一页。
    * 剩下的省卡断言（铺满宽度 / 层级）仍然有效。 */
@@ -102,14 +106,13 @@ const flags = (page) => page.evaluate(() => ({
   const e = await wide.evaluate(() => {
     const p = document.getElementById('panel').getBoundingClientRect();
     const i = document.getElementById('info').getBoundingClientRect();
-    const z = (id) => +getComputedStyle(document.getElementById(id)).zIndex;
+    const bb = document.getElementById('panelOpen').getBoundingClientRect();
     return { pr: Math.round(p.right), il: Math.round(i.left), iw: Math.round(i.width),
-             zCard: z('info'), zBtn: z('panelOpen') };
+             hit: !(bb.right <= i.left || bb.left >= i.right || bb.bottom <= i.top || bb.top >= i.bottom) };
   });
   ck('宽屏：左栏展开时省卡右移让位（不咬在一起）',
     e.il >= e.pr, '左栏右沿 ' + e.pr + ' / 省卡左沿 ' + e.il);
-  ck('宽屏：「面板」钮同样在省卡之下',
-    e.zCard > e.zBtn, '省卡 z' + e.zCard + ' > 钮 z' + e.zBtn);
+  ck('宽屏：「面板」钮同样不压省卡', !e.hit, '重叠=' + e.hit);
 
   await wide.evaluate(() => document.getElementById('notesBtn').click());
   await sleep(250);
