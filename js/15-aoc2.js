@@ -260,7 +260,12 @@
         army: 0,                   // 驻军人数（规则书第十一章：军队 = 省上一个数字）
         armyOf: 0,                 // 这支兵属于谁（占领军的归属方；空省为 0）
         disease: 0,                // 疾病压低稳定的量（阶段五）
-        fest: 0                    // 节日带来的临时幸福（每回合衰减）
+        fest: 0,                   // 节日带来的临时幸福（每回合衰减）
+        /* 建筑（阶段四，规则书第五章）：bld = 已完工等级，queue = 在建。
+         * 在建的不计入"同种建筑数量"—— 所以一口气排队批量建更便宜，
+         * 这是规则书明说的特性。 */
+        bld: {},
+        queue: []
       };
       p.aoc.value = AO.aoc2.provValue(p);
       /* 旧字段跟着新表走：别的模块（渲染 / 导出 / 编年史）还在读 p.population */
@@ -291,8 +296,9 @@
         warStart: {},              // 这一场仗从哪回合开始（算厌战/战报用）
         wear: 0,                   // 厌战 0~1（军费膨胀 + 幸福降）
         rq: [],                    // 征兵队列：[{pid, n}]，下一回合到位
-        rp: 0,                     // 研究点（阶段四接科技）
-        investPool: 0,             // 投资款（阶段四接建筑/经济投资）
+        rp: 0,                     // 研究进度（每 100 = 1 科技点）
+        tech: 0.01,                // 科技等级 0.01~50.0（阶段四）
+        investPool: 0,             // 投资款（建筑用；投资敕令也用它）
         last: null,                // 上回合收支明细
         /* 汇总值（每回合结算后写，UI 直接读，避免面板自己再算一遍算错） */
         happy: 55, stab: 55, pop: 0, econ: 0, dev: 0,
@@ -300,6 +306,10 @@
       };
       AO.aoc2.recomputeCountry(world, c);
     }
+
+    /* 岸线画像（coastDirs）：港口的前置、省卡"岸线"那一行的数据源。
+     * 这一段原来由已退役的模块计算，换血时被删掉了 —— 在这里补回来。 */
+    if (AO.aoc2.court && AO.aoc2.court.profileCoast) AO.aoc2.court.profileCoast(world);
     return world;
   };
 
@@ -376,7 +386,10 @@
         if (lowCash && A.taxRate < g.taxCap) A.taxRate = Math.min(g.taxCap, A.taxRate + 1);
       }
 
-      /* 移动点与外交点每回合刷新（规则书第十一章：全国共享一条每回合刷新的池） */
+      /* 移动点与外交点每回合刷新（规则书第十一章：全国共享一条每回合刷新的池）。
+       * 上限吃科技（第六章"每回合更多移动点数"）—— 每回合重算，
+       * 这样科技升完不用等读档就能看到池子变大。 */
+      if (AO.aoc2.court) A.mpMax = AO.aoc2.court.mpMaxOf(c);
       A.mp = A.mpMax;
       A.dip = Math.min(A.dipMax, A.dip + AOC2.DIP_BASE);
 
@@ -396,7 +409,10 @@
         /* 生产收入：受物资（goods）滑条影响 —— 物资足，工坊才开得动 */
         var prodIncome = p.aoc.econ * AOC2.PROD_GOLD * (0.5 + sl.goods / 100) *
           (1 + g.prodRev / 100);
+        if (AO.aoc2.court) prodIncome *= AO.aoc2.court.goodsMul(c);
         var inc = taxIncome + prodIncome;
+        /* 建筑与科技：工坊 +5%/级、港口 +3%、科技每级 +1%（规则书第五、六章） */
+        if (AO.aoc2.court) inc *= AO.aoc2.court.incomeMul(c, p);
         /* 占领省：原主收入归零，占领者拿固定 ~10 金（阶段二才可能有占领） */
         if (p.aoc.occupied && p.aoc.occupied !== c.id) inc = 0;
         p.aoc.income = inc;
@@ -418,13 +434,20 @@
       /* ③ 行政费 + 军费 + 贷款利息 ---------------------------------- */
       var admin = (gross * AOC2.ADMIN_RATE + provN * AOC2.ADMIN_PER_PROV +
         devSum * AOC2.ADMIN_PER_DEV) * (1 + g.admin / 100);
-      var upkeep = soldiers * AOC2.UPKEEP_PER_SOLDIER * (1 + g.upkeep / 100) *
-        (1 + (A.wear || 0) * AOC2.WEAR_UPKEEP);
+      /* 军费：占领军驻在别人家里，军费得算在占领者头上（第十一章按兵员计）。
+       * 有庙堂层就逐省算 —— 补给营地只降本地驻军那 20%。 */
+      var upkeep = AO.aoc2.court
+        ? AO.aoc2.court.upkeepOf(world, c, g, A)
+        : soldiers * AOC2.UPKEEP_PER_SOLDIER * (1 + g.upkeep / 100) *
+          (1 + (A.wear || 0) * AOC2.WEAR_UPKEEP);
       var interest = A.loans * AOC2.LOAN_RATE;
       var net = taxShare + unalloc - admin - upkeep - interest;
 
       A.treasury += net;
-      A.rp += researchMoney * 0.1;                 // 占位：1 金科研款 = 0.1 研究点
+      /* 研究点（第六章）：科研滑条那一份买进度，图书馆/大学每回合白给一点。
+       * 每攒满 100 进度 = 1 科技点。 */
+      if (AO.aoc2.court) AO.aoc2.court.gainRp(world, c, researchMoney);
+      else A.rp += researchMoney * 0.1;
       A.investPool += investMoney;
       /* 国库见底 → 自动借债（规则书第三章允许主动贷款；这里先做"被动兜底"，
        * 否则一个开局小国会在第 3 回合就发不出行政费，AI 直接死给你看）。
@@ -491,6 +514,8 @@
          * "人口超过经济的部分会外流/停止增长"。 */
         var gmul = (AOC2.TERRAIN_GROWTH[p.terrain] || 1) * (1 + 0) *
           (0.5 + p.aoc.happy / 100);
+        /* 农场 +5%/级（第五章） */
+        if (AO.aoc2.court) gmul *= AO.aoc2.court.growthMul(p);
         var rate = AOC2.POP_GROWTH * gmul;
         if (tp > p.aoc.econ * 1.02) rate *= AOC2.POP_JOB_DAMP;
         var dPop = tp * rate;
@@ -569,6 +594,22 @@
       for (i = 0; i < c.provinces.length; i++) {
         var pp = world.provinces[c.provinces[i] - 1];
         if (pp && pp.aoc) A.econ += pp.aoc.econ;
+      }
+
+      /* 工地推进（第五章：在建的不计入造价递增，完工才 +1 级） */
+      if (AO.aoc2.court) {
+        var done = AO.aoc2.court.tick(world, c);
+        if (done) A.builtLast = done;
+      }
+    }
+
+    /* AI 的研究与建设：放在国家循环之后 —— 这一回合的毛收入已经算好，
+     * "留三回合毛收入当周转"才有意义。 */
+    if (AO.aoc2.court && opts.ai !== false) {
+      for (ci = 0; ci < world.countries.length; ci++) {
+        var ac = world.countries[ci];
+        if (!ac || !ac.aoc || !ac.aoc.alive) continue;
+        AO.aoc2.court.aiTick(world, ac, opts);
       }
     }
 
@@ -982,8 +1023,10 @@
     if (cap <= 0) return { ok: false, msg: '这省已到征兵上限（人口 ' + Math.round(totalPop(p)).toLocaleString() + '）' };
     if (n > cap) n = cap;
     var mul = instant ? AOC2.INSTANT_MUL : 1;
-    /* 募兵成本 × 政体系数（君主制 1.8；规则书第七章"募兵成本"那一列） */
-    var cost = Math.round(n * AOC2.RECRUIT_GOLD * mul * govOf(c).recruit);
+    /* 募兵成本 × 政体系数（君主制 1.8；规则书第七章"募兵成本"那一列）。
+     * 军械库每兵 −1 金（第五章）—— 单价降了，政体系数照乘。 */
+    var unit = AO.aoc2.court ? AO.aoc2.court.recruitUnit(p) : AOC2.RECRUIT_GOLD;
+    var cost = Math.round(n * unit * mul * govOf(c).recruit);
     if (c.aoc.treasury < cost) return { ok: false, msg: '国库不足（需 ' + cost.toLocaleString() + ' 金）' };
     var pop = totalPop(p);
     if (pop - n < 100) return { ok: false, msg: '人口不够' };
@@ -1032,9 +1075,16 @@
     var defCountry = world.countries[defCid - 1];
     var defBonus = (AOC2.TERRAIN_DEF[p.terrain] || 0) +
       (defCountry && defCountry.aoc ? govDefOf(defCountry) : 0);
+    /* 建筑与科技（第五、六章）：城堡 +10%/级、瞭望塔 +4%、科技每级 +0.5 */
+    if (AO.aoc2.court && defCountry && defCountry.aoc) {
+      defBonus += AO.aoc2.court.defOf(defCountry, p);
+    }
     var la = warLuck(world, 'a', atkCid, p.id);
     var ld = warLuck(world, 'd', defCid, p.id);
     var atkPow = troops * (1 + la);
+    /* 科技"更强军队"：攻方战力也吃自己那一份 */
+    var atkC = world.countries[atkCid - 1];
+    if (AO.aoc2.court && atkC && atkC.aoc) atkPow *= AO.aoc2.court.combatMul(atkC);
     var defPow = def * (1 + defBonus / 100) * (1 + ld);
 
     /* 空省：最少 10 兵才能占（规则书第十一章） */
@@ -1657,7 +1707,9 @@
         yw: p.aoc.armyOf | 0,
         f: Math.round((p.aoc.fest || 0) * 100) / 100,
         n: p.aoc.pop,
-        k: p.aoc.core
+        k: p.aoc.core,
+        b: p.aoc.bld || {},
+        q: (p.aoc.queue || []).map(function (x) { return { k: x.k, t: x.t, cost: x.cost }; })
       };
     }
     for (i = 0; i < world.countries.length; i++) {
@@ -1671,6 +1723,7 @@
         gv: c.aoc.gov,
         mp: c.aoc.mp, dp: c.aoc.dip,
         rp: Math.round(c.aoc.rp * 100) / 100,
+        th: Math.round((c.aoc.tech || 0.01) * 100) / 100,
         ip: Math.round(c.aoc.investPool),
         al: c.aoc.alive ? 1 : 0,
         rel: cloneMap(c.aoc.rel || {}),
@@ -1766,6 +1819,8 @@
       p.aoc.fest = s.f || 0;
       p.aoc.pop = s.n || p.aoc.pop;
       p.aoc.core = s.k || p.aoc.core;
+      p.aoc.bld = s.b || {};
+      p.aoc.queue = s.q || [];
       p.aoc.value = AO.aoc2.provValue(p);
       p.population = Math.round(totalPop(p));
     }
@@ -1782,6 +1837,7 @@
       c.aoc.gov = s.gv || 'monarchy';
       c.aoc.mp = s.mp; c.aoc.dip = s.dp;
       c.aoc.rp = s.rp || 0;
+      c.aoc.tech = s.th || 0.01;
       c.aoc.investPool = s.ip || 0;
       c.aoc.alive = s.al !== 0;
       c.aoc.era = s.era | 0;

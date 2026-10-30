@@ -5886,6 +5886,134 @@
    * 九种全表；点一下就换（花金、受时代门槛限制）。
    * 为什么做成九宫格而不是下拉：这一页是"看着系数做选择"的地方，
    * 下拉会把八个选项藏起来，玩家只记得住自己现在是什么。 */
+  /* ---------------- 建筑（省卡，规则书第五章） ----------------
+   * 九格：八种建筑 + 大学（图书馆 2 级的升级）。
+   * 一格两行：上面"名字 + 现有等级"，下面"造价 · 工期"。
+   * 在建的格子画虚线 —— 造价那一条最反直觉（在建不计入递增），
+   * 所以排队中的格子要能一眼认出来。 */
+  function renderAocBld(p) {
+    var box = $('iBld');
+    if (!box) return;
+    box.innerHTML = '';
+    var w = state.world, c = w.countries[p.owner - 1];
+    if (!c || !c.aoc || !AO.aoc2.court) return;
+    var C = AO.aoc2.court;
+    var mine = canAct(p.owner);
+    var q = C.queueOf(p);
+    var info = $('iBldInfo');
+    if (info) {
+      if (q.length) {
+        var head = C.BLD[q[0].k];
+        info.textContent = '在建 ' + head.cn + '（' + q[0].t + ' 回合）' +
+          (q.length > 1 ? ' · 排队 ' + (q.length - 1) : '');
+      } else {
+        var sum = C.summaryOf(p);
+        info.textContent = sum.length ? sum.join(' · ') : '还没有建筑';
+      }
+    }
+    var queued = {};
+    for (var qi = 0; qi < q.length; qi++) queued[q[qi].k] = (queued[q[qi].k] || 0) + 1;
+
+    for (var i = 0; i < C.ORDER.length; i++) {
+      (function (k) {
+        var def = C.BLD[k];
+        var lv = C.lv(p, k);
+        var chk = C.canBuild(w, c, p, k);
+        var btn = doc.createElement('button');
+        btn.type = 'button';
+        btn.innerHTML = '<b>' + def.cn + '<i>' + lv + '/' + def.max + '</i></b>' +
+          '<em>' + (chk.ok ? fmtGold(chk.cost) + ' 金 · ' + def.turns + ' 回合' : def.cn1) + '</em>';
+        if (lv) btn.className = 'done';
+        if (queued[k]) btn.className += ' queued';
+        var why = '';
+        if (!mine) why = '不是你的国家';
+        else if (!chk.ok) why = chk.why;
+        btn.disabled = !!why;
+        btn.title = (why ? why + '　／　' : '') + def.cn1 +
+          (queued[k] ? '　／　在建 ' + queued[k] + ' 个（不计入造价递增）' : '');
+        if (!why) {
+          btn.addEventListener('click', function () {
+            var r = AO.aoc2.court.build(state.world, c.id, p.id, k);
+            toast(r.msg, 3000);
+            if (r.ok) {
+              AO.aoc2.recomputeCountry(state.world, c);
+              showInfo(p.id);
+              if ($('country').classList.contains('on')) showCountry(c.id);
+            }
+          });
+        }
+        box.appendChild(btn);
+      })(C.ORDER[i]);
+    }
+  }
+
+  /* ---------------- 科技（国卡内政页） ----------------
+   * 研究进度 → 科技点（100:1）→ 科技等级（每级越贵）。
+   * 这里不给"一次点满"的按钮：科技是长期取舍，点一下升一级就够。 */
+  function renderAocTech(c) {
+    var box = $('cTechBox');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!AO.aoc2.court) return;
+    var C = AO.aoc2.court;
+    var lvl = C.techOf(c);
+    var tp = C.techPoints(c);
+    var cost = C.techCost(c);
+    var mine = canAct(c.id);
+    var row = doc.createElement('div');
+    row.className = 'aocslider';
+    row.innerHTML = '<span>等级</span><span style="font-variant-numeric:tabular-nums">' +
+      lvl.toFixed(2) + ' / 50　科技点 ' + tp.toFixed(2) + '</span>' +
+      '<span class="v">' + (lvl >= C.T.TECH_MAX ? '满' : cost + ' 点/级') + '</span>';
+    box.appendChild(row);
+    var b = doc.createElement('button');
+    b.type = 'button';
+    b.innerHTML = '<b>研究</b><em>科技 +' + C.T.TECH_STEP + ' · −' + cost + ' 点</em>';
+    var why = '';
+    if (!mine) why = '不是你的国家';
+    else if (lvl >= C.T.TECH_MAX) why = '已经满级';
+    else if (tp < cost) why = '科技点不够（' + tp.toFixed(2) + ' / ' + cost + '）';
+    b.disabled = !!why;
+    b.title = (why ? why + '　／　' : '') +
+      '科技每级 +1% 收入 / +1% 战力 / +0.5 省防御 / 每 5 级 +1 移动点';
+    if (!why) b.addEventListener('click', function () {
+      var r = AO.aoc2.court.techUp(state.world, c.id);
+      toast(r.msg, 3000);
+      if (r.ok) {
+        AO.aoc2.recomputeCountry(state.world, c);
+        showCountry(c.id);
+      }
+    });
+    var wrap = doc.createElement('div');
+    wrap.className = 'aocrow';
+    wrap.appendChild(b);
+    box.appendChild(wrap);
+  }
+
+  /* 全国建筑合计（内政页一行） */
+  function renderAocBldSum(c) {
+    var el = $('cBldSum');
+    if (!el) return;
+    if (!AO.aoc2.court) { el.textContent = ''; return; }
+    var C = AO.aoc2.court, cnt = {}, total = 0, i, k;
+    for (i = 0; i < c.provinces.length; i++) {
+      var p = state.world.provinces[c.provinces[i] - 1];
+      if (!p || !p.aoc || !p.aoc.bld) continue;
+      for (k in p.aoc.bld) {
+        if (!p.aoc.bld[k]) continue;
+        cnt[k] = (cnt[k] || 0) + p.aoc.bld[k];
+        total += p.aoc.bld[k];
+      }
+    }
+    if (!total) { el.textContent = '还没有建筑 —— 选中自己的省，在省卡「建筑」里建'; return; }
+    var parts = [];
+    for (i = 0; i < C.ORDER.length; i++) {
+      k = C.ORDER[i];
+      if (cnt[k]) parts.push(C.BLD[k].cn + ' ' + cnt[k]);
+    }
+    el.textContent = total + ' 座：' + parts.join(' · ');
+  }
+
   function renderAocGov(c) {
     var box = $('cGovBox');
     if (!box) return;
@@ -6155,6 +6283,7 @@
     }
 
     renderAocArmy(p);
+    renderAocBld(p);
     renderAocDecree(p);
 
     /* 国家卡开着的时候，点省份也跟着换成该省所属国 */
@@ -7725,10 +7854,13 @@
     renderAocTreasury(c);
     renderAocSliders(c);
     renderAocGov(c);
+    renderAocTech(c);
+    renderAocBldSum(c);
     renderAocWar(c);
     $('cMP').textContent = c.aoc.mp + ' / ' + c.aoc.mpMax;
     $('cDIP').textContent = c.aoc.dip + ' / ' + c.aoc.dipMax;
-    $('cRP').textContent = c.aoc.rp.toFixed(1);
+    var rp = c.aoc.rp || 0;
+    $('cRP').textContent = rp.toFixed(1) + '（' + Math.floor(rp % 100) + '/100）';
     $('cIP').textContent = fmtGold(c.aoc.investPool) + ' 金';
   }
 

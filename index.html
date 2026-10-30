@@ -2607,6 +2607,13 @@
 #cGovBox button { min-width: 0; padding: 4px 6px; }
 #cGovBox button em { font-size: 10px; opacity: .68; }
 #cGovBox .hint { grid-column: 1 / -1; }
+
+/* 建筑格：一行两个，等级和造价分两行写 —— 省卡只有一条窄栏，横排会挤 */
+#iBld button b { display: flex; justify-content: space-between; gap: 4px; }
+#iBld button b i { font-style: normal; opacity: .6; font-weight: 400; }
+#iBld button.done { border-color: #8a6d34; background: #fdf6e6; }
+#iBld button.queued { border-style: dashed; opacity: .75; }
+#cTechBox .aocslider { grid-template-columns: 46px 1fr auto; }
 </style>
 </head>
 <body>
@@ -2733,6 +2740,9 @@
     <!-- 军务（第十一、十二章）：驻军就是一个数字，征兵扣金扣人口 -->
     <div class="sec">军务<span class="st2" id="iArmyInfo"></span></div>
     <div class="aocrow" id="iArmy"></div>
+    <!-- 建筑（规则书第五章）：八种 + 大学；在建的不计入造价递增 -->
+    <div class="sec">建筑<span class="st2" id="iBldInfo"></span></div>
+    <div class="aocrow" id="iBld"></div>
     <!-- 敕令（规则书第二十一章）：都花移动点 -->
     <div class="sec">敕令<span class="st2" id="iMP"></span></div>
     <div class="aocrow" id="iDecree"></div>
@@ -2787,6 +2797,8 @@
   <div class="cpane cpane-gov">
     <div class="sec" title="政体决定税收上限 / 行政费 / 募兵成本 / 军费 / 防御加成；换政体花一笔金，不同政体要不同时代">政体</div>
     <div id="cGovBox" class="aocrow"></div>
+    <div class="sec" title="科技等级 0.01~50：每级 +1% 收入 / +1% 战力 / +0.5 省防御 / 每 5 级 +1 移动点">科技</div>
+    <div id="cTechBox"></div>
     <div class="sec" title="国库 = 国家金库；税收滑条那一份扣掉行政费、军费、贷款利息之后进这里">国库</div>
     <div id="cTreasury" class="treasury"></div>
     <div class="sec" title="四条预算滑条把总收入切开，合计不超过 100%；没分配的部分自动进国库">预算分配</div>
@@ -2795,8 +2807,10 @@
     <div id="cTaxRow"></div>
     <div class="kv"><span>移动点</span><span id="cMP" title="每回合刷新；军队移动与敕令都花它"></span></div>
     <div class="kv"><span>外交点</span><span id="cDIP" title="外交行动用（阶段四接）"></span></div>
-    <div class="kv"><span>研究点</span><span id="cRP" title="科研滑条那一份转成研究点（阶段四接科技）"></span></div>
+    <div class="kv"><span>研究进度</span><span id="cRP" title="科研滑条 + 图书馆/大学；每攒满 100 进度 = 1 科技点"></span></div>
     <div class="kv"><span>投资款</span><span id="cIP" title="投资滑条那一份攒成投资款（投资敕令用）"></span></div>
+    <div class="sec" title="全国已完工的建筑合计（在建的不算）">建筑</div>
+    <div class="hint" id="cBldSum"></div>
   </div>
   <!-- 战争（第十一、十二章）：交战国 + 战争分 + 和谈条款；邻国 + 宣战 -->
   <div class="cpane cpane-dip">
@@ -2885,6 +2899,7 @@
 <script src="js/08b-society.js"></script>
 <script src="js/09-export.js"></script>
 <script src="js/15-aoc2.js"></script>
+<script src="js/16-aoc2-court.js"></script>
 <script src="js/17-chrono.js"></script>
 <script src="js/13-main.js"></script>
 <script src="js/14-labels.js"></script>
