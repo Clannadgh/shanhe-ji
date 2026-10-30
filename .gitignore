@@ -4,6 +4,7 @@ test/downloads/
 
 # 打包 / 预览输出：index.html + js + assets 的副本（约 19MB），不进仓库
 dist/
+dist.bak*/
 *.zip
 
 # 运行期临时文件
