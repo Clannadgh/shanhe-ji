@@ -1175,9 +1175,13 @@
   };
 
   Renderer.prototype._drawMinimap = function (ctx) {
+    /* 手机（<=760）不画小地图：那块地方本来就不够，缩到 100px 宽也读不出什么，
+     * 而右下角还站着「下一回合」那颗圆钮 —— 两者叠在一起只会互相咬。 */
+    if (this.cssW <= 760) { this._mmRect = null; return; }
     var mw = this.minimap.width, mh = this.minimap.height;
     var pad = 12;
-    var mx = this.cssW - mw - pad, my = this.cssH - mh - pad;
+    /* 右下角那颗红色圆钮（AoC2 的 Next Turn）占掉约 84px 高，小地图往上让位 */
+    var mx = this.cssW - mw - pad, my = this.cssH - mh - pad - 84;
     this._mmRect = { x: mx, y: my, w: mw, h: mh };
     var dpr = this.dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

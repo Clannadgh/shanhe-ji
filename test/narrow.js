@@ -79,7 +79,8 @@ const flags = (page) => page.evaluate(() => ({
       vw: innerWidth, vh: innerHeight,
       on: el.classList.contains('on'),
       hit: !(bb.right <= r.left || bb.left >= r.right || bb.bottom <= r.top || bb.top >= r.bottom),
-      bx: Math.round(bb.x), by: Math.round(bb.y), bw: Math.round(bb.width)
+      bx: Math.round(bb.x), by: Math.round(bb.y), bw: Math.round(bb.width),
+      iy: Math.round(r.y)
     };
   });
   ck('窄屏：省卡铺满宽度（左右各留 8，不越界）',
@@ -88,7 +89,7 @@ const flags = (page) => page.evaluate(() => ({
   /* 旧版那颗浮在左上角的「面板」钮曾经压在省名上。改成顶栏内的一颗图标钮以后，
    * 它离省卡有一个顶栏的距离，永远不会盖住信息 —— 断言直接查重叠。 */
   ck('窄屏：「面板」钮不压省卡',
-    !c.hit, '钮 ' + c.bx + ',' + c.by + ' (' + c.bw + 'px) / 省卡 y' + c.y + ' 起');
+    !c.hit, '钮 ' + c.bx + ',' + c.by + ' (' + c.bw + 'px) / 省卡 y' + c.iy + ' 起');
 
   /* 「建筑」页的窄屏断言随建筑一起退役（阶段一）：省卡现在只有一页。
    * 剩下的省卡断言（铺满宽度 / 层级）仍然有效。 */

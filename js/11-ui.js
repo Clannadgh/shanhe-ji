@@ -5287,6 +5287,8 @@
     updateTurnLabel();
     var box = $('turnBox');
     if (box) { box.classList.remove('flash'); void box.offsetWidth; box.classList.add('flash'); }
+    var et = $('nextTurn');
+    if (et) { et.classList.remove('flash'); void et.offsetWidth; et.classList.add('flash'); }
     if (state.world && state.renderer) {
       var id = state.renderer.selected;
       if (id) {
@@ -5744,6 +5746,17 @@
     if (mis) lines.push('传教中：剩 ' + mis.left + ' 回合 → ' + AO.faithName(mis.to));
     lines.push('传教在「治理」面板：本国省份那一行的「传教」钮');
     el.title = lines.join('\n');
+  }
+
+  /* 省条的"展开/收起"。记住选择：玩家一旦按过「更多」，下一个省也照旧展开 ——
+   * 他正在做"盖房/下敕令"这类连续动作，每点一个省就折回去等于每步多一次点击。 */
+  function setInfoMore(on) {
+    var el = $('info');
+    if (!el) return;
+    el.classList.toggle('info-more', !!on);
+    var b = $('iMore');
+    if (b) b.textContent = on ? '收起 ▴' : '更多 ▾';
+    try { localStorage.setItem('sj.infoMore', on ? '1' : '0'); } catch (e) { /* 忽略 */ }
   }
 
   /* 省份信息 */
@@ -8225,28 +8238,12 @@
     if (shortEl) shortEl.textContent = fmtGold(c.aoc.treasury) + ' 金';
   }
 
-  /* 国卡的高度上限 = 到小地图上沿为止。
-   * 为什么不用一条固定的 vh：小地图是画在 canvas 上的，尺寸随窗口和世界宽高比变，
-   * 一行 CSS 猜不准 —— 猜大了盖住小地图，猜小了白丢一截。这里直接问渲染层
-   * 拿它这一帧的矩形（_mmRect，每帧绘制时更新），于是两块永远不打架。 */
-  function clampCountryHeight() {
-    var el = $('country');
-    if (!el) return;
-    var R = state.renderer;
-    var mm = R && R._mmRect;
-    var top = el.getBoundingClientRect().top;
-    var avail = mm ? (mm.y - 10 - top) : 0;
-    /* 兜底：小地图还没画过（或窗口很矮）时给一个"至少能看四行"的下限 */
-    el.style.maxHeight = Math.max(220, avail) + 'px';
-  }
-
   function showCountry(cid) {
     var w = state.world;
     var c = w && w.countries[cid - 1];
     if (!c || !c.aoc) { clearCountry(); return; }
     $('country').classList.add('on');
     applyCountryTab();
-    clampCountryHeight();
 
     $('cFlag').style.background = c.color;
     $('cName').textContent = c.name;
@@ -11423,6 +11420,13 @@
       if (e && e.stopPropagation) e.stopPropagation();
       clearInfo();
     });
+    /* 省条上的「更多 ▾」= AoC2 的 More：展开军务 / 建筑 / 敕令。
+     * 默认收起 —— 底部那条只放"看一眼就要知道"的数字和两三颗常用钮。 */
+    var im = $('iMore');
+    if (im) im.addEventListener('click', function (e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      setInfoMore(!$('info').classList.contains('info-more'));
+    });
     root.addEventListener('keydown', function (e) {
       /* ESC 先关最上层的全屏层（治理 → 科技树），再关国家卡。
        * 两个 overlay 同时开在实现上不会发生（各有各的入口），
@@ -11824,6 +11828,8 @@
     bind();
     /* 抽屉的初始位（v16）：这四个只读 localStorage，跨刷新记得住玩家上次怎么摆的 */
     applyDetail();
+    /* 省条展没展开是跨刷新记住的（同一个省连着盖房时不用每省点一次） */
+    try { setInfoMore(localStorage.getItem('sj.infoMore') === '1'); } catch (e) { /* 忽略 */ }
     applyGroups();
     applyCountryTab();
     updateTurnLabel();
