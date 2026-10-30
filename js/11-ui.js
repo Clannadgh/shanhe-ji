@@ -5759,6 +5759,56 @@
     try { localStorage.setItem('sj.infoMore', on ? '1' : '0'); } catch (e) { /* 忽略 */ }
   }
 
+  /* 省域缩略图（AoC2 省条左端那块小地图）：把这一个省的形状画出来，
+   * 邻省垫一层淡色当"上下文"，选中省描一道白边 —— 一眼能认出"这块在哪"。
+   * 用省自己的 rings（世界坐标）现算包围盒，不依赖渲染层的相机。 */
+  function drawProvThumb(p) {
+    var cv = $('iThumb');
+    if (!cv || !cv.getContext) return;
+    var W = cv.width, H = cv.height;
+    var g = cv.getContext('2d');
+    g.clearRect(0, 0, W, H);
+    if (!p || !p.rings || !p.rings.length) return;
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, i, k, c;
+    for (i = 0; i < p.rings.length; i++) {
+      c = p.rings[i].coords;
+      for (k = 0; k < c.length; k += 2) {
+        if (c[k] < minX) minX = c[k];
+        if (c[k] > maxX) maxX = c[k];
+        if (c[k + 1] < minY) minY = c[k + 1];
+        if (c[k + 1] > maxY) maxY = c[k + 1];
+      }
+    }
+    var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    var half = Math.max(maxX - minX, maxY - minY) * 0.62 || 1;
+    var sc = W / (half * 2);
+    function ring(q) {
+      g.beginPath();
+      for (var r = 0; r < q.rings.length; r++) {
+        var pts = q.rings[r].coords;
+        g.moveTo((pts[0] - cx) * sc + W / 2, (pts[1] - cy) * sc + H / 2);
+        for (var j = 2; j < pts.length; j += 2) {
+          g.lineTo((pts[j] - cx) * sc + W / 2, (pts[j + 1] - cy) * sc + H / 2);
+        }
+        g.closePath();
+      }
+    }
+    var nb = p.neighbors || [];
+    g.fillStyle = 'rgba(90, 101, 112, .22)';
+    for (i = 0; i < nb.length; i++) {
+      var q = pOf(nb[i]);
+      if (!q || !q.rings) continue;
+      ring(q); g.fill();
+    }
+    var col = p.ownerColor || (p.owner && coOf(p.owner) ? coOf(p.owner).color : '#b9b09a');
+    ring(p);
+    g.fillStyle = col || '#b9b09a';
+    g.fill();
+    g.lineWidth = 2;
+    g.strokeStyle = 'rgba(255,255,255,.95)';
+    g.stroke();
+  }
+
   /* 省份信息 */
   function clearInfo() {
     $('info').classList.remove('on');
@@ -6557,6 +6607,7 @@
 
     $('iSw').style.background = p.ownerColor;
     $('iName').textContent = p.name;
+    drawProvThumb(p);
     $('iNameEn').textContent = p.name_en;
     var occBy = p.aoc.occupied ? w.countries[p.aoc.occupied - 1] : null;
     /* 无主省（阶段五）：没有国名可写。这片地只能殖民，军队也进不去 */

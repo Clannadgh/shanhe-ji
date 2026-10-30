@@ -2889,6 +2889,132 @@
     transform: translateX(-50%) translateY(-8px);
   }
   body #toast.on { transform: translateX(-50%) translateY(0); }
+
+  /* =============================================================
+   * AoC2 版式·第二轮（按 1920×1080 官方截图逐块对照）
+   *
+   * 这一轮修的是"形状和贴边"，上一轮修的是"位置"：
+   *   · 三块东西**全部贴边**（截图里国卡贴左缘、省条贴左下角、回合钮贴右下角），
+   *     不再浮着 8px 的缝 —— 那 8px 让整个界面看着像"贴纸"；
+   *   · 国卡去掉页签，改成 AoC2 那种"国情 → Diplomacy → Decisions"的分节长栏，
+   *     节标题居中小字、两边各一道细线；
+   *   · 省条左端加**省域缩略图**（截图里那块小地图）；
+   *   · 征兵/即时征/移动/解散改成省条顶上**四颗大方钮**（= Move/Recruit/More/Move To）；
+   *   · 「下一回合」从圆钮改成**金边长方钮**（截图里它就是一块长方钮，
+   *     圆的那个是玩家国色的圆盘，不是按钮 —— 我上一版看错了）。
+   * ============================================================= */
+
+  /* ---------------- 贴边 ---------------- */
+  body #country { left: 0; top: 42px; border-left: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+  body #info { left: 0; bottom: 0; border-left: 0; border-bottom: 0; border-bottom-right-radius: 0; }
+  body #panel { left: 6px; top: 48px; }
+  body #notesPanel { right: 6px; top: 48px; }
+
+  /* ---------------- 国卡：分节长栏（去掉页签） ---------------- */
+  body #country .cpane { display: block; padding-bottom: 14px; }
+  /* 国卡与省条同处左边一列：两块高度必须相加不超屏。国卡 46vh、
+   * 省条吃剩下的（再留 8px 缝）—— 都是 vh 公式，窗口一改也不会互相咬。 */
+  body #country { max-height: 46vh; }
+  /* 节标题：AoC2 的 Diplomacy / Decisions 就是"居中小字 + 两边细线" */
+  body #country .csec {
+    display: flex; align-items: center; gap: 8px;
+    margin: 14px 0 6px; padding: 0 11px;
+    font-size: 11px; font-weight: 700; letter-spacing: 2.4px; color: var(--ink-2);
+    text-align: center;
+  }
+  body #country .csec::before, body #country .csec::after {
+    content: ""; flex: 1; height: 1px; background: var(--line);
+  }
+  /* 第一块（国情）不要再顶一条线 */
+  body #country .cpane-ov > .kv:first-child { margin-top: 2px; }
+
+  /* 头部：旗子大一点，国名下面压一行"省份 N"（截图就是这么排的） */
+  body #country .ch { padding: 9px 30px 8px 11px; gap: 9px; }
+  body #country .ch .flag { width: 40px; height: 26px; margin-top: 0; border-radius: 2px; }
+  body #country .ch h2 { font-size: 15px; letter-spacing: .4px; }
+
+  /* ---------------- 省条：缩略图 + 四颗大方钮 ---------------- */
+  body #info { width: min(760px, 52vw); max-height: calc(100vh - 46vh - 50px); }
+  /* 缩略图用绝对定位钉在左边，正文靠 padding-left 让开 —— 不用 grid：
+   * grid 会让每一个 kv 各占一行（它们是并列的子项），chip 就竖着排了。 */
+  body #info .isum {
+    position: relative;
+    display: flex; flex-wrap: wrap; gap: 2px 14px;
+    padding: 7px 10px 9px 94px;
+  }
+  body #info #iThumb {
+    position: absolute; left: 10px; top: 7px;
+    width: 74px; height: 74px; border-radius: 3px;
+    background: #efe9dd; border: 1px solid rgba(20, 26, 32, .16);
+  }
+  body #info .isum h2 { padding-right: 78px; }
+
+  /* 四颗大方钮（Move / Recruit / More / Move To 的位置） */
+  /* 军务那四颗钮在截图里是**省条上方另一块板**：给它一道分界和一层浅底，
+   * 视觉上分成两块，但仍在同一张卡里（不用把 DOM 拆出去）。 */
+  body #info #iArmySec {
+    margin: 0 0 5px; padding: 6px 10px 0;
+    background: rgba(20, 26, 32, .035);
+    border-bottom: 1px solid var(--line);
+  }
+  body #info #iArmy {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+    padding: 0 10px 6px;
+  }
+  body #info #iArmy button {
+    min-width: 0; height: 46px; padding: 4px 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: 2px; font-size: 12.5px;
+  }
+  body #info #iArmy button b { font-size: 12.5px; }
+  body #info #iArmy button em { font-size: 10px; }
+
+  /* ---------------- 下一回合：金边长方钮 ---------------- */
+  body #endTurnWrap { right: 0; bottom: 0; align-items: stretch; gap: 0; }
+  body #endTurnWrap #nextTurn {
+    width: auto; min-width: 132px; height: 46px; border-radius: 0;
+    flex-direction: row; gap: 7px; padding: 0 16px;
+    background: linear-gradient(180deg, #fdf8ee 0%, #f2e9d8 100%);
+    border: 2px solid #b08a3c; color: #6b4a12;
+    box-shadow: 0 0 0 1px rgba(20, 26, 32, .18), 0 4px 14px rgba(20, 26, 32, .18);
+    text-shadow: none;
+  }
+  body #endTurnWrap #nextTurn .ar { font-size: 12px; }
+  body #endTurnWrap #nextTurn em { font-size: 13px; font-weight: 800; letter-spacing: 1.2px; }
+  body #endTurnWrap #nextTurn:hover {
+    background: linear-gradient(180deg, #fffdf7 0%, #f7efdf 100%);
+    filter: none; border-color: #8a6a26;
+  }
+  body #endTurnWrap #nextTurn:active { transform: none; }
+  @keyframes endturnFlash {
+    0% { box-shadow: 0 0 0 0 rgba(176, 138, 60, .55); }
+    100% { box-shadow: 0 0 0 12px rgba(176, 138, 60, 0); }
+  }
+  body #endTurnWrap #nextTurn.flash { animation: endturnFlash .5s ease-out 1; }
+
+  /* 手机上的例外：贴边那套是给桌面"地图铺满"的视觉，手机上左右各留 8
+   * 反而更好按（屏幕边缘容易误触）。这几条压在最后，盖掉上面的贴边规则。 */
+  @media (max-width: 760px) {
+    body #info { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 56vh; border-radius: 10px; }
+    body #country {
+      left: 8px; right: 8px; top: 74px; width: auto;
+      max-height: calc(100% - 82px); border-radius: 10px;
+    }
+    body #endTurnWrap { right: 8px; bottom: 8px; }
+    body #endTurnWrap #nextTurn { min-width: 104px; height: 40px; }
+    body #panel { left: 8px; }
+    body #notesPanel { right: 8px; }
+    body #info #iThumb { display: none; }
+    body #info .isum { padding-left: 10px; }
+  }
+
+  /* 贴边以后圆角要重算：只有"朝里"的那个角是圆的。
+   * 四角全圆 = 一张贴在屏幕边上的卡片；只圆内侧 = 一块嵌进去的面板（AoC2 就是后者）。 */
+  body #country { border-radius: 0 10px 10px 0; }
+  body #info { border-radius: 0 10px 0 0; }
+  body #info #iArmySec { border-radius: 0 10px 0 0; }
+  body #endTurnWrap #nextTurn { border-radius: 8px 0 0 0; }
+  body #panel { border-radius: 10px; }
 </style>
 </head>
 <body>
@@ -2977,10 +3103,14 @@
   <div id="infoBody" style="display:none">
     <!-- 迷雾黄条（阶段五接三档迷雾，先留着壳） -->
     <div id="iFogBar" class="fogbar" hidden></div>
+    <!-- 军务（第十一、十二章）：驻军就是一个数字，征兵扣金扣人口 -->
+    <div class="sec" id="iArmySec">军务<span class="st2" id="iArmyInfo"></span></div>
+    <div class="aocrow" id="iArmy"></div>
     <div class="ipanes">
     <div class="col info-col">
       <!-- 概要区（AoC2 口径）：归属 → 人口 → 经济 → 发展度 → 稳定 → 幸福 → 增长 -->
       <div class="isum">
+        <canvas id="iThumb" width="144" height="144" title="省域缩略图" aria-hidden="true"></canvas>
         <h2><span class="sw" id="iSw"></span><span id="iName"></span><button id="iMore" type="button" title="展开军务 / 建筑 / 敕令（AoC2 的 More）">更多 ▾</button><button id="iClose" type="button" title="收起省卡（Esc）">×</button></h2>
         <div class="en" id="iNameEn"></div>
         <div class="fogsnap" id="iFogSnap"></div>
@@ -3013,9 +3143,6 @@
       </div>
     </div>
     </div>
-    <!-- 军务（第十一、十二章）：驻军就是一个数字，征兵扣金扣人口 -->
-    <div class="sec" id="iArmySec">军务<span class="st2" id="iArmyInfo"></span></div>
-    <div class="aocrow" id="iArmy"></div>
     <!-- 建筑（规则书第五章）：八种 + 大学；在建的不计入造价递增 -->
     <div class="sec" id="iBldSec">建筑<span class="st2" id="iBldInfo"></span></div>
     <div class="aocrow" id="iBld"></div>
@@ -3045,12 +3172,6 @@
   </div>
   <div id="cFogBar" class="fogbar" hidden></div>
   <div id="cFogInfo" class="foginfo" hidden></div>
-  <!-- 两个页签（AoC2 口径）：概览 / 内政。外交要到阶段四才回来 -->
-  <div class="itabs" id="cTabs">
-    <button class="itab" type="button" data-ctab="ov" title="疆域与国情：政体、人口、经济、发展度、幸福、稳定、邻国">概览</button>
-    <button class="itab" type="button" data-ctab="gov" title="钱与政策：国库、贷款、税率滑条、四条预算滑条、移动点 / 外交点">内政</button>
-    <button class="itab" type="button" data-ctab="dip" title="外交：交战 / 附庸 / 21 种外交动作 / 贸易">外交</button>
-  </div>
   <div class="cpane cpane-ov">
     <div class="kv"><span>政体</span><span id="cGov"></span></div>
     <div class="kv"><span>国策</span><span id="cPersona" title="AI 性格（阶段五）：经营 / 扩张 / 外交 / 殖民 —— 只影响它的决策倾向，不影响规则"></span></div>
@@ -3072,6 +3193,24 @@
     <div class="chips" id="cNeighbors"></div>
   </div>
   <!-- 内政：国库 / 五条滑条 / 点数 —— 全是"能动手"的，所以单独一页 -->
+  <div class="csec" id="cSecDip">外交</div>
+  <!-- 外交（AoC2 的 Diplomacy 节）：交战 / 附庸 / 21 种动作 / 贸易 -->
+  <div class="cpane cpane-dip">
+    <div class="kv"><span>军队</span><span id="cArmy" title="全国兵力合计（军队就是省上的一个数字）"></span></div>
+    <div class="kv"><span>厌战</span><span id="cWear" title="战时上升、和平回落；过高 → 军费膨胀 + 幸福下降"></span></div>
+    <div class="kv"><span>外交点</span><span id="cDipNow" title="每回合 +3（大国 +2）；所有外交动作都花它"></span></div>
+    <div class="sec" title="战争分 = 占领敌省的比例：30 分能割地、45 分能附庸、20 分能要赔款">交战</div>
+    <div id="cWars" class="govbox"></div>
+    <div class="sec" title="附庸每回合上缴 20% 入库收入；独立欲望满 100% 会起兵">附庸</div>
+    <div id="cVassalBox" class="govbox"></div>
+    <div class="sec" title="点一个邻国选中它，下面的动作就作用在它身上">邻国 / 关系</div>
+    <div id="cWarTargets" class="govbox"></div>
+    <div class="sec" id="cDipTitle">外交动作</div>
+    <div id="cDipActs" class="aocrow"></div>
+    <div id="cTradeBox" class="govbox"></div>
+  </div>
+  <!-- 决策（AoC2 的 Decisions 节）：政体 / 科技 / 国库 / 预算 / 税率 -->
+  <div class="csec" id="cSecGov">决策</div>
   <div class="cpane cpane-gov">
     <div class="sec" title="政体决定税收上限 / 行政费 / 募兵成本 / 军费 / 防御加成；换政体花一笔金，不同政体要不同时代">政体</div>
     <div id="cGovBox" class="aocrow"></div>
@@ -3092,21 +3231,6 @@
     <div class="sec" title="只影响你自己看得见什么，不影响任何国家的真实数据">战争迷雾</div>
     <div id="cFogRow" class="aocrow"></div>
     <div class="hint" id="cFogTip"></div>
-  </div>
-  <!-- 外交（第十三、十四章）：交战 / 附庸 / 21 种动作 / 贸易 -->
-  <div class="cpane cpane-dip">
-    <div class="kv"><span>军队</span><span id="cArmy" title="全国兵力合计（军队就是省上的一个数字）"></span></div>
-    <div class="kv"><span>厌战</span><span id="cWear" title="战时上升、和平回落；过高 → 军费膨胀 + 幸福下降"></span></div>
-    <div class="kv"><span>外交点</span><span id="cDipNow" title="每回合 +3（大国 +2）；所有外交动作都花它"></span></div>
-    <div class="sec" title="战争分 = 占领敌省的比例：30 分能割地、45 分能附庸、20 分能要赔款">交战</div>
-    <div id="cWars" class="govbox"></div>
-    <div class="sec" title="附庸每回合上缴 20% 入库收入；独立欲望满 100% 会起兵">附庸</div>
-    <div id="cVassalBox" class="govbox"></div>
-    <div class="sec" title="点一个邻国选中它，下面的动作就作用在它身上">邻国 / 关系</div>
-    <div id="cWarTargets" class="govbox"></div>
-    <div class="sec" id="cDipTitle">外交动作</div>
-    <div id="cDipActs" class="aocrow"></div>
-    <div id="cTradeBox" class="govbox"></div>
   </div>
 </section>
 
