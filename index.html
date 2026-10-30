@@ -2589,6 +2589,18 @@
 .aocslider .v { text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
 .aocslider.sum { border-top: 1px dashed var(--line, #d8d2c4); margin-top: 3px; padding-top: 4px; }
 .aocslider.sum .v { font-weight: 600; }
+
+/* ---------------- AoC2：战争页的行（交战国 / 邻国） ----------------
+ * 一行 = 国名 + 一句状态 + 几个动作钮。和 .aocrow 同一套观感，
+ * 但每行独立（战争列表比敕令长得多，必须能一行一行扫）。 */
+.aocwar { display: flex; align-items: center; gap: 6px; padding: 3px 0;
+  border-bottom: 1px dashed rgba(0,0,0,.07); font-size: 12px; }
+.aocwar b { font-weight: 600; }
+.aocwar em { font-style: normal; opacity: .7; margin-left: auto; margin-right: 4px; }
+.aocwar button { padding: 3px 7px; font-size: 11px; border: 1px solid var(--line, #d8d2c4);
+  border-radius: 5px; background: #fffdf7; color: inherit; cursor: pointer; }
+.aocwar button:hover:not(:disabled) { border-color: #b9ac8e; background: #fff8e8; }
+.aocwar button:disabled { opacity: .45; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -2710,7 +2722,10 @@
       </div>
     </div>
     </div>
-    <!-- 敕令（规则书第二十一章）：本阶段三条，都花移动点 -->
+    <!-- 军务（第十一、十二章）：驻军就是一个数字，征兵扣金扣人口 -->
+    <div class="sec">军务<span class="st2" id="iArmyInfo"></span></div>
+    <div class="aocrow" id="iArmy"></div>
+    <!-- 敕令（规则书第二十一章）：都花移动点 -->
     <div class="sec">敕令<span class="st2" id="iMP"></span></div>
     <div class="aocrow" id="iDecree"></div>
   </div>
@@ -2740,6 +2755,7 @@
   <div class="itabs" id="cTabs">
     <button class="itab" type="button" data-ctab="ov" title="疆域与国情：政体、人口、经济、发展度、幸福、稳定、邻国">概览</button>
     <button class="itab" type="button" data-ctab="gov" title="钱与政策：国库、贷款、税率滑条、四条预算滑条、移动点 / 外交点">内政</button>
+    <button class="itab" type="button" data-ctab="dip" title="战争：交战国 / 战争分 / 和谈；邻国 / 宣战">战争</button>
   </div>
   <div class="cpane cpane-ov">
     <div class="kv"><span>政体</span><span id="cGov"></span></div>
@@ -2770,6 +2786,15 @@
     <div class="kv"><span>外交点</span><span id="cDIP" title="外交行动用（阶段四接）"></span></div>
     <div class="kv"><span>研究点</span><span id="cRP" title="科研滑条那一份转成研究点（阶段四接科技）"></span></div>
     <div class="kv"><span>投资款</span><span id="cIP" title="投资滑条那一份攒成投资款（投资敕令用）"></span></div>
+  </div>
+  <!-- 战争（第十一、十二章）：交战国 + 战争分 + 和谈条款；邻国 + 宣战 -->
+  <div class="cpane cpane-dip">
+    <div class="kv"><span>军队</span><span id="cArmy" title="全国兵力合计（军队就是省上的一个数字）"></span></div>
+    <div class="kv"><span>厌战</span><span id="cWear" title="战时上升、和平回落；过高 → 军费膨胀 + 幸福下降"></span></div>
+    <div class="sec" title="战争分 = 占领敌省的比例；100 分 = 全境被占，所有要求都会被接受">交战</div>
+    <div id="cWars" class="govbox"></div>
+    <div class="sec" title="宣战耗外交点；开局 5 回合内不能宣战；和约后有 30 回合停战期">邻国</div>
+    <div id="cWarTargets" class="govbox"></div>
   </div>
 </section>
 

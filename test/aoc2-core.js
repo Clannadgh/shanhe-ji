@@ -65,7 +65,7 @@ AO.aoc2.initWorld(world);
   const c = world.countries[0];
   const before = c.aoc.treasury;
   /* player = 这个国：关掉 AI 的自动加税 / 余钱投资，账才对得上 */
-  const P = { player: c.id };
+  const P = { player: c.id, ai: false };
   AO.aoc2.settle(world, P);
   const L = c.aoc.last;
   let incSum = 0;
@@ -97,7 +97,7 @@ AO.aoc2.initWorld(world);
 (function () {
   const c = world.countries[1];
   c.aoc.sliders = { tax: 25, goods: 65, research: 5, invest: 5 };
-  const P3 = { player: c.id };
+  const P3 = { player: c.id, ai: false };
   AO.aoc2.setTaxRate(c, 8);
   for (let i = 0; i < 12; i++) AO.aoc2.settle(world, P3);
   const happyLow = c.aoc.happy, stabLow = c.aoc.stab;
@@ -135,7 +135,7 @@ AO.aoc2.initWorld(world);
   const c = world.countries[3];
   const p = world.provinces[c.provinces[0] - 1];
   p.aoc.dev = 0.5;
-  for (let i = 0; i < 400; i++) AO.aoc2.settle(world, { player: c.id });
+  for (let i = 0; i < 400; i++) AO.aoc2.settle(world, { player: c.id, ai: false });
   ok('发展度自然增长封顶 1.0', p.aoc.dev <= 1.0 + 1e-9 && p.aoc.dev > 0.95,
     '400 回合后 ' + p.aoc.dev.toFixed(4));
 

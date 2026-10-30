@@ -180,6 +180,7 @@
     if (AO.balReset) AO.balReset();
     state.openKey = null;
     state.infoId = 0;
+    state.moveFrom = 0;
     // 让浏览器先把"生成中"画出来，再释放一次垃圾，最后才做重活
     setTimeout(function () {
       try {
@@ -1966,7 +1967,14 @@
     turnNo++;
     var w = state.world;
     if (!w) return;
-    AO.aoc2.settle(w);
+    var transfers0 = AO.aoc2.transfers || 0;
+    /* 必须把 PLAYER 传进去：不传的话玩家国也会被 AI 接管（自动征兵 / 自动宣战），
+     * 实测第 21 回合国库被自己的"AI 政府"花掉三分之一。 */
+    AO.aoc2.settle(w, { player: PLAYER });
+    /* 和约割地会改归属：路径缓存得重建，否则地图还画着旧国界 */
+    if ((AO.aoc2.transfers || 0) !== transfers0 && state.renderer && state.renderer.refreshGeometry) {
+      state.renderer.refreshGeometry();
+    }
 
     /* 给玩家一条能读的反馈：自己国这一回合的钱怎么来的、怎么没的 */
     var me = PLAYER ? w.countries[PLAYER - 1] : null;
@@ -7354,11 +7362,219 @@
     if (mpEl) mpEl.textContent = '移动点 ' + c.aoc.mp + ' / ' + c.aoc.mpMax;
   }
 
+  /* ---------------- 军务行（省卡）：征兵 / 移动 / 掠夺 / 解散 ---------------- */
+  function renderAocArmy(p) {
+    var box = $('iArmy');
+    if (!box) return;
+    box.innerHTML = '';
+    var w = state.world, c = w.countries[p.owner - 1];
+    if (!c || !c.aoc) return;
+    var troops = p.aoc.army | 0;
+    var owner = troops > 0 ? (p.aoc.armyOf || p.owner) : 0;
+    var mine = owner ? canAct(owner) : canAct(p.owner);
+    var info = $('iArmyInfo');
+    if (info) {
+      info.textContent = troops > 0
+        ? (owner === p.owner ? '驻军 ' : '占领军 ') + troops.toLocaleString()
+        : '无驻军';
+    }
+    function mk(label, sub, ok, fn, title) {
+      var b = doc.createElement('button');
+      b.type = 'button';
+      b.innerHTML = '<b>' + label + '</b>' + (sub ? '<em>' + sub + '</em>' : '');
+      b.disabled = !ok;
+      if (title) b.title = title;
+      if (ok) b.addEventListener('click', fn);
+      box.appendChild(b);
+    }
+    var cap = AO.aoc2.recruitCap(p, c.id);
+    var gov = AO.aoc2.govOf(c);
+    var unit = Math.round(AO.AOC2.RECRUIT_GOLD * gov.recruit);
+
+    /* 征兵（正常价，下一回合到位） */
+    var nNormal = Math.min(AO.AOC2.RECRUIT_BATCH, cap);
+    mk('征兵 ' + nNormal, (nNormal * unit).toLocaleString() + ' 金 · 下回合到',
+      mine && nNormal > 0 && !p.aoc.occupied && c.aoc.treasury >= nNormal * unit,
+      function () {
+        var r = AO.aoc2.recruit(w, c.id, p.id, nNormal, false);
+        toast(r.msg, 2600);
+        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+      },
+      '单省上限 = 人口 1/10~1/5；同时扣金和人口');
+
+    /* 即时征（×2 价，立刻到位，花移动点） */
+    var nInst = Math.min(AO.AOC2.RECRUIT_BATCH, cap);
+    var costI = nInst * unit * AO.AOC2.INSTANT_MUL;
+    mk('即时征 ' + nInst, costI.toLocaleString() + ' 金 · ×2',
+      mine && nInst > 0 && !p.aoc.occupied && c.aoc.treasury >= costI && c.aoc.mp >= AO.AOC2.MP_COST.recruit,
+      function () {
+        var r = AO.aoc2.recruit(w, c.id, p.id, nInst, true);
+        toast(r.msg, 2600);
+        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+      },
+      '征兵敕令：即时到位，正常价 ×2，花 ' + AO.AOC2.MP_COST.recruit + ' 移动点');
+
+    /* 移动：进入"点相邻省"的模式 */
+    mk('移动', troops > 0 ? '点相邻省' : '没有兵',
+      mine && troops > 0,
+      function () {
+        state.moveFrom = p.id;
+        toast('移动：点一个相邻省（全部 ' + troops.toLocaleString() + ' 兵一起走）', 3200);
+      },
+      '移动花移动点，按地形倍率');
+
+    /* 掠夺（只在"我占领的省"出现） */
+    if (p.aoc.occupied === c.id) {
+      mk('掠夺', '+' + Math.round(troops * AO.AOC2.PLUNDER_GOLD).toLocaleString() + ' 金',
+        mine && troops > 0 && c.aoc.mp >= AO.AOC2.MP_COST.plunder,
+        function () {
+          var r = AO.aoc2.plunder(w, c.id, p.id);
+          toast(r.msg, 2800);
+          if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+        },
+        '掠夺占领省：人口 / 经济 / 幸福下降 → 国库进金（军越多抢越多）');
+    }
+
+    /* 解散（只回填 1/20 人口，规则书第二章） */
+    mk('解散', '回填 1/20 人口', mine && troops > 0,
+      function () {
+        var r = AO.aoc2.disband(w, owner || c.id, p.id, troops);
+        toast(r.msg, 2600);
+        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+      },
+      '撤编损耗人口：只回填约 1/20');
+  }
+
+  /* ---------------- 战争页（国卡） ---------------- */
+  function renderAocWar(c) {
+    var w = state.world;
+    var armyEl = $('cArmy'), wearEl = $('cWear');
+    if (armyEl) armyEl.textContent = AO.aoc2.armyOf(w, c.id).toLocaleString() + ' 人';
+    if (wearEl) {
+      var wr = Math.round((c.aoc.wear || 0) * 100);
+      wearEl.textContent = wr + '%' + (wr >= 70 ? '（军费膨胀中）' : '');
+    }
+    var box = $('cWars');
+    if (!box) return;
+    box.innerHTML = '';
+    var wars = AO.aoc2.warsOf(w, c.id);
+    if (!wars.length) {
+      box.innerHTML = '<div class="hint">没有交战国。宣战要花 ' + AO.AOC2.WAR_DIP_COST +
+        ' 外交点，开局 ' + AO.AOC2.WAR_BAN_TURNS + ' 回合内不能打。</div>';
+    }
+    var mine = canAct(c.id);
+    for (var i = 0; i < wars.length; i++) {
+      (function (eid) {
+        var e = w.countries[eid - 1];
+        if (!e) return;
+        var score = AO.aoc2.warScore(w, c.id, eid);
+        var row = doc.createElement('div');
+        row.className = 'aocwar';
+        row.innerHTML = '<b>' + e.name + '</b><em>战争分 ' + Math.round(score) + '</em>';
+        var terms = [
+          { k: 'white', cn: '白和平' },
+          { k: 'land', cn: '割地' },
+          { k: 'reparations', cn: '赔款' }
+        ];
+        for (var t = 0; t < terms.length; t++) {
+          (function (term) {
+            var b = doc.createElement('button');
+            b.type = 'button';
+            b.textContent = term.cn;
+            b.disabled = !mine;
+            b.title = term.k === 'white' ? '停战，占着的省还回去'
+              : term.k === 'land' ? '割让被占领的省（战争分 100 或对方厌战 ≥70% 才接受）'
+                : '索取赔款（战争分 50+）';
+            b.addEventListener('click', function () {
+              var tr0 = AO.aoc2.transfers || 0;
+              var r = AO.aoc2.peace(w, c.id, eid, term.k);
+              toast(r.msg, 3600);
+              if (r.ok) {
+                AO.aoc2.recomputeCountry(w, c);
+                showCountry(c.id);
+                /* 割地会改归属：路径缓存必须重建，否则地图还画着旧国界 */
+                if (state.renderer) {
+                  if ((AO.aoc2.transfers || 0) !== tr0 && state.renderer.refreshGeometry) {
+                    state.renderer.refreshGeometry();
+                  } else {
+                    state.renderer.requestDraw();
+                  }
+                  state.renderer.select(state.renderer.selected);
+                }
+              }
+            });
+            row.appendChild(b);
+          })(terms[t]);
+        }
+        box.appendChild(row);
+      })(wars[i]);
+    }
+
+    /* 邻国：宣战 */
+    var tb = $('cWarTargets');
+    if (!tb) return;
+    tb.innerHTML = '';
+    var nbs = (c.neighbors || []).slice();
+    if (!nbs.length) { tb.innerHTML = '<div class="hint">没有陆上邻国</div>'; return; }
+    for (var k = 0; k < nbs.length; k++) {
+      (function (nid) {
+        var n = w.countries[nid - 1];
+        if (!n || !n.aoc || !n.aoc.alive) return;
+        var at = AO.aoc2.atWar(w, c.id, nid);
+        var tl = AO.aoc2.truceLeft(w, c.id, nid);
+        var row = doc.createElement('div');
+        row.className = 'aocwar';
+        row.innerHTML = '<b>' + n.name + '</b><em>' + (at ? '交战中' :
+          tl > 0 ? '停战 ' + tl + ' 回合' : '关系 ' + AO.aoc2.rel(c, nid)) + '</em>';
+        var b = doc.createElement('button');
+        b.type = 'button';
+        b.textContent = at ? '已交战' : '宣战';
+        var why = '';
+        if (!mine) why = '不是你的国家';
+        else if (at) why = '已经在交战';
+        else if (tl > 0) why = '停战期内';
+        else if ((w.turn || 1) <= AO.AOC2.WAR_BAN_TURNS) why = '开局 ' + AO.AOC2.WAR_BAN_TURNS + ' 回合内不能宣战';
+        else if (c.aoc.dip < AO.AOC2.WAR_DIP_COST) why = '外交点不够';
+        b.disabled = !!why;
+        b.title = why || ('花 ' + AO.AOC2.WAR_DIP_COST + ' 外交点');
+        if (!why) b.addEventListener('click', function () {
+          var r = AO.aoc2.declareWar(w, c.id, nid);
+          toast(r.msg, 3200);
+          if (r.ok) showCountry(c.id);
+        });
+        row.appendChild(b);
+        tb.appendChild(row);
+      })(nbs[k]);
+    }
+  }
+
   function showInfo(id) {
     var w = state.world;
     if (!id) { clearInfo(); return; }
     var p = w.provinces[id - 1];
     if (!p || !p.aoc) { clearInfo(); return; }
+
+    /* 移动模式：上一次点了「移动」，这一次点的省就是目的地。
+     * 放在最前面 —— 点相邻省是"下命令"，不是"查看这个省"。 */
+    if (state.moveFrom && state.moveFrom !== id) {
+      var srcPid = state.moveFrom;
+      state.moveFrom = 0;
+      var src = w.provinces[srcPid - 1];
+      if (src && src.aoc && src.neighbors.indexOf(id) >= 0) {
+        var mvOwner = src.aoc.armyOf || src.owner;
+        var mv = AO.aoc2.move(w, mvOwner, srcPid, id, src.aoc.army);
+        toast(mv.msg, 3600);
+        if (mv.ok) {
+          var mc = w.countries[mvOwner - 1];
+          if (mc) AO.aoc2.recomputeCountry(w, mc);
+          if (state.renderer) state.renderer.requestDraw();
+        }
+      } else {
+        toast('只能移到相邻省', 2400);
+      }
+    } else if (state.moveFrom === id) {
+      state.moveFrom = 0;
+    }
     /* 换省份时收起上一省的问号面板；同一省重绘（计时器刷新）则保持展开 */
     if (state.infoId !== id) {
       state.infoId = id;
@@ -7381,7 +7597,10 @@
     $('iSw').style.background = p.ownerColor;
     $('iName').textContent = p.name;
     $('iNameEn').textContent = p.name_en;
-    $('iOwner').textContent = p.ownerName + ' (#' + p.owner + ')';
+    var occBy = p.aoc.occupied ? w.countries[p.aoc.occupied - 1] : null;
+    $('iOwner').textContent = p.ownerName + ' (#' + p.owner + ')' +
+      (occBy ? ' · 被 ' + occBy.name + ' 占领' : '');
+    $('iOwner').style.color = occBy ? '#a8523b' : '';
 
     var tp = AO.aoc2.totalPop(p);
     $('iPop').textContent = AO.formatPop(tp);
@@ -7425,6 +7644,7 @@
       })(p.neighbors[i]);
     }
 
+    renderAocArmy(p);
     renderAocDecree(p);
 
     /* 国家卡开着的时候，点省份也跟着换成该省所属国 */
@@ -9963,6 +10183,7 @@
 
     renderAocTreasury(c);
     renderAocSliders(c);
+    renderAocWar(c);
     $('cMP').textContent = c.aoc.mp + ' / ' + c.aoc.mpMax;
     $('cDIP').textContent = c.aoc.dip + ' / ' + c.aoc.dipMax;
     $('cRP').textContent = c.aoc.rp.toFixed(1);

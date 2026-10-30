@@ -61,6 +61,43 @@
     ASSIMILATE_POP_GOLD: 0.02,      // 第八章：节日每人 0.02 金
     FESTIVAL_POP: 20000,            // 第八章：节日每 2 万人口 +0.1 幸福
     FESTIVAL_HAPPY: 0.1,
+    /* ---- 军队与战争（第十一、十二章）---- */
+    RECRUIT_GOLD: 5,         // 占位：基础约 5 金/兵〔社区〕
+    RECRUIT_POP: 1,          // 占位：1 兵扣 1 人口（规则书只说"同时扣人口"）
+    RECRUIT_CAP_STABLE: 0.20,// 第二章：单省上限 1/10 ~ 1/5，稳定省取高值
+    RECRUIT_CAP_UNSTABLE: 0.10,
+    RECRUIT_STAB_LINE: 70,   // 占位：稳定 ≥70 算"稳定省"
+    INSTANT_MUL: 2,          // 第十一章：征兵敕令即时到位 = 正常价 ×2
+    RECRUIT_BATCH: 1000,     // UI 一次招多少（不是规则，是手感）
+    MOVE_BASE: 1,            // 占位：每跳基础移动点
+    OCCUPY_MIN_TROOPS: 10,   // 第十一章：空省最少 10 兵即可占领
+    OCCUPY_DAMAGE_MUL: 2,    // 占位：大军损毁 = 兵/人口 × 2，上限 25%
+    OCCUPY_DAMAGE_MAX: 0.25,
+    OCCUPY_HAPPY_HIT: 10,    // 占位：被占领当回合幸福 −10
+    COMBAT_LOSS: 0.7,        // 占位：败方被歼时，胜方按对方战力 × 0.7 折损
+    COMBAT_LUCK: 0.12,       // 占位：±12% 的确定性抖动（不用 Math.random）
+    PLUNDER_GOLD: 0.5,       // 占位：每兵抢 0.5 金（规则书只说"军越多抢越多"）
+    PLUNDER_RATE: 2,         // 占位：人口/经济损失 = 兵/人口 × 2，上限 20%
+    PLUNDER_HAPPY: 12,       // 占位：掠夺一次幸福 −12
+    WAR_DIP_COST: 10,        // 占位：宣战耗外交点
+    WEAR_RISE: 0.025,        // 占位：战时每回合 +2.5% 厌战（约 30 回合打疲）
+    WEAR_FALL: 0.05,         // 占位：和平每回合 −5%
+    WEAR_UPKEEP: 1.0,        // 占位：厌战 100% 时军费 ×2（规则书"极端时每兵 >1 金"）
+    WEAR_HAPPY: 12,          // 占位：厌战 100% 时幸福 −12
+    AI_AGGRO: 0.75,          // 第二十章：AI 侵略度默认 75%
+    AI_WAR_CHANCE: 3,        // 占位：每回合宣战判定（百分比 × 侵略度）
+    AI_ARMY_RATIO: 0.01,     // 占位：AI 目标兵力 = 人口 × 1%
+    /* 地形防御加成（规则书第十八章维基表，单位 %） */
+    TERRAIN_DEF: {
+      plains: 0, grassland: 0, forest: 20, hills: 15, mountains: 50,
+      desert: 0, tundra: 10, swamp: 0, coast: 0, islands: 0
+    },
+    /* 地形移动花费（维基表倍率；islands 不在表里，占位 1.5） */
+    TERRAIN_MOVE: {
+      plains: 1, grassland: 1, forest: 1.5, hills: 2, mountains: 3,
+      desert: 1, tundra: 2, swamp: 1, coast: 1, islands: 1.5
+    },
+
     /* 地形增长倍率（规则书第十八章维基表；islands 不在表里，占位） */
     TERRAIN_GROWTH: {
       plains: 1.5, grassland: 1.0, forest: 1.5, hills: 1.25, mountains: 0.5,
@@ -165,6 +202,7 @@
 
   AO.aoc2.initWorld = function (world) {
     var i, c, p, cid;
+    world.turn = world.turn || 1;
 
     /* --- 省 --- */
     for (i = 0; i < world.provinces.length; i++) {
@@ -191,7 +229,9 @@
         core: (function () { var o = {}; o[cid] = 1; return o; })(),
         value: 0,
         income: 0,                 // 上回合本省总收入（省卡显示）
-        occupied: 0,               // 占领方 cid（阶段二）
+        occupied: 0,               // 占领方 cid（0 = 未被占领）
+        army: 0,                   // 驻军人数（规则书第十一章：军队 = 省上一个数字）
+        armyOf: 0,                 // 这支兵属于谁（占领军的归属方；空省为 0）
         disease: 0,                // 疾病压低稳定的量（阶段五）
         fest: 0                    // 节日带来的临时幸福（每回合衰减）
       };
@@ -219,6 +259,11 @@
         gov: 'monarchy',           // 本阶段全体默认君主制
         mp: AOC2.MP_BASE, mpMax: AOC2.MP_BASE,
         dip: AOC2.DIP_BASE, dipMax: AOC2.DIP_MAX,
+        rel: {},                   // 关系值（-100 = 战争；阶段四扩成 21 种外交动作）
+        truce: {},                 // 停战期：cid -> 到哪一回合为止不许宣战
+        warStart: {},              // 这一场仗从哪回合开始（算厌战/战报用）
+        wear: 0,                   // 厌战 0~1（军费膨胀 + 幸福降）
+        rq: [],                    // 征兵队列：[{pid, n}]，下一回合到位
         rp: 0,                     // 研究点（阶段四接科技）
         investPool: 0,             // 投资款（阶段四接建筑/经济投资）
         last: null,                // 上回合收支明细
@@ -272,6 +317,21 @@
   AO.aoc2.settle = function (world, opts) {
     opts = opts || {};
     var ci, pi, c, p, g, A, i;
+    world.turn = (world.turn || 1) + 1;
+
+    /* 军队与占领按"归属方"统计，而不是按"省属于谁" ——
+     * 占领军驻在别人的省里，军费得算在占领者头上（规则书第十一章按兵员计）。
+     * 所以先把整张图扫一遍，得到 每国兵力 / 每国占领了几个省。 */
+    var armyBy = Object.create(null), occBy = Object.create(null);
+    for (pi = 0; pi < world.provinces.length; pi++) {
+      p = world.provinces[pi];
+      if (!p || !p.aoc) continue;
+      if (p.aoc.army > 0) {
+        var ao = p.aoc.armyOf || p.owner;
+        armyBy[ao] = (armyBy[ao] || 0) + p.aoc.army;
+      }
+      if (p.aoc.occupied) occBy[p.aoc.occupied] = (occBy[p.aoc.occupied] || 0) + 1;
+    }
 
     for (ci = 0; ci < world.countries.length; ci++) {
       c = world.countries[ci];
@@ -293,7 +353,9 @@
       A.mp = A.mpMax;
       A.dip = Math.min(A.dipMax, A.dip + AOC2.DIP_BASE);
 
-      var gross = 0, devSum = 0, soldiers = 0, provN = 0;
+      var gross = 0, devSum = 0, provN = 0;
+      var soldiers = armyBy[c.id] || 0;
+      var occupiedN = occBy[c.id] || 0;
 
       /* ① 省收入 ---------------------------------------------------- */
       for (pi = 0; pi < c.provinces.length; pi++) {
@@ -301,7 +363,6 @@
         if (!p || !p.aoc) continue;
         provN++;
         devSum += p.aoc.dev;
-        soldiers += p.aoc.army || 0;
 
         var taxIncome = p.aoc.econ * (A.taxRate / 100) * AOC2.ECON_GOLD *
           (1 + p.aoc.dev * AOC2.DEV_TAX_BONUS) * (1 + g.taxRev / 100);
@@ -315,6 +376,9 @@
         gross += inc;
       }
 
+      /* 占领省的直接收入：约 10 金/省/回合〔社区〕（第一章） */
+      gross += occupiedN * AOC2.OCCUPY_INCOME;
+
       /* ② 国库汇总：四条预算滑条把总收入切开 -------------------------
        * 税收 → 国库；物资 → 当回合消耗掉（换满意度）；科研 → 研究点；
        * 投资 → 投资款。剩下没分配的部分自动进国库（不浪费）。 */
@@ -327,7 +391,8 @@
       /* ③ 行政费 + 军费 + 贷款利息 ---------------------------------- */
       var admin = (gross * AOC2.ADMIN_RATE + provN * AOC2.ADMIN_PER_PROV +
         devSum * AOC2.ADMIN_PER_DEV) * (1 + g.admin / 100);
-      var upkeep = soldiers * AOC2.UPKEEP_PER_SOLDIER * (1 + g.upkeep / 100);
+      var upkeep = soldiers * AOC2.UPKEEP_PER_SOLDIER * (1 + g.upkeep / 100) *
+        (1 + (A.wear || 0) * AOC2.WEAR_UPKEEP);
       var interest = A.loans * AOC2.LOAN_RATE;
       var net = taxShare + unalloc - admin - upkeep - interest;
 
@@ -350,6 +415,7 @@
 
       A.last = {
         gross: gross, taxIn: taxShare + unalloc, admin: admin, upkeep: upkeep,
+        occIncome: occupiedN * AOC2.OCCUPY_INCOME, occN: occupiedN,
         interest: interest, net: net, goodsMoney: goodsMoney,
         researchMoney: researchMoney, investMoney: investMoney, provN: provN
       };
@@ -368,7 +434,7 @@
           (goodsSat - 1) * AOC2.GOODS_HAPPY -
           A.taxRate * AOC2.TAX_HAPPY +
           (p.aoc.fest || 0) -
-          (p.aoc.weariness || 0) * 10;
+          (A.wear || 0) * AOC2.WEAR_HAPPY;
         p.aoc.happy = clamp(p.aoc.happy + (hTarget - p.aoc.happy) * AOC2.HAPPY_STEP,
           AOC2.HAPPY_MIN, AOC2.HAPPY_MAX);
         /* 节日是一次性的：加到幸福里之后每回合衰减 80%，几回合就散掉 */
@@ -471,8 +537,637 @@
         if (pp && pp.aoc) A.econ += pp.aoc.econ;
       }
     }
+
+    /* ⑧ 战争段（规则书第九、十一、十二章）：征兵到货 → 厌战 → AI 行动 */
+    settleWar(world, opts);
     return world;
   };
+
+  /* =============================================================
+   * ⑥ 战争（规则书第十一、十二章）
+   *
+   * 这一层的口径很短：**军队就是省上的一个数字**。没有单位、没有将领编制、
+   * 没有战术卡 —— 那些东西在 AoC2 里不存在，也正是旧制被整体退役的部分。
+   *
+   * 一条完整链路：征兵 → 移动（花移动点）→ 战斗（守方吃地形+政体加成）
+   *   → 占领（阴影 / 不能募兵下敕令 / 每回合 ~10 金）→ 和谈（割地/赔款/白和平）
+   *   → 停战 30 回合。
+   *
+   * 所有"随机"都走 AO.hashString 的确定性抖动（同种子同回合同省 = 同一场仗），
+   * 这是全项目"禁 Math.random"那条约定的一部分。
+   * ============================================================= */
+  function govDefOf(c) { return govOf(c).defense || 0; }
+
+  /* 一支兵属于谁：空省返回 0 */
+  function armyOwnerOf(p) { return p.aoc.army > 0 ? (p.aoc.armyOf || p.owner) : 0; }
+
+  function armyOf(world, cid) {
+    var n = 0, i, p;
+    for (i = 0; i < world.provinces.length; i++) {
+      p = world.provinces[i];
+      if (!p || !p.aoc || !(p.aoc.army > 0)) continue;
+      if ((p.aoc.armyOf || p.owner) === cid) n += p.aoc.army;
+    }
+    return n;
+  }
+  AO.aoc2.armyOf = armyOf;
+
+  /* ---------------- 关系 / 战争状态 ---------------- */
+  AO.aoc2.rel = function (c, cid) { return (c.aoc.rel && c.aoc.rel[cid]) || 0; };
+  AO.aoc2.setRel = function (world, a, b, v) {
+    var ca = world.countries[a - 1], cb = world.countries[b - 1];
+    if (!ca || !cb || !ca.aoc || !cb.aoc) return 0;
+    v = clamp(Math.round(v), -100, 100);
+    ca.aoc.rel = ca.aoc.rel || {}; cb.aoc.rel = cb.aoc.rel || {};
+    ca.aoc.rel[b] = v; cb.aoc.rel[a] = v;
+    return v;
+  };
+  AO.aoc2.atWar = function (world, a, b) {
+    var ca = world.countries[a - 1];
+    if (!ca || !ca.aoc || a === b) return false;
+    return AO.aoc2.rel(ca, b) <= -100;
+  };
+  /* 停战期还剩几回合（0 = 没有停战约束） */
+  AO.aoc2.truceLeft = function (world, a, b) {
+    var ca = world.countries[a - 1];
+    if (!ca || !ca.aoc || !ca.aoc.truce) return 0;
+    var until = ca.aoc.truce[b] || 0;
+    return Math.max(0, until - (world.turn || 1));
+  };
+  AO.aoc2.warsOf = function (world, cid) {
+    var out = [], i, c = world.countries[cid - 1];
+    if (!c || !c.aoc || !c.aoc.rel) return out;
+    for (var k in c.aoc.rel) {
+      if (c.aoc.rel[k] <= -100) {
+        var o = world.countries[(k | 0) - 1];
+        if (o && o.aoc && o.aoc.alive) out.push(o.id);
+      }
+    }
+    return out;
+  };
+
+  /* ---------------- 宣战（第十二章） ---------------- */
+  AO.aoc2.declareWar = function (world, a, b, opts) {
+    opts = opts || {};
+    var ca = world.countries[a - 1], cb = world.countries[b - 1];
+    if (!ca || !cb || !ca.aoc || !cb.aoc) return { ok: false, msg: '国家不存在' };
+    if (a === b) return { ok: false, msg: '不能对自己宣战' };
+    if (!ca.aoc.alive || !cb.aoc.alive) return { ok: false, msg: '对方已经不存在了' };
+    if (AO.aoc2.atWar(world, a, b)) return { ok: false, msg: '已经在交战' };
+    /* 开局 5 回合禁宣战（规则书第十二章） */
+    if ((world.turn || 1) <= AOC2.WAR_BAN_TURNS) {
+      return { ok: false, msg: '开局 ' + AOC2.WAR_BAN_TURNS + ' 回合内不能宣战' };
+    }
+    var tl = AO.aoc2.truceLeft(world, a, b);
+    if (tl > 0) return { ok: false, msg: '停战期还剩 ' + tl + ' 回合' };
+    if (ca.aoc.dip < AOC2.WAR_DIP_COST && !opts.free) {
+      return { ok: false, msg: '外交点不够（需 ' + AOC2.WAR_DIP_COST + '，剩 ' + ca.aoc.dip + '）' };
+    }
+    if (!opts.free) ca.aoc.dip -= AOC2.WAR_DIP_COST;
+    AO.aoc2.setRel(world, a, b, -100);
+    ca.aoc.warStart[b] = world.turn || 1;
+    cb.aoc.warStart[a] = world.turn || 1;
+    return { ok: true, msg: ca.name + ' 向 ' + cb.name + ' 宣战' };
+  };
+
+  /* ---------------- 征兵（第十一章） ---------------- */
+  /* 单省可招上限 = 人口 1/10 ~ 1/5（稳定省取高值） */
+  AO.aoc2.recruitCap = function (p, cid) {
+    var pop = totalPop(p);
+    var cap = pop * (p.aoc.stab >= AOC2.RECRUIT_STAB_LINE
+      ? AOC2.RECRUIT_CAP_STABLE : AOC2.RECRUIT_CAP_UNSTABLE);
+    return Math.max(0, Math.floor(cap - (p.aoc.armyOf === cid ? p.aoc.army : 0)));
+  };
+
+  /* instant=true 是「征兵」敕令：即时到位、正常价 ×2（规则书第二十一章） */
+  AO.aoc2.recruit = function (world, cid, pid, n, instant) {
+    var c = world.countries[cid - 1], p = world.provinces[pid - 1];
+    if (!c || !c.aoc || !p || !p.aoc) return { ok: false, msg: '目标不存在' };
+    if (p.owner !== cid) return { ok: false, msg: '不是自己的省' };
+    if (p.aoc.occupied) return { ok: false, msg: '占领省不能募兵' };
+    n = Math.floor(n);
+    if (!(n > 0)) return { ok: false, msg: '兵数不对' };
+    var cap = AO.aoc2.recruitCap(p, cid);
+    if (cap <= 0) return { ok: false, msg: '这省已到征兵上限（人口 ' + Math.round(totalPop(p)).toLocaleString() + '）' };
+    if (n > cap) n = cap;
+    var mul = instant ? AOC2.INSTANT_MUL : 1;
+    /* 募兵成本 × 政体系数（君主制 1.8；规则书第七章"募兵成本"那一列） */
+    var cost = Math.round(n * AOC2.RECRUIT_GOLD * mul * govOf(c).recruit);
+    if (c.aoc.treasury < cost) return { ok: false, msg: '国库不足（需 ' + cost.toLocaleString() + ' 金）' };
+    var pop = totalPop(p);
+    if (pop - n < 100) return { ok: false, msg: '人口不够' };
+
+    c.aoc.treasury -= cost;
+    /* 同时扣人口（规则书第十一章）：按国籍表扣本国那一份 */
+    p.aoc.pop[cid] = Math.max(0, (p.aoc.pop[cid] || 0) - n);
+    var np = totalPop(p);
+    p.population = Math.round(np);
+
+    if (instant) {
+      if (c.aoc.mp < AOC2.MP_COST.recruit) {
+        /* 移动点不够就别白扣钱：回滚 */
+        c.aoc.treasury += cost;
+        p.aoc.pop[cid] = (p.aoc.pop[cid] || 0) + n;
+        p.population = Math.round(totalPop(p));
+        return { ok: false, msg: '移动点不够（需 ' + AOC2.MP_COST.recruit + '）' };
+      }
+      c.aoc.mp -= AOC2.MP_COST.recruit;
+      p.aoc.army = (p.aoc.army || 0) + n;
+      p.aoc.armyOf = cid;
+      return { ok: true, msg: '即时征兵 ' + n.toLocaleString() + ' 人（' + cost.toLocaleString() + ' 金）', n: n, cost: cost };
+    }
+    c.aoc.rq.push({ pid: pid, n: n });
+    return { ok: true, msg: '征兵 ' + n.toLocaleString() + ' 人，下一回合到位（' + cost.toLocaleString() + ' 金）', n: n, cost: cost };
+  };
+
+  /* ---------------- 移动（第十一章） ---------------- */
+  AO.aoc2.moveCost = function (world, cid, toPid) {
+    var c = world.countries[cid - 1], p = world.provinces[toPid - 1];
+    if (!c || !p) return 0;
+    var tm = AOC2.TERRAIN_MOVE[p.terrain] || 1;
+    return Math.max(1, Math.ceil(AOC2.MOVE_BASE * tm * govOf(c).move));
+  };
+
+  /* 一场仗的确定性抖动：同回合同省同双方 = 同一个数（禁 Math.random） */
+  function warLuck(world, salt, a, b) {
+    var h = AO.hashString('war:' + (world.turn || 1) + ':' + salt + ':' + a + ':' + b) >>> 0;
+    return ((h % 2001) / 1000 - 1) * AOC2.COMBAT_LUCK;
+  }
+
+  /* 战斗：攻守双方按兵力结算，守方吃 地形 + 政体 防御加成（规则书第十一章） */
+  function battle(world, atkCid, p, troops) {
+    var defCid = p.aoc.occupied || p.owner;
+    var def = p.aoc.army || 0;
+    var defCountry = world.countries[defCid - 1];
+    var defBonus = (AOC2.TERRAIN_DEF[p.terrain] || 0) +
+      (defCountry && defCountry.aoc ? govDefOf(defCountry) : 0);
+    var la = warLuck(world, 'a', atkCid, p.id);
+    var ld = warLuck(world, 'd', defCid, p.id);
+    var atkPow = troops * (1 + la);
+    var defPow = def * (1 + defBonus / 100) * (1 + ld);
+
+    /* 空省：最少 10 兵才能占（规则书第十一章） */
+    if (def <= 0) {
+      if (troops < AOC2.OCCUPY_MIN_TROOPS) {
+        return { ok: true, won: false, occupied: false, atkLoss: 0, defLoss: 0,
+          msg: '空省至少要 ' + AOC2.OCCUPY_MIN_TROOPS + ' 兵才能占领（你派了 ' + troops + '）' };
+      }
+      return { ok: true, won: true, occupied: true, atkLoss: 0, defLoss: 0, remain: troops };
+    }
+
+    if (atkPow > defPow) {
+      /* 攻方胜：守军全歼，攻方按对方战力折损 */
+      var atkLoss = Math.min(troops - 1, Math.round(defPow * AOC2.COMBAT_LOSS));
+      if (atkLoss < 0) atkLoss = 0;
+      var remain = troops - atkLoss;
+      p.aoc.army = 0;
+      p.aoc.armyOf = 0;
+      if (remain < AOC2.OCCUPY_MIN_TROOPS) {
+        /* 打赢了但剩不下 10 个人守不住：残兵退回出发省，省仍归守方 */
+        return { ok: true, won: true, occupied: false, atkLoss: atkLoss, defLoss: def,
+          remain: remain, retreat: true, msg: '打赢了，但只剩 ' + remain + ' 兵，守不住（需 ' + AOC2.OCCUPY_MIN_TROOPS + '）' };
+      }
+      return { ok: true, won: true, occupied: true, atkLoss: atkLoss, defLoss: def, remain: remain };
+    }
+
+    /* 守方胜：攻方全灭，守方按攻方战力折损 */
+    var dLoss = Math.min(def, Math.round(atkPow * AOC2.COMBAT_LOSS / (1 + defBonus / 100)));
+    if (dLoss < 0) dLoss = 0;
+    p.aoc.army = def - dLoss;
+    if (p.aoc.army <= 0) { p.aoc.army = 0; p.aoc.armyOf = 0; }
+    return { ok: true, won: false, occupied: false, atkLoss: troops, defLoss: dLoss,
+      msg: '进攻被打退（守方 +' + defBonus + '% 防御）' };
+  }
+
+  /* 占领：阴影 / 不能募兵下敕令 / 每回合 ~10 金 / 大军损毁当地经济人口（第一章） */
+  function occupyProvince(world, atkCid, p, troops) {
+    var pop0 = totalPop(p);
+    /* 大军开进会损毁当地经济和人口：军队越多损毁越重（第一章） */
+    var dmg = Math.min(AOC2.OCCUPY_DAMAGE_MAX, (troops / Math.max(1, pop0)) * AOC2.OCCUPY_DAMAGE_MUL);
+    if (dmg > 0) {
+      for (var k in p.aoc.pop) p.aoc.pop[k] = Math.max(0, p.aoc.pop[k] * (1 - dmg));
+      p.aoc.econ = Math.max(1, p.aoc.econ * (1 - dmg));
+    }
+    p.aoc.happy = clamp(p.aoc.happy - AOC2.OCCUPY_HAPPY_HIT, AOC2.HAPPY_MIN, AOC2.HAPPY_MAX);
+    p.aoc.occupied = atkCid;
+    p.aoc.army = troops;
+    p.aoc.armyOf = atkCid;
+    p.population = Math.round(totalPop(p));
+    p.aoc.value = AO.aoc2.provValue(p);
+    return dmg;
+  }
+
+  /* 移动一支兵：邻接、花移动点；目标是对手就打成一场仗 */
+  AO.aoc2.move = function (world, cid, fromPid, toPid, n) {
+    var c = world.countries[cid - 1];
+    var a = world.provinces[fromPid - 1], b = world.provinces[toPid - 1];
+    if (!c || !c.aoc || !a || !b || !a.aoc || !b.aoc) return { ok: false, msg: '目标不存在' };
+    if (armyOwnerOf(a) !== cid) return { ok: false, msg: '出发省没有你的兵' };
+    n = Math.floor(n);
+    if (!(n > 0) || n > a.aoc.army) return { ok: false, msg: '兵数不对' };
+    if (!a.neighbors || a.neighbors.indexOf(toPid) < 0) return { ok: false, msg: '只能移到相邻省' };
+    var toOwner = b.aoc.occupied || b.owner;
+    var hostile = toOwner !== cid && AO.aoc2.atWar(world, cid, toOwner);
+    if (toOwner !== cid && !hostile) return { ok: false, msg: '要先宣战才能进入对方领土' };
+    var cost = AO.aoc2.moveCost(world, cid, toPid);
+    if (c.aoc.mp < cost) return { ok: false, msg: '移动点不够（需 ' + cost + '，剩 ' + c.aoc.mp + '）' };
+    c.aoc.mp -= cost;
+
+    a.aoc.army -= n;
+    if (a.aoc.army <= 0) { a.aoc.army = 0; a.aoc.armyOf = 0; }
+
+    if (!hostile) {
+      /* 友方/自己的省：并进去 */
+      if (b.aoc.army > 0 && (b.aoc.armyOf || b.owner) !== cid) {
+        /* 理论上不会发生（敌对会走 hostile 分支），保守处理成拒绝 */
+        a.aoc.army += n; c.aoc.mp += cost;
+        return { ok: false, msg: '目标省有别的国家的兵' };
+      }
+      b.aoc.army = (b.aoc.army || 0) + n;
+      b.aoc.armyOf = cid;
+      return { ok: true, moved: n, cost: cost, msg: '移动 ' + n.toLocaleString() + ' 兵（' + cost + ' 移动点）' };
+    }
+
+    /* 敌对：打 */
+    var r = battle(world, cid, b, n);
+    if (r.occupied) {
+      occupyProvince(world, cid, b, r.remain);
+      r.msg = '攻占 ' + b.name + '：歼敌 ' + (r.defLoss || 0).toLocaleString() +
+        '，自损 ' + (r.atkLoss || 0).toLocaleString() + '，驻军 ' + r.remain.toLocaleString();
+    } else if (r.retreat) {
+      /* 残兵退回出发省 */
+      a.aoc.army += (r.remain || 0);
+      a.aoc.armyOf = cid;
+    }
+    if (!r.occupied && r.won === false && !r.retreat) {
+      /* 攻方全灭：什么也不回 */
+    }
+    r.from = fromPid; r.to = toPid; r.cost = cost;
+    return r;
+  };
+
+  /* 解散军队：只回填约 1/20 人口（第二章"撤编损耗人口"） */
+  AO.aoc2.disband = function (world, cid, pid, n) {
+    var c = world.countries[cid - 1], p = world.provinces[pid - 1];
+    if (!c || !p || !p.aoc) return { ok: false, msg: '目标不存在' };
+    if (armyOwnerOf(p) !== cid) return { ok: false, msg: '这省没有你的兵' };
+    n = Math.floor(n || p.aoc.army);
+    n = Math.min(n, p.aoc.army);
+    if (n <= 0) return { ok: false, msg: '没有兵可解散' };
+    p.aoc.army -= n;
+    if (p.aoc.army <= 0) { p.aoc.army = 0; p.aoc.armyOf = 0; }
+    p.aoc.pop[cid] = (p.aoc.pop[cid] || 0) + n / 20;
+    p.population = Math.round(totalPop(p));
+    return { ok: true, msg: '解散 ' + n.toLocaleString() + ' 人，回填 ' +
+      Math.round(n / 20).toLocaleString() + ' 人口', n: n };
+  };
+
+  /* ---------------- 掠夺（第十二章 / 第二十一章） ---------------- */
+  AO.aoc2.plunder = function (world, cid, pid) {
+    var c = world.countries[cid - 1], p = world.provinces[pid - 1];
+    if (!c || !p || !p.aoc) return { ok: false, msg: '目标不存在' };
+    if (p.aoc.occupied !== cid) return { ok: false, msg: '只能掠夺自己占领的省' };
+    if (!(p.aoc.army > 0)) return { ok: false, msg: '这省没有驻军，抢不了' };
+    if (c.aoc.mp < AOC2.MP_COST.plunder) return { ok: false, msg: '移动点不够' };
+    c.aoc.mp -= AOC2.MP_COST.plunder;
+    var troops = p.aoc.army;
+    var gold = Math.round(troops * AOC2.PLUNDER_GOLD);
+    var rate = Math.min(0.20, troops / Math.max(1, totalPop(p)) * AOC2.PLUNDER_RATE);
+    for (var k in p.aoc.pop) p.aoc.pop[k] = Math.max(0, p.aoc.pop[k] * (1 - rate));
+    p.aoc.econ = Math.max(1, p.aoc.econ * (1 - rate));
+    p.aoc.happy = clamp(p.aoc.happy - AOC2.PLUNDER_HAPPY, AOC2.HAPPY_MIN, AOC2.HAPPY_MAX);
+    p.population = Math.round(totalPop(p));
+    c.aoc.treasury += gold;
+    return { ok: true, msg: '掠夺 ' + p.name + '：+' + gold.toLocaleString() + ' 金（人口 −' +
+      (rate * 100).toFixed(1) + '%）', gold: gold };
+  };
+
+  /* ---------------- 战争分数（第十二章） ---------------- */
+  AO.aoc2.warScore = function (world, a, b) {
+    var ca = world.countries[a - 1], cb = world.countries[b - 1];
+    if (!ca || !cb || !ca.aoc || !cb.aoc) return 0;
+    var occA = 0, occB = 0, i, p;
+    for (i = 0; i < cb.provinces.length; i++) {
+      p = world.provinces[cb.provinces[i] - 1];
+      if (p && p.aoc && p.aoc.occupied === a) occA++;
+    }
+    for (i = 0; i < ca.provinces.length; i++) {
+      p = world.provinces[ca.provinces[i] - 1];
+      if (p && p.aoc && p.aoc.occupied === b) occB++;
+    }
+    var totalB = Math.max(1, cb.provinces.length), totalA = Math.max(1, ca.provinces.length);
+    /* clamp(v, lo, hi) —— 顺序别写反：写反了恒等于 lo，战争分永远 100 */
+    return clamp(occA / totalB * 100 - occB / totalA * 50, 0, 100);
+  };
+
+  /* 割让：把一个省从原主转给新主（和约割地 / 转让控制权都用它） */
+  AO.aoc2.transfers = 0;      // 割地次数（UI 拿它判断"版图变了，得重建路径"）
+  AO.aoc2.transferProvince = function (world, pid, toCid) {
+    var p = world.provinces[pid - 1];
+    if (!p) return false;
+    var fromCid = p.owner;
+    if (fromCid === toCid) return false;
+    var from = world.countries[fromCid - 1], to = world.countries[toCid - 1];
+    if (from && from.aoc) {
+      var idx = from.provinces.indexOf(pid);
+      if (idx >= 0) from.provinces.splice(idx, 1);
+      if (from.capital === pid) from.capital = 0;
+    }
+    if (to && to.aoc) {
+      if (to.provinces.indexOf(pid) < 0) {
+        to.provinces.push(pid);
+        to.provinces.sort(function (x, y) { return x - y; });
+      }
+    }
+    p.owner = toCid;
+    p.ownerName = to ? to.name : '';
+    p.ownerColor = to ? to.color : '#999999';
+    p.aoc.occupied = 0;
+    if (p.aoc.army > 0) p.aoc.armyOf = toCid;
+    if (from) {
+      if (!from.provinces.length) from.aoc.alive = false;
+      AO.aoc2.recomputeCountry(world, from);
+    }
+    if (to) AO.aoc2.recomputeCountry(world, to);
+    AO.aoc2.transfers++;
+    return true;
+  };
+
+  /* ---------------- 和谈（第十二章） ---------------- */
+  /* terms: 'white' 白和平 / 'land' 割让被占省 / 'reparations' 赔款 */
+  AO.aoc2.peace = function (world, a, b, terms, opts) {
+    opts = opts || {};
+    var ca = world.countries[a - 1], cb = world.countries[b - 1];
+    if (!ca || !cb || !ca.aoc || !cb.aoc) return { ok: false, msg: '国家不存在' };
+    if (!AO.aoc2.atWar(world, a, b)) return { ok: false, msg: '并没有在交战' };
+    var score = AO.aoc2.warScore(world, a, b);
+    var foeWear = cb.aoc.wear || 0;
+    /* 谁接受什么（第十二章"偏向值到 100 → 所有要求被接受"的落地）：
+     *   白和平：占不到便宜的一方（分数 < 40）没资格要求停火 —— 赢家不白给；
+     *           除非赢家自己也打疲了（厌战 ≥70%）。
+     *   割地  ：全境被占（100）必接受；60 分以上且对方厌战 ≥70% 也认。
+     *   赔款  ：50 分以上，或 30 分 + 对方厌战 ≥80%。 */
+    var accept;
+    if (terms === 'white') accept = score >= 40 || foeWear >= 0.7;
+    else if (terms === 'land') accept = score >= 100 || (score >= 50 && foeWear >= 0.7);
+    else if (terms === 'reparations') accept = score >= 50 || (score >= 30 && foeWear >= 0.8);
+    else accept = false;
+    if (opts.force) accept = true;
+    if (!accept) {
+      return { ok: false, refused: true,
+        msg: cb.name + ' 拒绝和谈（战争分 ' + Math.round(score) + '，对方厌战 ' +
+          Math.round(foeWear * 100) + '%）' };
+    }
+    var out = { ok: true, score: score, terms: terms, ceded: 0, gold: 0 };
+    if (terms === 'land') {
+      /* 割让「被占领的」省：只割当前被 A 占着的 B 的省 */
+      var list = [], i, p;
+      for (i = 0; i < cb.provinces.length; i++) {
+        p = world.provinces[cb.provinces[i] - 1];
+        if (p && p.aoc && p.aoc.occupied === a) list.push(p.id);
+      }
+      for (i = 0; i < list.length; i++) {
+        if (AO.aoc2.transferProvince(world, list[i], a)) out.ceded++;
+      }
+    } else if (terms === 'reparations') {
+      var grossB = (cb.aoc.last && cb.aoc.last.gross) || 0;
+      out.gold = Math.min(Math.round(cb.aoc.treasury), Math.round(grossB * 3));
+      cb.aoc.treasury -= out.gold;
+      ca.aoc.treasury += out.gold;
+    }
+    /* 白和平 / 赔款：占着的省要还回去（规则书第十二章只有"割让"会换归属）。
+     * 占领军就地解散 —— 这支兵没有"遣返"这条路可走（遣返是军事通行权的事，
+     * 阶段四才有），留着会变成"和平时期一支外国军队驻在你家里"的怪状态。 */
+    if (terms !== 'land') {
+      var all = [ca, cb], ai2, pi2, pp;
+      for (ai2 = 0; ai2 < 2; ai2++) {
+        var cc = all[ai2], other = all[1 - ai2];
+        for (pi2 = 0; pi2 < cc.provinces.length; pi2++) {
+          pp = world.provinces[cc.provinces[pi2] - 1];
+          if (pp && pp.aoc && pp.aoc.occupied === other.id) {
+            pp.aoc.occupied = 0;
+            if ((pp.aoc.armyOf || 0) === other.id) { pp.aoc.army = 0; pp.aoc.armyOf = 0; }
+          }
+        }
+      }
+    }
+
+    /* 结束战争：关系回 0，停战 30 回合（第十二章） */
+    AO.aoc2.setRel(world, a, b, 0);
+    ca.aoc.truce = ca.aoc.truce || {}; cb.aoc.truce = cb.aoc.truce || {};
+    ca.aoc.truce[b] = (world.turn || 1) + AOC2.PEACE_TRUCE;
+    cb.aoc.truce[a] = (world.turn || 1) + AOC2.PEACE_TRUCE;
+    delete ca.aoc.warStart[b]; delete cb.aoc.warStart[a];
+    ca.aoc.wear = Math.max(0, (ca.aoc.wear || 0) - 0.3);
+    cb.aoc.wear = Math.max(0, (cb.aoc.wear || 0) - 0.3);
+    out.msg = (terms === 'white' ? '白和平' : terms === 'land' ? '割让 ' + out.ceded + ' 省' :
+      '赔款 ' + out.gold.toLocaleString() + ' 金') + '：' + ca.name + ' × ' + cb.name +
+      '（停战 ' + AOC2.PEACE_TRUCE + ' 回合）';
+    return out;
+  };
+
+  /* ---------------- 回合末的战争段 ---------------- */
+  function settleWar(world, opts) {
+    var ci, c, A;
+
+    /* ① 征兵到货（正常价的兵下一回合到位） */
+    for (ci = 0; ci < world.countries.length; ci++) {
+      c = world.countries[ci];
+      if (!c || !c.aoc || !c.aoc.alive) continue;
+      A = c.aoc;
+      if (!A.rq || !A.rq.length) continue;
+      for (var i = 0; i < A.rq.length; i++) {
+        var it = A.rq[i], p = world.provinces[it.pid - 1];
+        if (p && p.owner === c.id && !p.aoc.occupied) {
+          p.aoc.army = (p.aoc.army || 0) + it.n;
+          p.aoc.armyOf = c.id;
+        }
+        /* 省丢了：兵不发了（钱已经扣过，这是征兵的代价） */
+      }
+      A.rq = [];
+    }
+
+    /* ② 厌战：战时上升、和平回落（第九章） */
+    for (ci = 0; ci < world.countries.length; ci++) {
+      c = world.countries[ci];
+      if (!c || !c.aoc || !c.aoc.alive) continue;
+      A = c.aoc;
+      var wars = AO.aoc2.warsOf(world, c.id);
+      if (wars.length) A.wear = Math.min(1, (A.wear || 0) + AOC2.WEAR_RISE);
+      else A.wear = Math.max(0, (A.wear || 0) - AOC2.WEAR_FALL);
+      A.wars = wars.length;
+    }
+
+    /* ③ AI 的战争行为（玩家国不自动行动；opts.ai === false 时整段关掉，
+     * 给单测和探针一个"世界不动、只有我动"的干净场景） */
+    if (opts.ai === false) return;
+    for (ci = 0; ci < world.countries.length; ci++) {
+      c = world.countries[ci];
+      if (!c || !c.aoc || !c.aoc.alive) continue;
+      if (opts.player === c.id) continue;
+      aiWarTick(world, c, opts);
+    }
+  }
+
+  function hashRoll(world, cid, salt) {
+    var h = AO.hashString('aiwar:' + (world.turn || 1) + ':' + cid + ':' + (salt || '')) >>> 0;
+    return (h % 1000) / 10;      // 0.0 ~ 99.9
+  }
+
+
+  /* AI 把后方的兵往战线挪：AoC2 里没有"前线"这个概念，但 AI 如果只会从
+   * 与敌省相邻的省出击，兵招在内陆就永远走不到战场 —— 实测一场仗 20 回合
+   * 双方兵力一动不动、只占了 2 个省。这里用一次 BFS 算出每个自省到前线的
+   * 跳数，然后让后方的兵往跳数更小的邻省走一步（每回合每支兵走一跳）。 */
+  function aiMarch(world, c) {
+    var own = Object.create(null), i, k, p;
+    for (i = 0; i < c.provinces.length; i++) own[c.provinces[i]] = 1;
+    var dist = Object.create(null), queue = [];
+    for (i = 0; i < c.provinces.length; i++) {
+      p = world.provinces[c.provinces[i] - 1];
+      if (!p || p.aoc.occupied) continue;
+      for (k = 0; k < p.neighbors.length; k++) {
+        var q = world.provinces[p.neighbors[k] - 1];
+        if (!q) continue;
+        var o = q.aoc.occupied || q.owner;
+        if (o !== c.id && AO.aoc2.atWar(world, c.id, o)) { dist[p.id] = 0; queue.push(p.id); break; }
+      }
+    }
+    if (!queue.length) return;
+    for (var h = 0; h < queue.length; h++) {
+      var id = queue[h], pp = world.provinces[id - 1];
+      for (k = 0; k < pp.neighbors.length; k++) {
+        var nid = pp.neighbors[k];
+        if (own[nid] && dist[nid] === undefined) { dist[nid] = dist[id] + 1; queue.push(nid); }
+      }
+    }
+    for (i = 0; i < c.provinces.length; i++) {
+      p = world.provinces[c.provinces[i] - 1];
+      if (!p || p.aoc.occupied || armyOwnerOf(p) !== c.id || p.aoc.army < AOC2.OCCUPY_MIN_TROOPS) continue;
+      var d = dist[p.id];
+      if (d === undefined || d === 0) continue;
+      for (k = 0; k < p.neighbors.length; k++) {
+        var nid2 = p.neighbors[k];
+        if (!own[nid2] || dist[nid2] !== d - 1) continue;
+        if (AO.aoc2.move(world, c.id, p.id, nid2, p.aoc.army).ok) break;
+      }
+    }
+  }
+
+  /* AI：招兵 → 行军 → 打 → 谈 → 宣战。都是"能解释的一步"，不追求聪明。 */
+  function aiWarTick(world, c, opts) {
+    var A = c.aoc, g = govOf(c);
+    if (!A.alive || !c.provinces.length) return;
+    var enemies = AO.aoc2.warsOf(world, c.id);
+
+    /* ① 打不动了就和谈：厌战高 + 战争分低 */
+    if (enemies.length) {
+      var worst = 0, worstScore = 101;
+      for (var e = 0; e < enemies.length; e++) {
+        var sc = AO.aoc2.warScore(world, c.id, enemies[e]);
+        if (sc < worstScore) { worstScore = sc; worst = enemies[e]; }
+      }
+      /* 打崩了对方（100 分）就割地；自己快撑不住就白和平 */
+      /* 不能替玩家决定和平：对面是玩家就只打不谈（玩家自己开谈判桌） */
+      var worstIsPlayer = opts.player === worst;
+      var foeWear = (world.countries[worst - 1] || { aoc: {} }).aoc.wear || 0;
+      /* 赢了就割地：全境占领必割；打到 60 分且对方厌战 ≥70% 也能割。
+       * 只有"自己快撑不住且没占到便宜"才白和平。 */
+      if (!worstIsPlayer && (worstScore >= 100 || (worstScore >= 50 && foeWear >= 0.7))) {
+        var pr = AO.aoc2.peace(world, c.id, worst, 'land');
+        if (pr.ok) return;
+      }
+      if (!worstIsPlayer && (A.wear || 0) >= 0.75 && worstScore < 25 &&
+        hashRoll(world, c.id, 'peace') < 60) {
+        AO.aoc2.peace(world, c.id, worst, 'white');
+        return;
+      }
+    }
+
+    /* ② 招兵：目标兵力 = 人口 × 1%（占位）；钱够就在人口最多的省招 */
+    var total = armyOf(world, c.id);
+    var target = A.pop * AOC2.AI_ARMY_RATIO;
+    if (total < target && A.treasury > 5000 && A.mp >= 1) {
+      /* 优先招在边境省：招在内陆的话，兵要一跳一跳往前挪，
+       * 移动点又不够，结果整场仗一个省都占不下来（实测灭国 0）。 */
+      var bestP = null, bestScore = -1;
+      for (var i = 0; i < c.provinces.length; i++) {
+        var q = world.provinces[c.provinces[i] - 1];
+        if (!q || q.aoc.occupied) continue;
+        var border = 0;
+        for (var bi = 0; bi < q.neighbors.length; bi++) {
+          var nb0 = world.provinces[q.neighbors[bi] - 1];
+          if (nb0 && nb0.owner !== c.id) border = 1;
+        }
+        var sc0 = totalPop(q) * (border ? 3 : 1);
+        if (sc0 > bestScore) { bestScore = sc0; bestP = q; }
+      }
+      if (bestP) {
+        var n = Math.min(AOC2.RECRUIT_BATCH, Math.max(100, Math.round((target - total) / 2)));
+        var r = AO.aoc2.recruit(world, c.id, bestP.id, n, false);
+        if (!r.ok) {
+          /* 钱不够就少招一点，别每回合白试 */
+          AO.aoc2.recruit(world, c.id, bestP.id, Math.max(50, Math.floor(n / 4)), false);
+        }
+      }
+    }
+
+    /* ②b 复员：和平时期还欠着债，就裁掉两成兵（军费是最大的固定支出）。
+     * 没有这一步，AI 会在每场仗后留着一支养不起的常备军，利息一路滚下去。 */
+    if (!enemies.length && (A.loans > 0 || A.treasury < 1000) && total > target * 0.5) {
+      var cut = Math.round(total * 0.2), guard2 = 0;
+      for (var qi = 0; qi < c.provinces.length && cut > 0 && guard2++ < 40; qi++) {
+        var qp = world.provinces[c.provinces[qi] - 1];
+        if (!qp || !qp.aoc || armyOwnerOf(qp) !== c.id || !(qp.aoc.army > 0)) continue;
+        var take = Math.min(cut, Math.floor(qp.aoc.army * 0.5));
+        qp.aoc.army -= take; cut -= take;
+        if (qp.aoc.army <= 0) { qp.aoc.army = 0; qp.aoc.armyOf = 0; }
+      }
+    }
+
+    /* ③ 进攻：先把后方的兵挪到前线，移动点还够就继续推（一回合最多 3 次） */
+    if (enemies.length) {
+      aiMarch(world, c);
+      for (var round = 0; round < 3; round++) {
+        var moved = false;
+        for (var pi = 0; pi < c.provinces.length && !moved; pi++) {
+          var p = world.provinces[c.provinces[pi] - 1];
+          if (!p || !p.aoc || armyOwnerOf(p) !== c.id || p.aoc.army < AOC2.OCCUPY_MIN_TROOPS) continue;
+          for (var k = 0; k < p.neighbors.length; k++) {
+            var nb = world.provinces[p.neighbors[k] - 1];
+            if (!nb || !nb.aoc) continue;
+            var owner = nb.aoc.occupied || nb.owner;
+            if (owner === c.id) continue;
+            if (!AO.aoc2.atWar(world, c.id, owner)) continue;
+            var send = Math.max(AOC2.OCCUPY_MIN_TROOPS, Math.floor(p.aoc.army * 0.8));
+            if (send > p.aoc.army) send = p.aoc.army;
+            var mv = AO.aoc2.move(world, c.id, p.id, nb.id, send);
+            if (mv.ok) { moved = true; break; }
+          }
+        }
+        if (!moved) break;
+      }
+      return;
+    }
+
+    /* ④ 宣战：有兵、有外交点、有更弱的邻国 */
+    if ((world.turn || 1) <= AOC2.WAR_BAN_TURNS) return;
+    if (A.dip < AOC2.WAR_DIP_COST) return;
+    if (total < Math.max(200, target * 0.6)) return;
+    if (hashRoll(world, c.id, 'war') > AOC2.AI_WAR_CHANCE * AOC2.AI_AGGRO) return;
+
+    var best = 0, bestRatio = 1;
+    for (var ni = 0; ni < (c.neighbors || []).length; ni++) {
+      var nc = world.countries[c.neighbors[ni] - 1];
+      if (!nc || !nc.aoc || !nc.aoc.alive || nc.id === c.id) continue;
+      if (AO.aoc2.atWar(world, c.id, nc.id)) continue;
+      if (AO.aoc2.truceLeft(world, c.id, nc.id) > 0) continue;
+      var theirArmy = armyOf(world, nc.id);
+      var ratio = theirArmy / Math.max(1, total);
+      if (ratio < bestRatio) { bestRatio = ratio; best = nc.id; }
+    }
+    if (best && bestRatio < 0.7) AO.aoc2.declareWar(world, c.id, best);
+  }
 
   /* =============================================================
    * ⑤ 敕令（规则书第二十一章；本阶段三条）
@@ -582,8 +1277,16 @@
   /* =============================================================
    * ⑥ 存档：只存 AoC2 自己的那几张表（v7 起）
    * ============================================================= */
+  /* 存档要**拷贝**关系/停战/征兵队列：直接塞引用的话，存完之后玩家再改关系，
+   * 快照里的值会跟着变（读档读出"存完之后"的状态，等于没存）。 */
+  function cloneMap(o) {
+    var r = {}, k;
+    for (k in o) if (Object.prototype.hasOwnProperty.call(o, k)) r[k] = o[k];
+    return r;
+  }
+
   AO.aoc2.save = function (world) {
-    var out = { p: {}, c: {} }, i, p, c;
+    var out = { t: world.turn || 1, p: {}, c: {} }, i, p, c;
     for (i = 0; i < world.provinces.length; i++) {
       p = world.provinces[i];
       if (!p || !p.aoc) continue;
@@ -595,6 +1298,8 @@
         r: Math.round(p.aoc.revolt * 10) / 10,
         g: Math.round(p.aoc.growth * 100000) / 100000,
         o: p.aoc.occupied | 0,
+        y: p.aoc.army | 0,
+        yw: p.aoc.armyOf | 0,
         f: Math.round((p.aoc.fest || 0) * 100) / 100,
         n: p.aoc.pop,
         k: p.aoc.core
@@ -612,7 +1317,11 @@
         mp: c.aoc.mp, dp: c.aoc.dip,
         rp: Math.round(c.aoc.rp * 100) / 100,
         ip: Math.round(c.aoc.investPool),
-        al: c.aoc.alive ? 1 : 0
+        al: c.aoc.alive ? 1 : 0,
+        rel: cloneMap(c.aoc.rel || {}),
+        truce: cloneMap(c.aoc.truce || {}),
+        wear: Math.round((c.aoc.wear || 0) * 1000) / 1000,
+        rq: (c.aoc.rq || []).map(function (x) { return { pid: x.pid, n: x.n }; })
       };
     }
     return out;
@@ -621,6 +1330,7 @@
   AO.aoc2.load = function (world, data) {
     if (!data) return world;
     var i, p, c, s;
+    if (data.t) world.turn = data.t;
     for (i = 0; i < world.provinces.length; i++) {
       p = world.provinces[i];
       if (!p) continue;
@@ -634,6 +1344,8 @@
       p.aoc.revolt = s.r || 0;
       p.aoc.growth = s.g || 0;
       p.aoc.occupied = s.o || 0;
+      p.aoc.army = s.y || 0;
+      p.aoc.armyOf = s.yw || 0;
       p.aoc.fest = s.f || 0;
       p.aoc.pop = s.n || p.aoc.pop;
       p.aoc.core = s.k || p.aoc.core;
@@ -655,6 +1367,10 @@
       c.aoc.rp = s.rp || 0;
       c.aoc.investPool = s.ip || 0;
       c.aoc.alive = s.al !== 0;
+      c.aoc.rel = s.rel || {};
+      c.aoc.truce = s.truce || {};
+      c.aoc.wear = s.wear || 0;
+      c.aoc.rq = s.rq || [];
       AO.aoc2.recomputeCountry(world, c);
     }
     return world;
@@ -668,7 +1384,9 @@
       if (!c || !c.aoc) continue;
       out.push({
         id: c.id, name: c.name, treasury: c.aoc.treasury, loans: c.aoc.loans,
-        happy: c.aoc.happy, stab: c.aoc.stab, pop: c.aoc.pop, econ: c.aoc.econ
+        happy: c.aoc.happy, stab: c.aoc.stab, pop: c.aoc.pop, econ: c.aoc.econ,
+        army: armyOf(world, c.id), wear: c.aoc.wear || 0,
+        wars: (AO.aoc2.warsOf(world, c.id) || []).length, alive: !!c.aoc.alive
       });
     }
     return out;

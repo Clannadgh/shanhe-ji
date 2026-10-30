@@ -578,6 +578,16 @@
     this.requestDraw();
   };
 
+  /* 版图变了（和约割地）之后重建路径：**不 fit** —— 玩家正看着的地方不能被
+   * 一次割地拽回全图。只丢缓存 + 重算几何 + 重画。 */
+  Renderer.prototype.refreshGeometry = function () {
+    this.provPaths.clear();
+    this.countryPaths = new Map();
+    this._buildGeometry();
+    this._needBase = true;
+    this.requestDraw();
+  };
+
   /* 重算前先把上一个世界的引用和 Path2D 全丢掉。
    * 一个 2400×1200 / 1100 省的世界在渲染层持有几十 MB（Path2D 是原生对象），
    * 不清掉的话下一次生成要在这个大堆里做分配和标记，耗时直接翻 3 倍。 */
@@ -920,6 +930,8 @@
         ctx.fillStyle = c.color;
         ctx.fill(path, 'nonzero');
       }
+      /* 占领省（规则书第一章：地图上画阴影线）：压一层占领方的颜色 + 斜线 */
+      this._drawOccupation(ctx);
     }
 
     // 2) 河流：细蓝线，按水量分四档粗细
@@ -1193,6 +1205,44 @@
      * 放在最后画 —— 军旗要压在所有高亮之上，不然选中的省一填色旗就看不见了。
      * 用回调而不是在这里直写：渲染层不该知道"军队"这个概念（它只管画）。 */
     if (AO.drawWarLayer) AO.drawWarLayer(ctx, this);
+  };
+
+  Renderer.prototype._drawOccupation = function (ctx) {
+    var w = this.world;
+    if (!w || !w.provinces) return;
+    var hat = null;
+    try {
+      if (!this._hatchPat) {
+        var cv = document.createElement('canvas');
+        cv.width = 8; cv.height = 8;
+        var g = cv.getContext('2d');
+        g.strokeStyle = 'rgba(24,28,32,0.55)';
+        g.lineWidth = 1.6;
+        g.beginPath();
+        g.moveTo(-2, 6); g.lineTo(6, -2);
+        g.moveTo(2, 10); g.lineTo(10, 2);
+        g.stroke();
+        this._hatchPat = ctx.createPattern(cv, 'repeat');
+      }
+      hat = this._hatchPat;
+    } catch (e) { hat = null; }
+    for (var i = 0; i < w.provinces.length; i++) {
+      var p = w.provinces[i];
+      if (!p || !p.aoc || !p.aoc.occupied) continue;
+      var path = this._provPath(p.id);
+      if (!path) continue;
+      var c = w.countries[p.aoc.occupied - 1];
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = c ? c.color : '#8a8a8a';
+      ctx.fill(path, 'nonzero');
+      if (hat) {
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = hat;
+        ctx.fill(path, 'nonzero');
+      }
+      ctx.restore();
+    }
   };
 
   Renderer.prototype._provPath = function (id) {
