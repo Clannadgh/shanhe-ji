@@ -726,10 +726,6 @@
       c.capital = best;
     }
 
-    /* --- 全国资源汇总（15-resources 提供；脚本顺序上它在本文件之后，
-     * 但这段只在运行时（涂色）才跑，那时一定已经定义好了） --- */
-    if (AO.aggCountryResources) AO.aggCountryResources(c, provinces);
-
     return c;
   };
 

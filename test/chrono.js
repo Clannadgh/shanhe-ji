@@ -153,7 +153,7 @@ const COLOR_COUNT = `(cv) => {
    * 不是这一局恰好有没有事发生。 */
   for (let i = 0; i < 5; i++) {
     await page.evaluate((k) => {
-      if (AO.evtPending()) AO.evtPick(0);
+      /* 事件池已随阶段三之前的换血退役：这里不再需要"先处置事件再走回合" */
       AO.resDebug.notes().push({
         owner: AO.resDebug.player(), cls: 'ok',
         text: k === 0 ? '⚑ 测试：天有异象，史官记之' : '测试纪要 ' + k
@@ -230,7 +230,17 @@ const COLOR_COUNT = `(cv) => {
   ck('统一全图 → 记 flag 并自动弹史书', unify.mode === 1 && unify.open, 'flag=' + unify.mode + ' open=' + unify.open);
   ck('「天下归一」进 NOTES 且进年表', unify.note === 1 && unify.wt === 1, 'NOTES ' + unify.note + ' / 年表 ' + unify.wt);
 
-  /* 折叠：这一年条目远超 14 条 —— 应该有「展卷」 */
+  /* 折叠：这一年条目远超 14 条 —— 应该有「展卷」。
+   * 现在的规则层一回合只产出一条纪要（国库收支），一个自然年凑不满 14 条，
+   * 所以这里手工塞 20 条再走一回合 —— 测的是**排版折叠**，不是这一局忙不忙。 */
+  await page.evaluate(() => {
+    for (let i = 0; i < 20; i++) {
+      AO.resDebug.notes().push({ owner: AO.resDebug.player(), cls: 'ok', text: '测试条目 ' + i });
+    }
+    AO.resDebug.nextTurn();
+    if (AO.chronoRefresh) AO.chronoRefresh();
+  });
+  await sleep(300);
   const fold = await page.evaluate(() => {
     const sec = [...document.querySelectorAll('#chYears .chy')].find(s => s.classList.contains('cut'));
     if (!sec) return [false, 0, 0];
@@ -258,7 +268,6 @@ const COLOR_COUNT = `(cv) => {
   ck('统一只播报一次（不重复触发）', twice[0] === 1 && twice[1] === 1, twice.join('→'));
 
   /* ================= ⑤ 定稿 + 称号 + 印章 ================= */
-  await page.evaluate(() => { if (AO.evtPending()) AO.evtPick(0); });
   await page.evaluate(() => { if (!AO.chronoIsOpen()) AO.chronoOpen(); });
   await sleep(400);
   const fin = await page.evaluate(() => {
@@ -405,6 +414,7 @@ const COLOR_COUNT = `(cv) => {
   ck('读档后定稿三图仍能画出来', restored.length === 3 && restored.every(n => n > 60), restored.join('/'));
 
   /* 旧档（v6 及以下）→ **拒读**并提示 legacy-v19（阶段一换血后的新政策） */
+  const beforeOld = await page.evaluate(() => ({ years: AO.chronoYearLog().length, turn: AO.resDebug.turn() }));
   const old = await page.evaluate(() => {
     const raw = JSON.parse(localStorage.getItem(AO.SAVE_KEY));
     raw.v = 4;
@@ -422,7 +432,7 @@ const COLOR_COUNT = `(cv) => {
     turn: AO.resDebug.turn()
   }));
   ck('读 v6 旧档：拒读，年表保持原样、世界不重建',
-    old && oldLoad.years === 8 && oldLoad.turn === 8,
+    old && oldLoad.years === beforeOld.years && oldLoad.turn === beforeOld.turn,
     JSON.stringify(oldLoad) + '（旧档被挡在版本闸门外）');
 
   /* ================= ⑧ 灭亡：亡国史书 + 悲情末帝 ================= */

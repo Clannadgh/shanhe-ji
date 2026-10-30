@@ -488,14 +488,6 @@
     });
     marks.society = AO.now() - tS;
 
-    /* ---------- 8c. 资源发牌（省挂了 resource / 国家汇总 resources） ----------
-     * 独立支流：fork 只做哈希派生、不消耗父流，所以加这一段不会位移
-     * 前面任何随机数 —— 大陆形状、国家、名字、世界指纹全部保持不变。
-     * 资源是新增字段，不进 worldHash。 */
-    var tRs = AO.now();
-    AO.assignResources({ provinces: provinces, countries: countries, coast: coastInfo }, rng.fork('resources'));
-    marks.resources = AO.now() - tRs;
-
     /* ---------- 9. 环方向规范化 ----------
      * 外环正向、洞反向。渲染时用 nonzero 填充整国路径：
      * 同国相邻两省共享的那条边在两侧方向相反、绕数相加而不是相消，

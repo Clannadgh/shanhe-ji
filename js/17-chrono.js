@@ -308,61 +308,49 @@
     return best || 1;
   }
 
+  /* =============================================================
+   * 编年史的数据：全部从 AoC2 的省/国字段读
+   *
+   * 旧版这里读的是 POP / CENTRAL / SCHOOL / RESEARCH / ARMY 五张表 ——
+   * 那些表随换血一起退役了，继续读只会得到 undefined（渲染时 toFixed 炸）。
+   * 现在：人口取国籍表、国库取 treasury、军队取 armyOf、占领取 occupied。
+   * 学校 / 科技是阶段四的事，这里先老实写 0，不编数。
+   * ============================================================= */
   function dataOf(cid) {
     var world = B.world(), t = B.turn() | 0;
     var c = world.countries[cid - 1] || null;
     var provinces = world.provinces, total = provinces.length, i, p;
-    var own = 0, per = Object.create(null), pop = 0;
+    var own = 0, per = Object.create(null), pop = 0, occN = 0, men = 0;
+    var menBy = Object.create(null);
+
     for (i = 0; i < provinces.length; i++) {
       p = provinces[i];
-      if (!p) continue;
+      if (!p || !p.aoc) continue;
       per[p.owner] = (per[p.owner] || 0) + 1;
+      var tp = 0, k;
+      for (k in p.aoc.pop) tp += p.aoc.pop[k] || 0;
+      if (p.aoc.army > 0) {
+        var ao = p.aoc.armyOf || p.owner;
+        menBy[ao] = (menBy[ao] || 0) + p.aoc.army;
+      }
+      if (p.aoc.occupied === cid) occN++;
       if (p.owner !== cid) continue;
       own++;
-      var s = B.pop()[p.id];
-      pop += (s && s.v) || p.population || 0;
-    }
-    /* 排名：比自己省多 / 钱多的国家有几个（0 就是第一） */
-    var moreN = 0, moreG = 0, cc, gold = 0;
-    var cen = B.central();
-    gold = (cen[cid] && cen[cid].gold) || 0;
-    for (i = 0; i < world.countries.length; i++) {
-      cc = world.countries[i];
-      if (cc.id === cid) continue;
-      if ((per[cc.id] || 0) > own) moreN++;
-      var g2 = (cen[cc.id] && cen[cc.id].gold) || 0;
-      if (g2 > gold) moreG++;
-    }
-    /* 教育：学校座数 + 人才点（两个都来自"办学校"这一条线，合起来才像"文教总量"） */
-    var school = B.school(), eduN = 0;
-    for (i = 0; i < provinces.length; i++) {
-      p = provinces[i];
-      if (p && p.owner === cid && school[p.id]) eduN += school[p.id].n || 0;
-    }
-    var tal = B.talent()[cid];
-    var eduPts = (tal && tal.pts) || 0;
-    var R = B.research()[cid] || {};
-    var techN = R.done ? Object.keys(R.done).length : 0;
-    var techTotal = (AO.TECHS || []).length;
-    /* 常备军 + 军力排名 */
-    var army = B.army(), men = 0, menBy = Object.create(null), aid;
-    for (aid in army) {
-      var a = army[aid];
-      if (!a) continue;
-      menBy[a.owner] = (menBy[a.owner] || 0) + (a.men || 0);
+      pop += tp;
     }
     men = menBy[cid] || 0;
-    var moreA = 0;
+
+    /* 排名：比自己省多 / 钱多的国家有几个（0 就是第一） */
+    var moreN = 0, moreG = 0, moreA = 0, cc;
+    var gold = (c && c.aoc) ? c.aoc.treasury : 0;
     for (i = 0; i < world.countries.length; i++) {
       cc = world.countries[i];
-      if (cc.id === cid) continue;
+      if (!cc || cc.id === cid) continue;
+      if ((per[cc.id] || 0) > own) moreN++;
+      if (((cc.aoc && cc.aoc.treasury) || 0) > gold) moreG++;
       if ((menBy[cc.id] || 0) > men) moreA++;
     }
-    /* 占领省（战争中拿在手里、法理上还没割的地） */
-    var occ = B.occupy(), occN = 0;
-    for (var op in occ) {
-      if (occ[op] && occ[op].by === cid) occN++;
-    }
+
     /* 经历战争：年表里"宣战"条目点了名的次数；战报条数另算 */
     var wrN = 0, nm = (c && c.name) || '';
     for (i = 0; i < YL.length; i++) {
@@ -379,16 +367,16 @@
       nameEn: (c && (c.name_en || c.nameEn)) || '',
       leader: (c && c.leader && c.leader.name) || '',
       leaderTitle: (c && c.leader && c.leader.title) || '',
-      gov: (c && c.govCn) || '',
+      gov: (c && c.aoc && AO.AOC2.GOV[c.aoc.gov]) ? AO.AOC2.GOV[c.aoc.gov].cn : ((c && c.govCn) || ''),
       color: (c && c.color) || '#9a9a9a',
       provN: own, provTotal: total,
       areaPct: total ? own * 100 / total : 0,
       areaRank: moreN + 1,
-      pop: pop, gold: gold, goldRank: moreG + 1,
-      edu: eduN + eduPts, eduSchool: eduN, eduPts: eduPts,
-      techN: techN, techTotal: techTotal,
+      pop: pop, gold: Math.round(gold), goldRank: moreG + 1,
+      edu: 0, eduSchool: 0, eduPts: 0,
+      techN: 0, techTotal: 0,
       armyMen: men, armyRank: moreA + 1,
-      happy: B.countryHappy ? B.countryHappy(c) : 0,
+      happy: (c && c.aoc) ? c.aoc.happy : 0,
       warN: wrN, logN: (B.warLog() || []).length,
       occN: occN,
       dead: own === 0
@@ -564,8 +552,11 @@
     if (!B || !B.world()) { if (B && B.toast) B.toast('还没有世界', 1800); return false; }
     ensureDOM();
     if (!built) return false;
-    OPEN = true;
     var el = $('chrono');
+    /* DOM 可能被别的东西清掉（换世界 / 外部脚本动了 body）：
+     * built 是缓存，不能当证据 —— 找不到就重建一次，别在这里炸。 */
+    if (!el) { built = false; ensureDOM(); el = $('chrono'); if (!el) return false; }
+    OPEN = true;
     el.classList.toggle('on', true);
     el.classList.toggle('dead', mode === 'dead');
     if (doc().body) doc().body.classList.add('chrono-open');

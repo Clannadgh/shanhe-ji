@@ -157,6 +157,9 @@
    * "尽量迁移"只会把玩家送进一个半新半旧、两套账都算不清的世界。 */
   AOC2.SAVE_VER = 7;
   AO.SAVE_VER = 7;            // 旧代码 / 测试读的是 AO.SAVE_VER，留个别名
+  /* 存档键：原来定义在 15-resources，换血后搬到这里（测试直接读 AO.SAVE_KEY） */
+  AO.SAVE_KEY = 'sj.save';
+  AO.SAVE_KEY_V1 = 'sj.save.v1';
   AO.AOC2 = AOC2;
 
   /* 读档前的版本闸门：UI 与测试共用同一句话，不许两处各写一份 */
@@ -1374,6 +1377,42 @@
       AO.aoc2.recomputeCountry(world, c);
     }
     return world;
+  };
+
+
+  /* =============================================================
+   * 历法（UI 与编年史共用）
+   *
+   * 一年 12 回合。回合标签**必须带月**：只写年的话，连点十二次「下一回合」
+   * 屏幕上那个字一个都不动 —— 玩家的第一反应是"卡了"。
+   * 这段原来在 15-resources（旧资源层），换血时跟着搬过来。
+   * ============================================================= */
+  var CAL = { perYear: 12 };
+  AO.CAL = CAL;
+  AO.calOf = function (turn) {
+    var t = Math.max(1, (turn | 0) || 1);
+    return {
+      turn: t,
+      year: Math.floor((t - 1) / CAL.perYear) + 1,
+      month: ((t - 1) % CAL.perYear) + 1
+    };
+  };
+  var CN_D = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  AO.cnNum = function (n) {
+    n = n | 0;
+    if (n < 0 || n > 99) return String(n);
+    if (n < 10) return CN_D[n];
+    var t = Math.floor(n / 10), u = n % 10;
+    return (t === 1 ? '十' : CN_D[t] + '十') + (u ? CN_D[u] : '');
+  };
+  AO.calTag = function (turn) {
+    var c = AO.calOf(turn === undefined ? (AO.curTurn ? AO.curTurn() : 1) : turn);
+    return (c.year === 1 ? '元年' : AO.cnNum(c.year) + '年') +
+      (c.month === 1 ? '正' : AO.cnNum(c.month)) + '月';
+  };
+  AO.calLabel = function (turn) {
+    var c = AO.calOf(turn === undefined ? (AO.curTurn ? AO.curTurn() : 1) : turn);
+    return '王国历 ' + c.year + ' 年 ' + c.month + ' 月';
   };
 
   /* 供 UI / 探针读的小结 */

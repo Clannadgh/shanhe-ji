@@ -41,10 +41,6 @@
   var RES_SIDE_FAR = 8;
   /* 近景徽记里放的是什么：'item' = 生图的实物图标（默认），'glyph' = 生图墨字，
    * 'font' = canvas 字体。ASSETS 缺图时会逐级退回。 */
-  var RES_ICON_PX = 28;       // 实物图标烘焙尺寸（屏幕像素，绘制时再缩）
-  var RES_ICON_HALO = 1.8;    // 图标外面的暖白描边（贴纸边）
-  var RES_GLYPH_PX = 11;      // 墨字字号（'glyph' / 'font' 模式）
-  var RES_GLYPH_HALO = 2;
   var RES_BAKE = 4;           // 烘焙倍率
 
   function hexToRgb(hex) {
@@ -119,7 +115,6 @@
     this._moved = 0;
     this.onSelect = null;
     this.onHover = null;
-    this._loadResIcons();
     this._buildGeometry();
     this.resize();
     this.fit();
@@ -170,30 +165,6 @@
     for (i = 0; i < rivers.length; i++) {
       var rv = rivers[i];
       addSmoothPolyline(this.riverPaths[rv.cls] || this.riverPaths[0], rv.pts);
-    }
-
-    /* 宗教视图：按信仰分组，每个信仰一条 Path2D */
-    this.faithPaths = [];
-    for (i = 0; i < 10; i++) this.faithPaths.push(new Path2D());
-    for (i = 0; i < w.provinces.length; i++) {
-      var pvF = w.provinces[i];
-      if (!pvF || pvF.faithIdx === undefined || pvF.faithIdx < 0) continue;
-      var fp = this.faithPaths[pvF.faithIdx];
-      if (!fp) continue;
-      for (k = 0; k < pvF.rings.length; k++) addRing(fp, pvF.rings[k].coords);
-    }
-
-    /* 资源视图：按"主资源"分组，每种资源一条 Path2D（和宗教视图同一个做法）。
-     * 每省的七种储量在省份卡里看，地图上不画图标也不写数字。 */
-    this.resPaths = Object.create(null);
-    var RES = AO.RESOURCES || [];
-    for (i = 0; i < RES.length; i++) this.resPaths[RES[i].key] = new Path2D();
-    for (i = 0; i < w.provinces.length; i++) {
-      var pvR = w.provinces[i];
-      if (!pvR || !pvR.resources || !pvR.resources.length) continue;
-      var rp = this.resPaths[pvR.resources[0].key];
-      if (!rp) continue;
-      for (k = 0; k < pvR.rings.length; k++) addRing(rp, pvR.rings[k].coords);
     }
 
     /* 山体阴影：把灰度场包成一张 canvas。
@@ -605,8 +576,6 @@
     this.provPaths = new Map();
     this.coastPath = null;
     this.borderPath = null;
-    this.faithPaths = null;
-    this.resPaths = null;
     this.terrainPaths = [];
     this.hillCanvas = null;
     this.minimap.width = 1;
@@ -892,20 +861,6 @@
        * 边界那一条还没探过。所以按"显示色"分组填：实时用现行国色，
        * 已探用 LASTSEEN 里那个旧主的颜色，没探过的一律留白（后面铺纸纹）。 */
       this._fillFogPolitical(ctx);
-    } else if (this.viewMode === 'resources' && this.resPaths) {
-      var RESL = AO.RESOURCES || [];
-      for (i = 0; i < RESL.length; i++) {
-        var rpath = this.resPaths[RESL[i].key];
-        if (!rpath) continue;
-        ctx.fillStyle = RESL[i].color;
-        ctx.fill(rpath, 'nonzero');
-      }
-    } else if (this.viewMode === 'faith' && this.faithPaths && this.faithPaths.length) {
-      var FTH = AO.FAITHS || [];
-      for (i = 0; i < this.faithPaths.length; i++) {
-        ctx.fillStyle = (FTH[i] && FTH[i].color) || '#cccccc';
-        ctx.fill(this.faithPaths[i], 'nonzero');
-      }
     } else if (this.viewMode === 'terrain' && this.terrainPaths.length) {
       for (i = 0; i < this.terrainPaths.length; i++) {
         ctx.fillStyle = TERRAIN_COLORS[i] || TERRAIN_COLORS[0];
@@ -998,11 +953,6 @@
       ctx.stroke();
     }
 
-    /* 5b) 资源徽记（资源视图）：省质心上一枚 45° 菱形。
-     * 这是**静态层** —— 画在缓存底图里，进每帧 overlay 的只有悬停/选中。 */
-    /* 5b) 资源标记：默认不画（资源按主资源填色，储量在省份卡里看）。
-     * 想在省上再垫图标，把 15-resources.js 的 AO.RES_MARKS 改成 'icon'。 */
-    if (this.viewMode === 'resources' && AO.RES_MARKS === 'icon') this._drawResourceMarks(ctx, s);
 
     /* 6) 纸纹 + 暗角：回到屏幕坐标铺在最上层。
      * 纸纹用 overlay 混合，只改明暗不动色相，像印在纸上；
@@ -1027,99 +977,8 @@
 
   };
 
-  /* 载入 7 张图标并烘焙。图片是异步的：加载完一张就置一次脏标记，
-   * 底图会自然重绘一次，不需要在别处再触发。缺图（onerror）先退到墨字，
-   * 再失败就保持空表 —— 渲染端会退回 canvas 字体，功能不受影响。 */
-  Renderer.prototype._loadResIcons = function () {
-    this.resIcons = Object.create(null);
-    var mode = AO.RES_ICON || 'item';
-    if (mode === 'font' || !AO.RESOURCES || typeof root.Image === 'undefined') return;
-    var px = mode === 'glyph' ? RES_GLYPH_PX : RES_ICON_PX;
-    var halo = mode === 'glyph' ? RES_GLYPH_HALO : RES_ICON_HALO;
-    var prefix = mode === 'glyph' ? '' : 'item-';
-    var self = this;
-    var list = AO.RESOURCES;
-    for (var i = 0; i < list.length; i++) {
-      (function (res) {
-        var img = new root.Image();
-        img.onload = function () {
-          if (!img.naturalWidth) return;
-          self.resIcons[res.key] = bakeSprite(img, px, halo);
-          self._needBase = true;
-          self.requestDraw();
-        };
-        if (prefix) {
-          img.onerror = function () {           // 实物图标缺失 → 退到墨字
-            img.onerror = null;
-            img.src = 'assets/res/' + res.key + '.png';
-          };
-        }
-        img.src = 'assets/res/' + prefix + res.key + '.png';
-      })(list[i]);
-    }
-  };
 
-  /* 可选的资源标记层（默认关闭，见 AO.RES_MARKS）。
-   * 资源视图本身按主资源填色；这一层只用于"想在省上再垫个图标"的场合：
-   *   scale <  1.0 → 只标富集省（储量 ≥ AO.RES_RICH）的 8px 色块
-   *   scale >= 1.0 → 每省标主资源的实物图标
-   * 尺寸全部除以 s（屏幕恒定），画在 base 缓存里。 */
-  Renderer.prototype._drawResourceMarks = function (ctx, s) {
-    var w = this.world;
-    if (!AO.RESOURCE_BY_KEY) return;
-    var showIcon = s >= 1.0;
-    var rich = AO.RES_RICH || 85;
-    var iconPx = showIcon ? AO.clamp(10 + s * 6, 14, 32) : RES_SIDE_FAR;
-    var half = RES_SIDE_FAR / Math.SQRT1_2 / s;
-    var i, p;
 
-    ctx.lineJoin = 'miter';
-    ctx.lineCap = 'butt';
-
-    /* 视口剔除：每省都有标记，不剔的话每次重绘底图都要摸一遍全图 */
-    var padW = 48 / s;
-    var vx0 = this.cam.x - this.cssW / 2 / s - padW, vx1 = this.cam.x + this.cssW / 2 / s + padW;
-    var vy0 = this.cam.y - this.cssH / 2 / s - padW, vy1 = this.cam.y + this.cssH / 2 / s + padW;
-
-    for (i = 0; i < w.provinces.length; i++) {
-      p = w.provinces[i];
-      var top = p && p.resources && p.resources[0];
-      if (!top) continue;
-      if (fogActive() && fogVis(p.id) === 0) continue;   // 没测绘过的地方没有徽记
-      if (!showIcon && top.n < rich) continue;      // 远景只标富集省
-
-      var cx = p.centroid[0], cy = p.centroid[1];
-      if (cx < vx0 || cx > vx1 || cy < vy0 || cy > vy1) continue;
-
-      if (!showIcon) {
-        diamondPath(ctx, cx, cy, half);
-        ctx.fillStyle = top.color;
-        ctx.fill();
-        ctx.lineWidth = 1 / s;
-        ctx.strokeStyle = RES_INK;
-        ctx.stroke();
-        continue;
-      }
-
-      var sp = (AO.RES_ICON !== 'font' && this.resIcons) ? this.resIcons[top.key] : null;
-      if (!sp) {
-        /* 没有图标资源（或 AO.RES_ICON='font'）：退回 canvas 字体 */
-        var ch = top.cn.charAt(0);
-        ctx.font = '600 ' + (iconPx * 0.46 / s) + 'px ' + AO.LABEL_FONT;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.lineWidth = 1.4 / s;
-        ctx.strokeStyle = RES_HALO;
-        ctx.strokeText(ch, cx, cy);
-        ctx.fillStyle = RES_TXT;
-        ctx.fillText(ch, cx, cy);
-        continue;
-      }
-
-      var iw = iconPx / s;
-      ctx.drawImage(sp.cv, cx - iw / 2, cy - iw / 2, iw, iw);
-    }
-  };
 
   /* 切换视图 */
   Renderer.prototype.setView = function (mode) {

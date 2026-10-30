@@ -5,7 +5,7 @@ const path = require('path');
 
 const CORE = ['00-core', '01-noise', '02-terrain', '03-seeds', '04-partition',
   '04b-rivers', '05-geometry', '06-adjacency', '07-politics', '08-names',
-  '08b-society', '09-export', '15-resources', '15-aoc2', '13-main'];
+  '08b-society', '09-export', '15-aoc2', '13-main'];
 
 function load(extra) {
   const files = CORE.concat(extra || []);
