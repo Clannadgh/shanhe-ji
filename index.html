@@ -2601,6 +2601,12 @@
   border-radius: 5px; background: #fffdf7; color: inherit; cursor: pointer; }
 .aocwar button:hover:not(:disabled) { border-color: #b9ac8e; background: #fff8e8; }
 .aocwar button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 政体九宫格：两列排，别让八行把国库挤出屏幕 */
+#cGovBox { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 2px 0 4px; }
+#cGovBox button { min-width: 0; padding: 4px 6px; }
+#cGovBox button em { font-size: 10px; opacity: .68; }
+#cGovBox .hint { grid-column: 1 / -1; }
 </style>
 </head>
 <body>
