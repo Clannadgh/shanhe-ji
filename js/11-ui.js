@@ -5902,11 +5902,17 @@
     var troops = p.aoc.army | 0;
     var owner = troops > 0 ? (p.aoc.armyOf || p.owner) : 0;
     var mine = owner ? canAct(owner) : canAct(p.owner);
+    /* 军务那一行要把"在路上"的兵也写出来：
+     * 征兵是下一回合到货的，只写"无驻军"会让玩家以为钱白花了。 */
+    var pend = 0;
+    (c.aoc.rq || []).forEach(function (q) { if (q && q.pid === p.id) pend += q.n | 0; });
     var info = $('iArmyInfo');
     if (info) {
-      info.textContent = troops > 0
+      var txt = troops > 0
         ? (owner === p.owner ? '驻军 ' : '占领军 ') + troops.toLocaleString()
         : '无驻军';
+      if (pend > 0) txt += ' · 在途 ' + pend.toLocaleString() + '（下回合到）';
+      info.textContent = txt;
     }
     function mk(label, sub, ok, fn, title) {
       var b = doc.createElement('button');
@@ -5928,7 +5934,14 @@
       function () {
         var r = AO.aoc2.recruit(w, c.id, p.id, nNormal, false);
         toast(r.msg, 2600);
-        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+        if (r.ok) {
+          AO.aoc2.recomputeCountry(w, c); showInfo(p.id);
+          /* 兵变了 → 地图上的兵数牌要重画（底图是缓存，overlay 得主动求一帧），
+           * 顶栏那个「兵」也要跟着变 —— 它原来只在过回合时刷。 */
+          if (state.renderer) state.renderer.requestDraw();
+          updateHud();
+          if ($('country').classList.contains('on')) showCountry(c.id);
+        }
       },
       '单省上限 = 人口 1/10~1/5；同时扣金和人口');
 
@@ -5940,7 +5953,14 @@
       function () {
         var r = AO.aoc2.recruit(w, c.id, p.id, nInst, true);
         toast(r.msg, 2600);
-        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+        if (r.ok) {
+          AO.aoc2.recomputeCountry(w, c); showInfo(p.id);
+          /* 兵变了 → 地图上的兵数牌要重画（底图是缓存，overlay 得主动求一帧），
+           * 顶栏那个「兵」也要跟着变 —— 它原来只在过回合时刷。 */
+          if (state.renderer) state.renderer.requestDraw();
+          updateHud();
+          if ($('country').classList.contains('on')) showCountry(c.id);
+        }
       },
       '征兵敕令：即时到位，正常价 ×2，花 ' + AO.AOC2.MP_COST.recruit + ' 移动点');
 
@@ -5960,7 +5980,14 @@
         function () {
           var r = AO.aoc2.plunder(w, c.id, p.id);
           toast(r.msg, 2800);
-          if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+          if (r.ok) {
+          AO.aoc2.recomputeCountry(w, c); showInfo(p.id);
+          /* 兵变了 → 地图上的兵数牌要重画（底图是缓存，overlay 得主动求一帧），
+           * 顶栏那个「兵」也要跟着变 —— 它原来只在过回合时刷。 */
+          if (state.renderer) state.renderer.requestDraw();
+          updateHud();
+          if ($('country').classList.contains('on')) showCountry(c.id);
+        }
         },
         '掠夺占领省：人口 / 经济 / 幸福下降 → 国库进金（军越多抢越多）');
     }
@@ -5974,7 +6001,14 @@
         function () {
           var r = AO.aoc2.assimilate(w, c.id, p.id);
           toast(r.msg, 3000);
-          if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+          if (r.ok) {
+          AO.aoc2.recomputeCountry(w, c); showInfo(p.id);
+          /* 兵变了 → 地图上的兵数牌要重画（底图是缓存，overlay 得主动求一帧），
+           * 顶栏那个「兵」也要跟着变 —— 它原来只在过回合时刷。 */
+          if (state.renderer) state.renderer.requestDraw();
+          updateHud();
+          if ($('country').classList.contains('on')) showCountry(c.id);
+        }
         },
         '渐进转国籍：一次转掉剩下的 8%；旧核心不删');
     }
@@ -5984,7 +6018,14 @@
       function () {
         var r = AO.aoc2.disband(w, owner || c.id, p.id, troops);
         toast(r.msg, 2600);
-        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+        if (r.ok) {
+          AO.aoc2.recomputeCountry(w, c); showInfo(p.id);
+          /* 兵变了 → 地图上的兵数牌要重画（底图是缓存，overlay 得主动求一帧），
+           * 顶栏那个「兵」也要跟着变 —— 它原来只在过回合时刷。 */
+          if (state.renderer) state.renderer.requestDraw();
+          updateHud();
+          if ($('country').classList.contains('on')) showCountry(c.id);
+        }
       },
       '撤编损耗人口：只回填约 1/20');
   }
@@ -6797,7 +6838,14 @@
       function () {
         var r = AO.aoc2.world.colonist(w, cid, p.id);
         toast(r.msg, 2800);
-        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+        if (r.ok) {
+          AO.aoc2.recomputeCountry(w, c); showInfo(p.id);
+          /* 兵变了 → 地图上的兵数牌要重画（底图是缓存，overlay 得主动求一帧），
+           * 顶栏那个「兵」也要跟着变 —— 它原来只在过回合时刷。 */
+          if (state.renderer) state.renderer.requestDraw();
+          updateHud();
+          if ($('country').classList.contains('on')) showCountry(c.id);
+        }
       },
       why || '向这块无主之地移入人口，把本国占比推向 10% 的自然殖民门槛');
 
@@ -6808,7 +6856,14 @@
       function () {
         var r = AO.aoc2.world.colony(w, cid, p.id);
         toast(r.msg, 3000);
-        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+        if (r.ok) {
+          AO.aoc2.recomputeCountry(w, c); showInfo(p.id);
+          /* 兵变了 → 地图上的兵数牌要重画（底图是缓存，overlay 得主动求一帧），
+           * 顶栏那个「兵」也要跟着变 —— 它原来只在过回合时刷。 */
+          if (state.renderer) state.renderer.requestDraw();
+          updateHud();
+          if ($('country').classList.contains('on')) showCountry(c.id);
+        }
       },
       why || (!needCol ? '先要有 ' + Math.round(Wd.COLONY_NEED_SHARE * 100) + '% 本国人口（现 ' +
         Math.round(share * 100) + '%）' : '一次买断这块地'));
@@ -9970,6 +10025,52 @@
   }
 
   var FLASH = Object.create(null);     // pid → turnNo（这一回合打过仗的省）
+
+  /* 兵数小方牌：质心下方一块 1/s 反算的方牌 —— 左国色条 + 白字。
+   * pending=true 时画成虚线空心 + "+N"，表示"还在路上"。 */
+  function drawTroopBadge(ctx, rndr, wx, wy, n, color, dotColor, pending) {
+    var s = rndr.cam.scale || 1;
+    var label = (n >= 10000 ? Math.round(n / 1000) + 'k'
+      : n >= 1000 ? (n / 1000).toFixed(n % 1000 ? 1 : 0) + 'k'
+        : String(Math.round(n)));
+    var fs = 11;                       // 屏幕像素
+    ctx.save();
+    ctx.font = '700 ' + fs + 'px "Segoe UI","Microsoft YaHei",sans-serif';
+    var tw = ctx.measureText(label).width;
+    var wpx = tw + 17, hpx = 16;
+    var x = wx - (wpx / 2) / s;
+    /* 在途那块画在常驻兵牌**上方**一格（16 屏幕像素）：
+     * 同一位置叠着画的话，后画的"在途"会把已经在编的那支盖掉。 */
+    var y = wy + ((pending ? -13 : 8) / s);
+    var ww = wpx / s, hh = hpx / s;
+    ctx.beginPath();
+    ctx.rect(x, y, ww, hh);
+    ctx.fillStyle = pending ? 'rgba(252,250,246,0.80)' : 'rgba(22,29,35,0.82)';
+    ctx.fill();
+    ctx.lineWidth = Math.max(1 / s, 0.25);
+    ctx.strokeStyle = pending ? 'rgba(90,101,112,0.85)' : 'rgba(250,247,240,0.85)';
+    if (pending) ctx.setLineDash([2.5 / s, 2 / s]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    /* 左边那道国色条：不看字也知道这是谁的兵 */
+    ctx.beginPath();
+    ctx.rect(x, y, 3.5 / s, hh);
+    ctx.fillStyle = color || '#888';
+    ctx.fill();
+    /* 占领军再点一颗红点 */
+    if (dotColor) {
+      ctx.beginPath();
+      ctx.arc(x + ww - 3.5 / s, y + 3.5 / s, 2 / s, 0, Math.PI * 2);
+      ctx.fillStyle = dotColor;
+      ctx.fill();
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = pending ? '#5a6570' : '#ffffff';
+    ctx.fillText((pending ? '+' : '') + label, x + ww / 2 + 1.5 / s, y + hh / 2 + 0.5 / s);
+    ctx.restore();
+  }
+
   AO.drawWarLayer = function (ctx, rndr) {
     var s = rndr.cam.scale, w = state.world;
     if (!w) return;
@@ -10031,61 +10132,38 @@
       }
       ctx.restore();
     }
-    /* 军旗：国家色小旗 + 兵数（放大到 1.2 才写数字，远景只留旗） */
-    var ids = armyIds();
-    for (i = 0; i < ids.length; i++) {
-      var a = ARMY[ids[i]];
-      if (!a) continue;
-      var pr = pOf(a.pid);
-      if (!pr) continue;
-      /* 迷雾（v6）：别国军队只在**实时**省里画旗。
-       * 已探但不在跟前的地方，只能看到 LASTSEEN 里的"据报驻军约 N"。 */
-      if (PLAYER && a.owner !== PLAYER && visCode(a.pid) !== VIS_REAL) continue;
-      var c = coOf(a.owner);
-      var col = c ? c.color : '#888';
-      var cx = pr.centroid[0], cy = pr.centroid[1];
-      /* 同一省多军：左右错开，免得叠成一面旗 */
-      var same = armiesIn(a.pid), k = same.indexOf(a);
-      var off = (k - (same.length - 1) / 2) * 7 / s;
-      cx += off;
-      var h = AO.clamp(7 / s, 0.5, 14);
-      ctx.lineWidth = Math.max(0.9 / s, 0.25);
-      ctx.strokeStyle = '#2b3238';
-      ctx.beginPath();
-      ctx.moveTo(cx, cy + h * 0.55);
-      ctx.lineTo(cx, cy - h);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - h);
-      var fw = h * 0.82;
-      if (a.type === 'navy') {
-        /* 舰队：三角旗（和陆军方旗区分开） */
-        ctx.lineTo(cx + fw, cy - h * 0.78);
-        ctx.lineTo(cx, cy - h * 0.55);
-      } else {
-        ctx.lineTo(cx + fw, cy - h * 0.94);
-        ctx.lineTo(cx + fw, cy - h * 0.62);
-        ctx.lineTo(cx, cy - h * 0.55);
+    /* 军队（AoC2 口径）：兵是**省上的一个数字**（p.aoc.army），
+     * 不是旧制 ARMY 表里的对象 —— 那张表在 AoC2 迁移时就空了，
+     * 所以从这里读等于"全世界没有一兵一卒"，征完兵地图上什么也看不见。
+     *
+     * 画法：质心下方一个小方牌 —— 左边一道国色条 + 白字兵数。
+     * 数字在 s>=0.45 就写（原来要 1.2 倍缩放才写，等于永远看不见）；
+     * 牌子的尺寸按 1/s 反算，所以不论缩放都是固定的屏幕大小。 */
+    for (i = 0; i < w.provinces.length; i++) {
+      var ap = w.provinces[i];
+      if (!ap || !ap.aoc || !(ap.aoc.army > 0)) continue;
+      /* 迷雾：没测绘过的省不画（和占领斜线、城墙同一条规矩）；
+       * 别国的兵只在**实时**省里露出 —— 旧情报里只有一个约数。 */
+      if (fogOn()) {
+        if (visCode(ap.id) === VIS_UNKNOWN) continue;
+        var aown = ap.aoc.armyOf || ap.owner;
+        if (PLAYER && aown !== PLAYER && visCode(ap.id) !== VIS_REAL) continue;
       }
-      ctx.closePath();
-      ctx.fillStyle = col;
-      ctx.fill();
-      ctx.stroke();
-      /* 占领军：旗上点一个小红点（"这是打下来的地方"） */
-      if (OCCUPY[a.pid]) {
-        ctx.beginPath();
-        ctx.arc(cx + fw * 0.4, cy - h * 0.78, Math.max(1.1 / s, 0.3), 0, Math.PI * 2);
-        ctx.fillStyle = '#b0492f';
-        ctx.fill();
-      }
-      if (s >= 1.2) {
-        ctx.font = '600 ' + AO.clamp(9 / s, 2.4, 12) + 'px system-ui,sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = 'rgba(30,38,44,0.92)';
-        var label = (a.men >= 1000 ? (a.men / 1000).toFixed(a.men % 1000 ? 1 : 0) + 'k' : a.men) +
-          (a.type === 'navy' ? '⚓' : '');
-        ctx.fillText(label, cx + fw * 0.5, cy + h * 0.6);
+      var ow = coOf(ap.aoc.armyOf || ap.owner);
+      drawTroopBadge(ctx, rndr, ap.centroid[0], ap.centroid[1],
+        ap.aoc.army, ow ? ow.color : '#888', ap.aoc.occupied ? '#b0492f' : null);
+    }
+    /* 在途兵（征了还没到）：同一省上方再压一块淡色小牌「+N」。
+     * 玩家点了征兵、钱扣了、兵没到 —— 这三个月里只有这块牌子能告诉他"在路上"。 */
+    for (var ci = 0; ci < w.countries.length; ci++) {
+      var cc = w.countries[ci];
+      if (!cc || !cc.aoc || !cc.aoc.rq || !cc.aoc.rq.length) continue;
+      for (var qi = 0; qi < cc.aoc.rq.length; qi++) {
+        var rq = cc.aoc.rq[qi];
+        var qp = pOf(rq.pid);
+        if (!qp) continue;
+        if (fogOn() && PLAYER && cc.id !== PLAYER && visCode(qp.id) !== VIS_REAL) continue;
+        drawTroopBadge(ctx, rndr, qp.centroid[0], qp.centroid[1], rq.n, cc.color, null, true);
       }
     }
     /* 已探省的"据报驻军"：**不画旗**，只写一行约数。
