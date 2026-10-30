@@ -5857,6 +5857,20 @@
         '掠夺占领省：人口 / 经济 / 幸福下降 → 国库进金（军越多抢越多）');
     }
 
+    /* 同化（第十章）：只在"自己的省 + 有异族"时出现 */
+    var foreignN = AO.aoc2.totalPop(p) - (p.aoc.pop[p.owner] || 0);
+    if (foreignN > 1 && p.owner === c.id && !p.aoc.occupied) {
+      var acost = AO.aoc2.assimCost(w, c.id, p.id);
+      mk('同化', acost.toLocaleString() + ' 金 · ' + Math.round(foreignN / AO.aoc2.totalPop(p) * 100) + '% 异族',
+        mine && c.aoc.treasury >= acost && c.aoc.mp >= AO.AOC2.MP_COST.assimilate,
+        function () {
+          var r = AO.aoc2.assimilate(w, c.id, p.id);
+          toast(r.msg, 3000);
+          if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+        },
+        '渐进转国籍：一次转掉剩下的 8%；旧核心不删');
+    }
+
     /* 解散（只回填 1/20 人口，规则书第二章） */
     mk('解散', '回填 1/20 人口', mine && troops > 0,
       function () {
@@ -5865,6 +5879,57 @@
         if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
       },
       '撤编损耗人口：只回填约 1/20');
+  }
+
+
+  /* ---------------- 政体（国卡内政页顶部） ----------------
+   * 九种全表；点一下就换（花金、受时代门槛限制）。
+   * 为什么做成九宫格而不是下拉：这一页是"看着系数做选择"的地方，
+   * 下拉会把八个选项藏起来，玩家只记得住自己现在是什么。 */
+  function renderAocGov(c) {
+    var box = $('cGovBox');
+    if (!box) return;
+    box.innerHTML = '';
+    var w = state.world;
+    var mine = canAct(c.id) && !c.aoc.rebel;
+    var cost = AO.aoc2.govSwitchCost(c);
+    var era = c.aoc.era || 0;
+    var eraCn = ['启蒙', '工业', '现代'][era] || '启蒙';
+    var keys = ['monarchy', 'democracy', 'republic', 'communism', 'fascism', 'citystate', 'tribe', 'nomad'];
+    for (var i = 0; i < keys.length; i++) {
+      (function (key) {
+        var g = AO.AOC2.GOV[key];
+        var need = AO.aoc2.govEra(key);
+        var cur = c.aoc.gov === key;
+        var b = doc.createElement('button');
+        b.type = 'button';
+        b.innerHTML = '<b>' + g.cn + '</b><em>税 ' + g.taxCap + '% · 募 ×' + g.recruit.toFixed(1) +
+          ' · 防 +' + g.defense + '%</em>';
+        var why = '';
+        if (cur) why = '当前政体';
+        else if (!mine) why = c.aoc.rebel ? '叛军只有一种活法' : '不是你的国家';
+        else if (era < need) why = '要' + ['启蒙', '工业', '现代'][need] + '时代';
+        else if (c.aoc.treasury < cost) why = '国库不足（需 ' + cost.toLocaleString() + ' 金）';
+        b.disabled = !!why;
+        b.title = (why ? why + '　／　' : '') + (cur ? '' : '换政体 ' + cost.toLocaleString() + ' 金');
+        if (cur) b.style.borderColor = '#8a6d34';
+        if (!why) b.addEventListener('click', function () {
+          var r = AO.aoc2.setGov(w, c.id, key);
+          toast(r.msg, 3200);
+          if (r.ok) {
+            AO.aoc2.recomputeCountry(w, c);
+            showCountry(c.id);
+            if (state.renderer && state.renderer.selected) showInfo(state.renderer.selected);
+          }
+        });
+        box.appendChild(b);
+      })(keys[i]);
+    }
+    var tip = doc.createElement('div');
+    tip.className = 'hint';
+    tip.textContent = '当前 ' + AO.aoc2.govOf(c).cn + ' · ' + eraCn + '时代 · 换政体 ' +
+      cost.toLocaleString() + ' 金';
+    box.appendChild(tip);
   }
 
   /* ---------------- 战争页（国卡） ---------------- */
@@ -6035,6 +6100,29 @@
     $('iStab').textContent = p.aoc.stab.toFixed(0) + '%';
     $('iHappy').textContent = p.aoc.happy.toFixed(0) + '%';
     $('iGrowth').textContent = (p.aoc.growth * 100).toFixed(2) + '% / 回合';
+    /* 国籍构成：人数最多的两三个国籍 + 本国占比（同化程度） */
+    var parts = AO.aoc2.popParts(w, p);
+    var own = p.aoc.pop[p.owner] || 0;
+    var ownPct = tp > 0 ? Math.round(own / tp * 100) : 100;
+    var natTxt = '本国 ' + ownPct + '%';
+    if (parts.length > 1) {
+      var others = [];
+      for (var pi = 0; pi < parts.length && others.length < 2; pi++) {
+        if (parts[pi].cid === p.owner) continue;
+        others.push(parts[pi].name + ' ' + Math.round(parts[pi].n / tp * 100) + '%');
+      }
+      if (others.length) natTxt += ' · ' + others.join(' · ');
+    }
+    $('iNat').textContent = natTxt;
+    $('iNat').title = parts.map(function (x) {
+      return x.name + ' ' + Math.round(x.n).toLocaleString() + ' 人';
+    }).join('\n');
+    $('iRevolt').textContent = p.aoc.revolt.toFixed(0) + '%';
+    $('iRevolt').title = '革命风险（目标值 ' + AO.aoc2.revoltTarget(w, p.id).toFixed(0) +
+      '%）：≥' + AO.AOC2.REVOLT_TRIGGER + '% 每回合 ' +
+      Math.round(AO.AOC2.REVOLT_CHANCE * 100) + '% 概率举旗';
+    $('iRevolt').style.color = p.aoc.revolt >= AO.AOC2.REVOLT_TRIGGER ? '#a8523b' : '';
+
     $('iCore').textContent = coreText(w, p);
     $('iValue').textContent = p.aoc.value.toFixed(1);
 
@@ -7571,6 +7659,18 @@
     $('cDev').textContent = c.aoc.dev.toFixed(2);
     $('cHappy').textContent = c.aoc.happy.toFixed(0) + '%';
     $('cStab').textContent = c.aoc.stab.toFixed(0) + '%';
+    var maxR = 0, hotN = 0;
+    for (var ri = 0; ri < c.provinces.length; ri++) {
+      var rq = w.provinces[c.provinces[ri] - 1];
+      if (!rq || !rq.aoc) continue;
+      if (rq.aoc.revolt > maxR) maxR = rq.aoc.revolt;
+      if (rq.aoc.revolt >= AO.AOC2.REVOLT_TRIGGER) hotN++;
+    }
+    var rvEl = $('cRevolt');
+    if (rvEl) {
+      rvEl.textContent = maxR.toFixed(0) + '%' + (hotN ? '（' + hotN + ' 省随时举旗）' : '');
+      rvEl.style.color = hotN ? '#a8523b' : '';
+    }
     $('cArea').textContent = c.areaKm2.toLocaleString() + ' km²';
     var cap = w.provinces[c.capital - 1];
     $('cCapital').textContent = cap ? cap.name : '—';
@@ -7624,6 +7724,7 @@
 
     renderAocTreasury(c);
     renderAocSliders(c);
+    renderAocGov(c);
     renderAocWar(c);
     $('cMP').textContent = c.aoc.mp + ' / ' + c.aoc.mpMax;
     $('cDIP').textContent = c.aoc.dip + ' / ' + c.aoc.dipMax;

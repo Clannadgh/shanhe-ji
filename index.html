@@ -2703,6 +2703,8 @@
         <div class="kv"><span>稳定</span><span id="iStab" title="1% ~ 100%：国籍占比 / 驻军 / 疾病 / 幸福 / 占领"></span></div>
         <div class="kv"><span>幸福</span><span id="iHappy" title="0 ~ 100%：税率 + 物资 + 节日 + 厌战"></span></div>
         <div class="kv"><span>增长</span><span id="iGrowth" title="人口每回合自然增长率（地形 × 政体 × 幸福）"></span></div>
+        <div class="kv"><span>国籍</span><span id="iNat" title="人口按国籍构成；本国占比 = 同化程度"></span></div>
+        <div class="kv"><span>革命</span><span id="iRevolt" title="革命风险 0~100：低幸福 / 低稳定 / 异族 / 厌战 / 被占领驱动，驻军能压"></span></div>
         <div class="kv"><span>核心</span><span id="iCore" title="这省是谁的核心领土（历史主张）"></span></div>
         <div class="kv"><span>价值</span><span id="iValue" title="省份价值：贸易定价用（购省价 = 40000 × 价值）"></span></div>
       </div>
@@ -2764,6 +2766,7 @@
     <div class="kv"><span>发展度</span><span id="cDev" title="全国各省平均发展度"></span></div>
     <div class="kv"><span>幸福</span><span id="cHappy" title="按人口加权"></span></div>
     <div class="kv"><span>稳定</span><span id="cStab" title="按人口加权"></span></div>
+    <div class="kv"><span>革命</span><span id="cRevolt" title="全国最高革命风险；≥80 就可能举旗"></span></div>
     <div class="kv"><span>国库</span><span id="cTreasuryShort"></span></div>
     <div class="kv"><span>面积</span><span id="cArea"></span></div>
     <div class="kv"><span>首都</span><span id="cCapital"></span></div>
@@ -2776,6 +2779,8 @@
   </div>
   <!-- 内政：国库 / 五条滑条 / 点数 —— 全是"能动手"的，所以单独一页 -->
   <div class="cpane cpane-gov">
+    <div class="sec" title="政体决定税收上限 / 行政费 / 募兵成本 / 军费 / 防御加成；换政体花一笔金，不同政体要不同时代">政体</div>
+    <div id="cGovBox" class="aocrow"></div>
     <div class="sec" title="国库 = 国家金库；税收滑条那一份扣掉行政费、军费、贷款利息之后进这里">国库</div>
     <div id="cTreasury" class="treasury"></div>
     <div class="sec" title="四条预算滑条把总收入切开，合计不超过 100%；没分配的部分自动进国库">预算分配</div>

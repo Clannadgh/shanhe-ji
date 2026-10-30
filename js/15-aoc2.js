@@ -84,6 +84,30 @@
     WEAR_FALL: 0.05,         // 占位：和平每回合 −5%
     WEAR_UPKEEP: 1.0,        // 占位：厌战 100% 时军费 ×2（规则书"极端时每兵 >1 金"）
     WEAR_HAPPY: 12,          // 占位：厌战 100% 时幸福 −12
+    /* ---- 人心（第七、八、九、十章）---- */
+    ASSIM_GOLD: 0.01,        // 占位：同化每人 0.01 金 × (1 + 异族占比 × 2)
+    ASSIM_RATE: 0.08,        // 占位：一次同化掉"剩下的异族"的 8%（渐进）
+    REVOLT_TRIGGER: 80,      // 占位：革命风险 ≥80 才可能举旗
+    REVOLT_CHANCE: 0.10,     // 占位：达标后每回合 10% 爆发
+    REVOLT_HAPPY_LINE: 45,   // 占位：幸福低于 45 开始算账
+    REVOLT_HAPPY_K: 1.2,
+    REVOLT_STAB_LINE: 55,    // 占位：稳定低于 55 开始算账
+    REVOLT_STAB_K: 1.0,
+    REVOLT_FOREIGN: 35,      // 占位：异族占比 100% 加 35 点
+    REVOLT_WEAR: 15,         // 占位：厌战 100% 加 15 点
+    REVOLT_OCCUPIED: 15,     // 占位：被占领加 15 点
+    REVOLT_GARRISON_K: 1,    // 占位：每千兵压 1 点
+    REVOLT_GARRISON_MAX: 12,
+    REBEL_ARMY: 0.03,        // 占位：叛军起兵 = 省人口 × 3%
+    /* 叛军国上限：规则书没给，但不封顶会滚成"100 回合 15 个叛军国、
+     * 1000 多对交战"（实测），厌战把全世界拖垮。到顶之后高风险省只是
+     * 继续掉稳定度，不再起兵。 */
+    REBEL_MAX: 6,
+    CIVIL_HAPPY: 25,         // 占位：全国幸福低于 25 记为"低位"
+    CIVIL_TURNS: 20,         // 第九章：连续约 20 回合低位才可能内战
+    GOV_SWITCH_BASE: 5000,   // 占位：换政体「数千级」
+    GOV_SWITCH_PER_PROV: 500,
+    STAB_REVOLT: 0.15,       // 占位：革命风险对稳定的反向拉扯
     AI_AGGRO: 0.75,          // 第二十章：AI 侵略度默认 75%
     AI_WAR_CHANCE: 3,        // 占位：每回合宣战判定（百分比 × 侵略度）
     AI_ARMY_RATIO: 0.01,     // 占位：AI 目标兵力 = 人口 × 1%
@@ -449,11 +473,18 @@
         var sTarget = AOC2.STAB_BASE + AOC2.STAB_NAT * natShare +
           (p.aoc.happy - 50) * AOC2.STAB_HAPPY -
           (p.aoc.disease || 0) -
-          (p.aoc.occupied ? 20 : 0) +
+          (p.aoc.occupied ? 20 : 0) -
+          /* 革命风险越高，稳定越压不住（第八章因子表里的一条） */
+          (p.aoc.revolt || 0) * AOC2.STAB_REVOLT +
           /* 驻军临时维稳：每 1000 兵 +2 稳定，最多 +20（规则书第八章"权宜"） */
           Math.min(20, (p.aoc.army || 0) / 1000 * 2);
         p.aoc.stab = clamp(p.aoc.stab + (sTarget - p.aoc.stab) * AOC2.STAB_STEP,
           AOC2.STAB_MIN, AOC2.STAB_MAX);
+
+        /* 革命风险（第九章）：低幸福 / 低稳定 / 异族 / 厌战 / 被占领，驻军压一点。
+         * 用本回合刚算出来的幸福与稳定 —— 顺序反过来玩家看到的因果就晚一回合。 */
+        var rTarget = revoltTargetOf(p, c.id, A.wear || 0);
+        p.aoc.revolt = clamp((p.aoc.revolt || 0) + (rTarget - (p.aoc.revolt || 0)) * 0.35, 0, 100);
 
         /* ⑦ 增长：人口 / 经济 / 发展度 ---------------------------------
          * 地形倍率 × 政体 × 幸福；人口超过岗位（经济）时增长被压住 —— 第二章
@@ -541,10 +572,307 @@
       }
     }
 
-    /* ⑧ 战争段（规则书第九、十一、十二章）：征兵到货 → 厌战 → AI 行动 */
+    /* ⑧ 战争段（第九、十一、十二章）：征兵到货 → 厌战 → AI 行动 */
     settleWar(world, opts);
+    /* ⑨ 人心（第九、十章）：革命风险 → 叛军国；全国幸福低位 → 内战 */
+    settleUnrest(world, opts);
     return world;
   };
+
+  /* =============================================================
+   * ⑦ 人心（规则书第七、八、九、十章）
+   *
+   * 这一层回答三个问题：
+   *   ① 这块地是谁的（国籍构成 + 核心表）—— 打下来不等于吃得下
+   *   ② 吃不下会怎样（革命风险 → 叛军国 → 内战）
+   *   ③ 换个活法（政体九种 + 切换）
+   *
+   * 数据形状沿用阶段一留好的那两个表：
+   *   p.aoc.pop  = { 国 id: 人数 }   —— 本国占比 = 同化程度
+   *   p.aoc.core = { 国 id: 1 }      —— 历史主张，同化**不删**
+   * ============================================================= */
+
+  /* ---------------- 国籍 / 核心 ---------------- */
+  /* 本国人口占比：0 = 全是异族，1 = 全是自己人 */
+  function natShareOf(p, cid) {
+    var tp = totalPop(p);
+    return tp > 0 ? (p.aoc.pop[cid] || 0) / tp : 1;
+  }
+  AO.aoc2.natShare = natShareOf;
+
+  /* 国籍构成（省卡显示用）：按人数降序，带国名 */
+  AO.aoc2.popParts = function (world, p) {
+    var out = [], k, c;
+    for (k in p.aoc.pop) {
+      var n = p.aoc.pop[k] || 0;
+      if (n < 1) continue;
+      c = world.countries[(k | 0) - 1];
+      out.push({ cid: k | 0, name: c ? c.name : ('#' + k), n: n, color: c ? c.color : '#999' });
+    }
+    out.sort(function (a, b) { return b.n - a.n; });
+    return out;
+  };
+
+  /* ---------------- 同化敕令（第十章） ---------------- */
+  /* 花金 + 移动点，把异族人口**逐步**转成本国国籍；人口越多越贵越慢。
+   * 旧核心不删：只转人口构成，p.aoc.core 一个字都不动。 */
+  AO.aoc2.assimilate = function (world, cid, pid) {
+    var c = world.countries[cid - 1], p = world.provinces[pid - 1];
+    if (!c || !c.aoc || !p || !p.aoc) return { ok: false, msg: '目标不存在' };
+    if (p.owner !== cid) return { ok: false, msg: '不是自己的省' };
+    if (p.aoc.occupied) return { ok: false, msg: '占领省不能同化（要先通过和约拿到手）' };
+    var tp = totalPop(p), own = p.aoc.pop[cid] || 0, foreign = tp - own;
+    if (foreign < 1) return { ok: false, msg: '这省全是本国人，不用同化' };
+    var mp = AOC2.MP_COST.assimilate;
+    if (c.aoc.mp < mp) return { ok: false, msg: '移动点不够（需 ' + mp + '）' };
+    var share = foreign / Math.max(1, tp);
+    var cost = Math.round(tp * AOC2.ASSIM_GOLD * (1 + share * 2));
+    if (c.aoc.treasury < cost) return { ok: false, msg: '国库不足（需 ' + cost.toLocaleString() + ' 金）' };
+
+    c.aoc.treasury -= cost;
+    c.aoc.mp -= mp;
+    /* 一次转掉"剩下的异族"的 8%（渐进：越到后面越慢，像真在消化） */
+    var conv = 0;
+    for (var k in p.aoc.pop) {
+      if ((k | 0) === cid) continue;
+      var take = (p.aoc.pop[k] || 0) * AOC2.ASSIM_RATE;
+      if (take < 0.5) continue;
+      p.aoc.pop[k] -= take;
+      conv += take;
+    }
+    p.aoc.pop[cid] = own + conv;
+    p.population = Math.round(totalPop(p));
+    p.aoc.assimT = world.turn;
+    return {
+      ok: true, converted: conv, cost: cost,
+      msg: '同化 ' + Math.round(conv).toLocaleString() + ' 人（本国占比 ' +
+        Math.round(natShareOf(p, cid) * 100) + '%），花费 ' + cost.toLocaleString() + ' 金'
+    };
+  };
+  AO.aoc2.assimCost = function (world, cid, pid) {
+    var p = world.provinces[pid - 1];
+    if (!p || !p.aoc) return 0;
+    var tp = totalPop(p), own = p.aoc.pop[cid] || 0, foreign = tp - own;
+    if (foreign < 1) return 0;
+    return Math.round(tp * AOC2.ASSIM_GOLD * (1 + foreign / Math.max(1, tp) * 2));
+  };
+
+  /* ---------------- 政体（第七章） ---------------- */
+  /* 时代：0 启蒙 / 1 工业 / 2 现代（推进时代是阶段四科技的事，这里只立门槛） */
+  var GOV_ERA = {
+    monarchy: 0, democracy: 0, republic: 0, citystate: 0, tribe: 0, nomad: 0,
+    communism: 1, fascism: 1, rebel: 0
+  };
+  AO.aoc2.govEra = function (key) { return GOV_ERA[key] || 0; };
+  AO.aoc2.govSwitchCost = function (c) {
+    return Math.round(AOC2.GOV_SWITCH_BASE + (c.provinces.length || 0) * AOC2.GOV_SWITCH_PER_PROV);
+  };
+  AO.aoc2.setEra = function (c, era) { c.aoc.era = clamp(era | 0, 0, 2); return c.aoc.era; };
+  AO.aoc2.setGov = function (world, cid, key) {
+    var c = world.countries[cid - 1];
+    if (!c || !c.aoc) return { ok: false, msg: '国家不存在' };
+    if (!G[key]) return { ok: false, msg: '没有这个政体' };
+    if (c.aoc.gov === key) return { ok: false, msg: '已经是' + G[key].cn };
+    if (c.aoc.rebel && key !== 'rebel') return { ok: false, msg: '叛军只有一种活法' };
+    if ((c.aoc.era || 0) < GOV_ERA[key]) {
+      return { ok: false, msg: G[key].cn + '要' + ['启蒙', '工业', '现代'][GOV_ERA[key]] + '时代' };
+    }
+    var cost = AO.aoc2.govSwitchCost(c);
+    if (c.aoc.treasury < cost) return { ok: false, msg: '国库不足（需 ' + cost.toLocaleString() + ' 金）' };
+    c.aoc.treasury -= cost;
+    c.aoc.gov = key;
+    /* 新政体的税率上限可能更低：当场压下来（不然会出现"24% 上限的民主制收 28% 的税"） */
+    if (c.aoc.taxRate > G[key].taxCap) c.aoc.taxRate = G[key].taxCap;
+    return { ok: true, cost: cost, msg: '改行' + G[key].cn + '（' + cost.toLocaleString() + ' 金）' };
+  };
+
+  /* ---------------- 革命风险（第九章） ---------------- */
+  /* 驱动：低幸福、低稳定、异族人口、厌战、被占领；驻军能压一点（权宜） */
+  function revoltTargetOf(p, cid, wear) {
+    var tp = totalPop(p), share = natShareOf(p, cid);
+    var r = 0;
+    r += Math.max(0, AOC2.REVOLT_HAPPY_LINE - p.aoc.happy) * AOC2.REVOLT_HAPPY_K;
+    r += Math.max(0, AOC2.REVOLT_STAB_LINE - p.aoc.stab) * AOC2.REVOLT_STAB_K;
+    r += (1 - share) * AOC2.REVOLT_FOREIGN;
+    r += (wear || 0) * AOC2.REVOLT_WEAR;
+    if (p.aoc.occupied) r += AOC2.REVOLT_OCCUPIED;
+    r -= Math.min(AOC2.REVOLT_GARRISON_MAX, (p.aoc.army || 0) / 1000 * AOC2.REVOLT_GARRISON_K);
+    return clamp(r, 0, 100);
+  }
+
+  /* 革命风险的"目标值"（省卡 tooltip / 探针用）：给的是这一回合各项驱动的合计，
+   * 不是平滑后的 p.aoc.revolt —— 平滑值要看历史，看不出"现在为什么高"。 */
+  AO.aoc2.revoltTarget = function (world, pid) {
+    var p = world.provinces[pid - 1];
+    if (!p || !p.aoc) return 0;
+    var c = world.countries[p.owner - 1];
+    return revoltTargetOf(p, p.owner, c && c.aoc ? (c.aoc.wear || 0) : 0);
+  };
+
+  /* ---------------- 叛军国 / 内战 ---------------- */
+  var REBEL_NAMES = ['义军', '叛军', '民军', '揭竿军', '复国军'];
+
+  function makeCountry(world, name, color, gov) {
+    var id = world.countries.length + 1;
+    var seed = (AO.hashString('rebel:' + name + ':' + id) >>> 0);
+    var c = {
+      id: id,
+      name: name,
+      name_en: 'Rebels of ' + name,
+      color: color,
+      provinces: [],
+      capital: 0,
+      neighbors: [],
+      gov: gov || 'rebel',
+      govCn: (G[gov || 'rebel'] || G.rebel).cn,
+      economy: '战时经济',
+      house: '',
+      leader: {
+        name: '首领' + (id % 90 + 10), name_en: 'Leader', gender: 'm',
+        title: '首领', age: 30 + (seed % 25), reign: 1
+      },
+      portraitHat: 'none',
+      portrait: '',
+      population: 0, areaKm2: 0, density: 0,
+      terrainComp: [], faiths: [], faith: null, kmPerPx: 1,
+      irrPct: 0, faithRoll: 0.99
+    };
+    if (AO.makePortrait) {
+      try { c.portrait = AO.makePortrait(seed, { color: color, hat: 'none', gender: 'm' }); } catch (e) { c.portrait = ''; }
+    }
+    c.aoc = {
+      treasury: 0, loans: 0, taxRate: 20,
+      sliders: { tax: 30, goods: 60, research: 5, invest: 5 },
+      gov: gov || 'rebel', era: 0,
+      mp: AOC2.MP_BASE, mpMax: AOC2.MP_BASE,
+      dip: AOC2.DIP_BASE, dipMax: AOC2.DIP_MAX,
+      rel: {}, truce: {}, warStart: {}, wear: 0, rq: [],
+      rp: 0, investPool: 0, last: null,
+      happy: 50, stab: 50, pop: 0, econ: 0, dev: 0,
+      alive: true, rebel: gov === 'rebel',
+      lowHappy: 0
+    };
+    world.countries.push(c);
+    return c;
+  }
+
+  /* 叛军与所有人敌对（第九章〔社区〕：叛军会和第三国也打） */
+  function hostileToAll(world, c) {
+    for (var i = 0; i < world.countries.length; i++) {
+      var o = world.countries[i];
+      if (!o || !o.aoc || o.id === c.id || !o.aoc.alive) continue;
+      AO.aoc2.setRel(world, c.id, o.id, -100);
+      c.aoc.warStart[o.id] = world.turn || 1;
+      o.aoc.warStart[c.id] = world.turn || 1;
+    }
+  }
+
+  /* 在一个省里竖起叛旗：省归叛军、带兵、和所有人开战 */
+  function spawnRebel(world, parent, pid) {
+    var p = world.provinces[pid - 1];
+    if (!p) return null;
+    var nm = (parent ? parent.name : '本地') + REBEL_NAMES[(world.turn + pid) % REBEL_NAMES.length];
+    var col = parent ? parent.color : '#8a3b2f';
+    var reb = makeCountry(world, nm, shadeColor(col, -18), 'rebel');
+    AO.aoc2.transferProvince(world, pid, reb.id);
+    p = world.provinces[pid - 1];
+    /* 起兵：人口 × 3%（占位）；这些人从本地人口里出，不从天上掉 */
+    var tp = totalPop(p);
+    var men = Math.max(200, Math.round(tp * AOC2.REBEL_ARMY));
+    men = Math.min(men, Math.max(200, Math.floor(tp * 0.2)));
+    p.aoc.army = men;
+    p.aoc.armyOf = reb.id;
+    reb.aoc.treasury = Math.round((parent ? parent.aoc.treasury : 0) * 0.02) + 1000;
+    AO.aoc2.recomputeCountry(world, reb);
+    if (parent) AO.aoc2.recomputeCountry(world, parent);
+    hostileToAll(world, reb);
+    return reb;
+  }
+
+  /* 颜色明暗（叛军用原国色的暗调：一眼看出是"从哪来的"） */
+  function shadeColor(hex, pct) {
+    var h = String(hex || '#888888').replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var n = parseInt(h, 16);
+    if (isNaN(n)) return hex;
+    var r = clamp(((n >> 16) & 255) + pct, 0, 255);
+    var g = clamp(((n >> 8) & 255) + pct, 0, 255);
+    var b = clamp((n & 255) + pct, 0, 255);
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+
+  /* 内战（第九章）：全国幸福连续约 20 回合低位 → 国家一分为二 */
+  function startCivilWar(world, c) {
+    var list = [], i, p;
+    for (i = 0; i < c.provinces.length; i++) {
+      p = world.provinces[c.provinces[i] - 1];
+      if (!p || p.aoc.occupied) continue;
+      list.push({ pid: p.id, happy: p.aoc.happy });
+    }
+    if (list.length < 4) return null;
+    /* 最不满的那一半（至少 2 省）举旗 */
+    list.sort(function (a, b) { return a.happy - b.happy; });
+    var take = Math.max(2, Math.floor(list.length / 2));
+    var first = list[0].pid;
+    var reb = spawnRebel(world, c, first);
+    if (!reb) return null;
+    for (i = 1; i < take && i < list.length; i++) {
+      AO.aoc2.transferProvince(world, list[i].pid, reb.id);
+      var q = world.provinces[list[i].pid - 1];
+      if (q) {
+        q.aoc.army = Math.max(100, Math.round(totalPop(q) * AOC2.REBEL_ARMY * 0.5));
+        q.aoc.armyOf = reb.id;
+      }
+    }
+    AO.aoc2.recomputeCountry(world, reb);
+    AO.aoc2.recomputeCountry(world, c);
+    c.aoc.lowHappy = 0;
+    return reb;
+  }
+
+  /* 每回合末：革命风险 → 叛乱；全国幸福低位 → 内战 */
+  function rebelCount(world) {
+    var n = 0;
+    for (var i = 0; i < world.countries.length; i++) {
+      if (world.countries[i] && world.countries[i].aoc && world.countries[i].aoc.rebel) n++;
+    }
+    return n;
+  }
+
+  function settleUnrest(world, opts) {
+    var i, p, c, ci;
+    var spawned = 0;
+
+    /* ① 逐省掷革命风险（每回合最多起一处，免得一崩全崩） */
+    for (i = 0; i < world.provinces.length && spawned < 1; i++) {
+      p = world.provinces[i];
+      if (!p || !p.aoc || p.aoc.occupied) continue;
+      if (p.aoc.revolt < AOC2.REVOLT_TRIGGER) continue;
+      var owner = world.countries[p.owner - 1];
+      if (!owner || !owner.aoc || !owner.aoc.alive) continue;
+      if (owner.aoc.rebel) continue;            // 叛军不会再叛
+      if (rebelCount(world) >= AOC2.REBEL_MAX) break;
+      var roll = hashRoll(world, p.id, 'revolt') / 100;   // 0~1
+      if (roll > AOC2.REVOLT_CHANCE) continue;
+      spawnRebel(world, owner, p.id);
+      spawned++;
+    }
+
+    /* ② 内战：全国幸福连续 20 回合低位 */
+    for (ci = 0; ci < world.countries.length; ci++) {
+      c = world.countries[ci];
+      if (!c || !c.aoc || !c.aoc.alive || c.aoc.rebel) continue;
+      if (opts.player === c.id) {
+        /* 玩家国也照规则走 —— 内战不是"AI 专属惩罚" */
+      }
+      if ((c.aoc.happy || 0) < AOC2.CIVIL_HAPPY) c.aoc.lowHappy = (c.aoc.lowHappy || 0) + 1;
+      else c.aoc.lowHappy = 0;
+      if (c.aoc.lowHappy >= AOC2.CIVIL_TURNS && c.provinces.length >= 4 &&
+        rebelCount(world) < AOC2.REBEL_MAX) {
+        startCivilWar(world, c);
+      }
+    }
+  }
 
   /* =============================================================
    * ⑥ 战争（规则书第十一、十二章）
@@ -996,9 +1324,17 @@
       if (!c || !c.aoc || !c.aoc.alive) continue;
       A = c.aoc;
       var wars = AO.aoc2.warsOf(world, c.id);
-      if (wars.length) A.wear = Math.min(1, (A.wear || 0) + AOC2.WEAR_RISE);
+      /* 厌战只看"接壤的敌人"：叛军与所有人敌对（第九章〔社区〕），
+       * 如果远方一个叛军也算战时，全世界会被拖成永久厌战 —— 实测
+       * 100 回合 1000 多对交战、幸福全体 20 出头。 */
+      var active = 0;
+      for (var wi = 0; wi < wars.length; wi++) {
+        if ((c.neighbors || []).indexOf(wars[wi]) >= 0) { active = 1; break; }
+      }
+      if (active) A.wear = Math.min(1, (A.wear || 0) + AOC2.WEAR_RISE);
       else A.wear = Math.max(0, (A.wear || 0) - AOC2.WEAR_FALL);
       A.wars = wars.length;
+      A.activeWar = active;
     }
 
     /* ③ AI 的战争行为（玩家国不自动行动；opts.ai === false 时整段关掉，
@@ -1062,13 +1398,23 @@
     var A = c.aoc, g = govOf(c);
     if (!A.alive || !c.provinces.length) return;
     var enemies = AO.aoc2.warsOf(world, c.id);
+    /* 叛军和所有人敌对（第九章）：如果把它算进"已经在打仗"，
+     * 所有国家都会永远停在"有敌人"的分支里，再也不宣战 ——
+     * 实测 300 回合只剩 25 次宣战、全程 1 对交战。所以分成两份：
+     *   enemies     打谁（含叛军）
+     *   realEnemies 能不能谈、要不要另开一桌（不含叛军） */
+    var realEnemies = [];
+    for (var ei = 0; ei < enemies.length; ei++) {
+      var eo = world.countries[enemies[ei] - 1];
+      if (eo && eo.aoc && !eo.aoc.rebel) realEnemies.push(enemies[ei]);
+    }
 
     /* ① 打不动了就和谈：厌战高 + 战争分低 */
-    if (enemies.length) {
+    if (realEnemies.length) {
       var worst = 0, worstScore = 101;
-      for (var e = 0; e < enemies.length; e++) {
-        var sc = AO.aoc2.warScore(world, c.id, enemies[e]);
-        if (sc < worstScore) { worstScore = sc; worst = enemies[e]; }
+      for (var e = 0; e < realEnemies.length; e++) {
+        var sc = AO.aoc2.warScore(world, c.id, realEnemies[e]);
+        if (sc < worstScore) { worstScore = sc; worst = realEnemies[e]; }
       }
       /* 打崩了对方（100 分）就割地；自己快撑不住就白和平 */
       /* 不能替玩家决定和平：对面是玩家就只打不谈（玩家自己开谈判桌） */
@@ -1150,11 +1496,14 @@
         }
         if (!moved) break;
       }
-      return;
+      /* 打完了：身上只有叛军（realEnemies 空）就继续往下走，该宣战宣战；
+       * 有真敌人就收手（不另开战线）。 */
     }
+    if (realEnemies.length) return;
 
-    /* ④ 宣战：有兵、有外交点、有更弱的邻国 */
+    /* ④ 宣战：有兵、有外交点、有更弱的邻国（身上还挂着叛军也照宣不误） */
     if ((world.turn || 1) <= AOC2.WAR_BAN_TURNS) return;
+    if (realEnemies.length) return;
     if (A.dip < AOC2.WAR_DIP_COST) return;
     if (total < Math.max(200, target * 0.6)) return;
     if (hashRoll(world, c.id, 'war') > AOC2.AI_WAR_CHANCE * AOC2.AI_AGGRO) return;
@@ -1289,10 +1638,13 @@
   }
 
   AO.aoc2.save = function (world) {
-    var out = { t: world.turn || 1, p: {}, c: {} }, i, p, c;
+    var out = { t: world.turn || 1, p: {}, c: {}, own: [], reb: [] }, i, p, c;
     for (i = 0; i < world.provinces.length; i++) {
       p = world.provinces[i];
       if (!p || !p.aoc) continue;
+      /* 归属必须存：世界读档时是按种子重生成的，不存 owner 的话
+       * 所有征服、割地、叛军占的地都会还原成开局版图。 */
+      out.own[p.id - 1] = p.owner;
       out.p[p.id] = {
         e: Math.round(p.aoc.econ * 100) / 100,
         d: Math.round(p.aoc.dev * 1000) / 1000,
@@ -1324,16 +1676,78 @@
         rel: cloneMap(c.aoc.rel || {}),
         truce: cloneMap(c.aoc.truce || {}),
         wear: Math.round((c.aoc.wear || 0) * 1000) / 1000,
+        era: c.aoc.era | 0,
+        low: c.aoc.lowHappy | 0,
+        reb: c.aoc.rebel ? 1 : 0,
         rq: (c.aoc.rq || []).map(function (x) { return { pid: x.pid, n: x.n }; })
       };
     }
+    /* 叛军国是"这一局长出来的"，种子重建不出来 —— 名字 / 颜色 / 首都全存 */
+    for (i = 0; i < world.countries.length; i++) {
+      c = world.countries[i];
+      if (!c || !c.aoc || !c.aoc.rebel) continue;
+      out.reb.push({
+        id: c.id, name: c.name, nameEn: c.name_en, color: c.color,
+        capital: c.capital, gov: c.aoc.gov,
+        leader: c.leader ? c.leader.name : '', age: c.leader ? c.leader.age : 30
+      });
+    }
     return out;
   };
+
+  /* 读档时把版图接回来：先补出叛军国，再逐省落归属 */
+  function rebuildOwnership(world, owners, rebels) {
+    var i, c, p;
+    /* 1) 清空所有国家的省列表（世界是刚生成的） */
+    for (i = 0; i < world.countries.length; i++) {
+      c = world.countries[i];
+      if (c) c.provinces = [];
+    }
+    /* 2) 补出叛军国（id 必须等于下标 +1，追加即可） */
+    if (rebels) {
+      for (i = 0; i < rebels.length; i++) {
+        var r = rebels[i];
+        while (world.countries.length < r.id) {
+          /* 理论不会发生（叛军是连续追加的），补个占位免得下标错位 */
+          world.countries.push(makeCountry(world, '叛军', '#8a3b2f', 'rebel'));
+        }
+        if (world.countries[r.id - 1]) continue;
+        var rc = makeCountry(world, r.name, r.color, r.gov || 'rebel');
+        rc.name_en = r.nameEn || rc.name_en;
+        rc.capital = r.capital || 0;
+        if (r.leader) rc.leader.name = r.leader;
+        if (r.age) rc.leader.age = r.age;
+      }
+    }
+    /* 3) 逐省落归属 */
+    if (owners) {
+      for (i = 0; i < world.provinces.length; i++) {
+        p = world.provinces[i];
+        if (!p) continue;
+        var ow = owners[p.id - 1];
+        if (!ow) continue;
+        p.owner = ow;
+        c = world.countries[ow - 1];
+        p.ownerName = c ? c.name : '';
+        p.ownerColor = c ? c.color : '#999999';
+        if (c) c.provinces.push(p.id);
+      }
+    }
+    for (i = 0; i < world.countries.length; i++) {
+      c = world.countries[i];
+      if (!c) continue;
+      c.provinces.sort(function (a, b) { return a - b; });
+      AO.aoc2.recomputeCountry(world, c);
+      if (!c.provinces.length && c.aoc) c.aoc.alive = false;
+    }
+  }
 
   AO.aoc2.load = function (world, data) {
     if (!data) return world;
     var i, p, c, s;
     if (data.t) world.turn = data.t;
+    /* 版图先接回来（叛军国也在这一步补出来），再灌省 / 国的字段 */
+    rebuildOwnership(world, data.own, data.reb);
     for (i = 0; i < world.provinces.length; i++) {
       p = world.provinces[i];
       if (!p) continue;
@@ -1370,6 +1784,9 @@
       c.aoc.rp = s.rp || 0;
       c.aoc.investPool = s.ip || 0;
       c.aoc.alive = s.al !== 0;
+      c.aoc.era = s.era | 0;
+      c.aoc.lowHappy = s.low | 0;
+      c.aoc.rebel = !!s.reb;
       c.aoc.rel = s.rel || {};
       c.aoc.truce = s.truce || {};
       c.aoc.wear = s.wear || 0;

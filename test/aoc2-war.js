@@ -300,7 +300,10 @@ const pair = findPair();
 /* ---------------- 9. 厌战 ---------------- */
 (function () {
   const a = world.countries[pair.a.id - 1];
-  const b = world.countries.find(x => x.aoc && x.aoc.alive && x.id !== a.id);
+  /* 厌战只看"接壤的敌人"（远方的叛军不算），所以这里必须挑一个邻国 */
+  const b = world.countries.find(x => x.aoc && x.aoc.alive && x.id !== a.id &&
+    (a.neighbors || []).indexOf(x.id) >= 0) ||
+    world.countries.find(x => x.aoc && x.aoc.alive && x.id !== a.id);
   a.aoc.truce = {}; b.aoc.truce = {};
   a.aoc.wear = 0; b.aoc.wear = 0;
   world.turn = 40;
