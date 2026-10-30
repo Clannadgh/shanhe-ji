@@ -8,7 +8,9 @@
   function $(id) { return doc.getElementById(id); }
 
   var state = { world: null, renderer: null, opts: null, size: 'l', resState: 'raw',
-                openKey: null, selKey: null, infoId: 0, infoTab: null };
+                openKey: null, selKey: null, infoId: 0, infoTab: null,
+                /* 外交页：选中的邻国 / 最后通牒的"拒绝就入侵"开关 */
+                dipTarget: 0, ultimInvade: true };
 
   /* 三档世界尺寸：像素面积、省份密度、国家数量一起等比放大，
    * 所以"大世界"是更多省份铺满更大的画布，而不是把同样的省份拉大。 */
@@ -6061,76 +6063,314 @@
   }
 
   /* ---------------- 战争页（国卡） ---------------- */
+  /* =============================================================
+   * 外交页（国卡，规则书第十三、十四章）
+   *
+   * 一页里塞三件事：交战（和谈条款）、附庸（谁归谁）、邻国（21 种动作）。
+   * 21 个动作不摊在每一行上 —— 那样每个邻国都是 21 个按钮，扫不动。
+   * 做法：先点一个邻国"选中"，下面的动作格就作用在它身上（和"移动"同一个套路）。
+   * ============================================================= */
+  function dipWhy(c, tid, key) {
+    var w = state.world;
+    if (!AO.aoc2.dip) return '外交层没加载';
+    var DP = AO.aoc2.dip;
+    var act = DP.ACT[key];
+    if (c.aoc.dip < act.dip) return '外交点不够（需 ' + act.dip + '）';
+    if (act.gold && c.aoc.treasury < act.gold) return '国库不足（需 ' + act.gold.toLocaleString() + '）';
+    var t = w.countries[tid - 1];
+    if (key === 'war') {
+      if (AO.aoc2.atWar(w, c.id, tid)) return '已经在交战';
+      if (AO.aoc2.truceLeft(w, c.id, tid) > 0) return '停战期内';
+      if ((w.turn || 1) <= AO.AOC2.WAR_BAN_TURNS) return '开局 ' + AO.AOC2.WAR_BAN_TURNS + ' 回合内不能宣战';
+    }
+    if (key === 'peace' && !AO.aoc2.atWar(w, c.id, tid)) return '并没有在交战';
+    if (key === 'ally' && DP.has(w, c.id, tid, 'ally')) return '已经是同盟';
+    if (key === 'breakAlly' && !DP.has(w, c.id, tid, 'ally')) return '本来就不是同盟';
+    if (key === 'nap' && DP.has(w, c.id, tid, 'nap')) return '已有互不侵犯';
+    if (key === 'defpact' && DP.has(w, c.id, tid, 'defpact')) return '已有防御条约';
+    if (key === 'guarantee' && DP.has(w, c.id, tid, 'guarantee')) return '已经在保障';
+    if (key === 'access' && DP.has(w, c.id, tid, 'access')) return '已经给了通行权';
+    if (key === 'requestAccess' && DP.has(w, c.id, tid, 'access')) return '已经有通行权';
+    if (key === 'annex' && DP.overlordOf(w, tid) !== c.id) return '对方不是你的附庸';
+    if (key === 'vassalize' || key === 'ultimatum') {
+      if (AO.aoc2.rel(c, tid) > DP.D.ULTIM_REL) return '关系要 ≤ ' + DP.D.ULTIM_REL + '（现 ' + AO.aoc2.rel(c, tid) + '）';
+    }
+    if (key === 'release' || key === 'capital') {
+      var pid = state.renderer ? state.renderer.selected : 0;
+      var pp = pid ? w.provinces[pid - 1] : null;
+      if (!pp || pp.owner !== c.id) return '先在省卡里选中一个自己的省';
+      if (key === 'capital' && pp.aoc.occupied) return '被占领的省不能当首都';
+      if (key === 'capital' && c.capital === pid) return '已经是首都了';
+    }
+    if (key === 'union' && AO.aoc2.atWar(w, c.id, tid)) return '交战中不能谈合并';
+    if (key === 'trade') return '';
+    return '';
+  }
+
+  function dipRun(c, tid, key) {
+    var w = state.world;
+    var DP = AO.aoc2.dip;
+    var arg = null;
+    if (key === 'release' || key === 'capital') {
+      arg = { pid: state.renderer ? state.renderer.selected : 0 };
+    } else if (key === 'vassalize') {
+      arg = { invade: !!state.ultimInvade };
+    } else if (key === 'ultimatum') {
+      arg = { term: 'land', invade: !!state.ultimInvade };
+    }
+    var tr0 = AO.aoc2.transfers || 0;
+    var r = DP.act(w, c.id, tid, key, arg);
+    toast(r.msg, 3800);
+    if (r.open) { renderAocTrade(c, tid); return; }
+    if (r.ok || r.refused) {
+      AO.aoc2.recomputeCountry(w, c);
+      showCountry(c.id);
+      if (state.renderer) {
+        if ((AO.aoc2.transfers || 0) !== tr0 && state.renderer.refreshGeometry) {
+          state.renderer.refreshGeometry();
+        } else {
+          state.renderer.requestDraw();
+        }
+        if (state.renderer.selected) state.renderer.select(state.renderer.selected);
+      }
+    }
+  }
+
+  function renderAocDipActs(c, tid) {
+    var box = $('cDipActs');
+    if (!box) return;
+    box.innerHTML = '';
+    var w = state.world;
+    var DP = AO.aoc2.dip;
+    var t = tid ? w.countries[tid - 1] : null;
+    var title = $('cDipTitle');
+    if (title) {
+      title.textContent = t ? '外交动作 · ' + t.name : '外交动作（先选一个邻国）';
+    }
+    if (!DP) return;
+    if (!t) {
+      box.innerHTML = '<div class="hint">点上面一个邻国，这里就会出现 21 种动作</div>';
+      return;
+    }
+    var mine = canAct(c.id);
+    for (var i = 0; i < DP.ORDER.length; i++) {
+      (function (key) {
+        var act = DP.ACT[key];
+        var why = mine ? dipWhy(c, tid, key) : '不是你的国家';
+        var b = doc.createElement('button');
+        b.type = 'button';
+        b.innerHTML = '<b>' + act.cn + '</b><em>' + (act.dip ? act.dip + ' 点' : '免费') +
+          (act.gold ? ' · ' + act.gold.toLocaleString() + ' 金' : '') + '</em>';
+        b.disabled = !!why;
+        b.title = (why ? why + '　／　' : '') + act.tip;
+        if (!why) b.addEventListener('click', function () { dipRun(c, tid, key); });
+        box.appendChild(b);
+      })(DP.ORDER[i]);
+    }
+    /* 最后通牒的"拒绝就入侵"开关：规则书第十三章明确说发的时候可以设定 */
+    var tg = doc.createElement('button');
+    tg.type = 'button';
+    tg.className = 'ghost';
+    tg.innerHTML = '<b>拒绝即入侵：' + (state.ultimInvade ? '开' : '关') + '</b>' +
+      '<em>点一下切换</em>';
+    tg.title = '开：对方拒绝最后通牒就直接宣战；关：只掉关系';
+    tg.addEventListener('click', function () {
+      state.ultimInvade = !state.ultimInvade;
+      renderAocDipActs(c, tid);
+    });
+    box.appendChild(tg);
+  }
+
+  /* 贸易（第十七章）：七类里能在这里点的是四类（金币 / 省份 / 参战 / 条约走动作格） */
+  function renderAocTrade(c, tid) {
+    var box = $('cTradeBox');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!tid) return;
+    var w = state.world, DP = AO.aoc2.dip;
+    var t = w.countries[tid - 1];
+    if (!t) return;
+    var pid = state.renderer ? state.renderer.selected : 0;
+    var pp = pid ? w.provinces[pid - 1] : null;
+    var head = doc.createElement('div');
+    head.className = 'hint';
+    head.textContent = '与 ' + t.name + ' 的贸易（购省价 = 40000 × 省份价值；AI 不卖核心省）';
+    box.appendChild(head);
+
+    function mk(label, ok, fn, title) {
+      var b = doc.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.disabled = !ok;
+      b.title = title || '';
+      if (ok) b.addEventListener('click', fn);
+      var row = doc.createElement('div');
+      row.className = 'aocwar';
+      row.appendChild(b);
+      box.appendChild(row);
+    }
+    var mine = canAct(c.id);
+    var provMine = pp && pp.owner === c.id;
+    var provTheirs = pp && pp.owner === tid;
+    mk('买下「' + (provTheirs ? pp.name : '选中的省') + '」',
+      mine && provTheirs,
+      function () {
+        var r = DP.buyProvince(w, c.id, tid, pid);
+        toast(r.msg, 3600);
+        if (r.ok) { showCountry(c.id); if (state.renderer && state.renderer.refreshGeometry) state.renderer.refreshGeometry(); }
+      },
+      '要价 = 40000 × 价值 × 1.2；AI 不卖核心省');
+    mk('卖出「' + (provMine ? pp.name : '选中的省') + '」',
+      mine && provMine && c.provinces.length > 1,
+      function () {
+        var r = DP.sellProvince(w, c.id, tid, pid);
+        toast(r.msg, 3600);
+        if (r.ok) { showCountry(c.id); if (state.renderer && state.renderer.refreshGeometry) state.renderer.refreshGeometry(); }
+      },
+      '自己的核心省不能卖');
+    mk('给 10,000 金（换关系）', mine && c.aoc.treasury >= 10000,
+      function () {
+        var r = DP.giveGold(w, c.id, tid, 10000);
+        toast(r.msg, 3200);
+        if (r.ok) showCountry(c.id);
+      },
+      '给钱换关系：每 500 金 +1（单次最多 +30）');
+    var warTargets = AO.aoc2.warsOf(w, c.id);
+    mk('要它参战（打我的敌人）', mine && warTargets.length > 0,
+      function () {
+        var r = DP.tradeJoinWar(w, c.id, tid, warTargets[0]);
+        toast(r.msg, 3600);
+        if (r.ok) showCountry(c.id);
+      },
+      warTargets.length ? '让它对 ' + (w.countries[warTargets[0] - 1] || {}).name + ' 宣战（要付钱）'
+        : '你现在没有在交战，没得拉');
+  }
+
   function renderAocWar(c) {
     var w = state.world;
-    var armyEl = $('cArmy'), wearEl = $('cWear');
+    var armyEl = $('cArmy'), wearEl = $('cWear'), dipEl = $('cDipNow');
     if (armyEl) armyEl.textContent = AO.aoc2.armyOf(w, c.id).toLocaleString() + ' 人';
     if (wearEl) {
       var wr = Math.round((c.aoc.wear || 0) * 100);
       wearEl.textContent = wr + '%' + (wr >= 70 ? '（军费膨胀中）' : '');
     }
-    var box = $('cWars');
-    if (!box) return;
-    box.innerHTML = '';
-    var wars = AO.aoc2.warsOf(w, c.id);
-    if (!wars.length) {
-      box.innerHTML = '<div class="hint">没有交战国。宣战要花 ' + AO.AOC2.WAR_DIP_COST +
-        ' 外交点，开局 ' + AO.AOC2.WAR_BAN_TURNS + ' 回合内不能打。</div>';
-    }
-    var mine = canAct(c.id);
-    for (var i = 0; i < wars.length; i++) {
-      (function (eid) {
-        var e = w.countries[eid - 1];
-        if (!e) return;
-        var score = AO.aoc2.warScore(w, c.id, eid);
-        var row = doc.createElement('div');
-        row.className = 'aocwar';
-        row.innerHTML = '<b>' + e.name + '</b><em>战争分 ' + Math.round(score) + '</em>';
-        var terms = [
-          { k: 'white', cn: '白和平' },
-          { k: 'land', cn: '割地' },
-          { k: 'reparations', cn: '赔款' }
-        ];
-        for (var t = 0; t < terms.length; t++) {
-          (function (term) {
-            var b = doc.createElement('button');
-            b.type = 'button';
-            b.textContent = term.cn;
-            b.disabled = !mine;
-            b.title = term.k === 'white' ? '停战，占着的省还回去'
-              : term.k === 'land' ? '割让被占领的省（战争分 100 或对方厌战 ≥70% 才接受）'
-                : '索取赔款（战争分 50+）';
-            b.addEventListener('click', function () {
-              var tr0 = AO.aoc2.transfers || 0;
-              var r = AO.aoc2.peace(w, c.id, eid, term.k);
-              toast(r.msg, 3600);
-              if (r.ok) {
-                AO.aoc2.recomputeCountry(w, c);
-                showCountry(c.id);
-                /* 割地会改归属：路径缓存必须重建，否则地图还画着旧国界 */
-                if (state.renderer) {
-                  if ((AO.aoc2.transfers || 0) !== tr0 && state.renderer.refreshGeometry) {
-                    state.renderer.refreshGeometry();
-                  } else {
-                    state.renderer.requestDraw();
-                  }
-                  state.renderer.select(state.renderer.selected);
-                }
-              }
-            });
-            row.appendChild(b);
-          })(terms[t]);
-        }
-        box.appendChild(row);
-      })(wars[i]);
+    if (dipEl) {
+      dipEl.textContent = c.aoc.dip + ' / ' + c.aoc.dipMax +
+        (c.aoc.great ? '（大国 +' + (AO.aoc2.dip ? AO.aoc2.dip.D.GREAT_DIP : 2) + '/回合）' : '');
     }
 
-    /* 邻国：宣战 */
+    /* ---- 交战：和谈条款 ---- */
+    var box = $('cWars');
+    if (box) {
+      box.innerHTML = '';
+      var wars = AO.aoc2.warsOf(w, c.id);
+      if (!wars.length) {
+        box.innerHTML = '<div class="hint">没有交战国。宣战要花 ' + AO.AOC2.WAR_DIP_COST +
+          ' 外交点，开局 ' + AO.AOC2.WAR_BAN_TURNS + ' 回合内不能打。</div>';
+      }
+      var mine = canAct(c.id);
+      for (var i = 0; i < wars.length; i++) {
+        (function (eid) {
+          var e = w.countries[eid - 1];
+          if (!e) return;
+          var score = AO.aoc2.warScore(w, c.id, eid);
+          var row = doc.createElement('div');
+          row.className = 'aocwar';
+          row.innerHTML = '<b>' + e.name + '</b><em>战争分 ' + Math.round(score) + '</em>';
+          var terms = [
+            { k: 'white', cn: '白和平' },
+            { k: 'land', cn: '割地' },
+            { k: 'vassal', cn: '附庸化' },
+            { k: 'reparations', cn: '赔款' }
+          ];
+          for (var t = 0; t < terms.length; t++) {
+            (function (term) {
+              var b = doc.createElement('button');
+              b.type = 'button';
+              b.textContent = term.cn;
+              b.disabled = !mine;
+              b.title = term.k === 'white' ? '停战，占着的省还回去'
+                : term.k === 'land' ? '割让被占领的省（战争分 30+）'
+                  : term.k === 'vassal' ? '把对方变成附庸（战争分 45+）'
+                    : '索取赔款（战争分 20+）';
+              b.addEventListener('click', function () {
+                var tr0 = AO.aoc2.transfers || 0;
+                var r = AO.aoc2.peace(w, c.id, eid, term.k);
+                toast(r.msg, 3600);
+                if (r.ok) {
+                  AO.aoc2.recomputeCountry(w, c);
+                  showCountry(c.id);
+                  if (state.renderer) {
+                    if ((AO.aoc2.transfers || 0) !== tr0 && state.renderer.refreshGeometry) {
+                      state.renderer.refreshGeometry();
+                    } else {
+                      state.renderer.requestDraw();
+                    }
+                    state.renderer.select(state.renderer.selected);
+                  }
+                }
+              });
+              row.appendChild(b);
+            })(terms[t]);
+          }
+          box.appendChild(row);
+        })(wars[i]);
+      }
+    }
+
+    /* ---- 附庸：我是谁的附庸 / 谁是我的附庸 ---- */
+    var vb = $('cVassalBox');
+    if (vb) {
+      vb.innerHTML = '';
+      var ov = AO.aoc2.dip ? AO.aoc2.dip.overlordOf(w, c.id) : 0;
+      var mineV = c.aoc.vassals ? Object.keys(c.aoc.vassals) : [];
+      if (!ov && !mineV.length) {
+        vb.innerHTML = '<div class="hint">不是任何人的附庸，也没有附庸。</div>';
+      }
+      if (ov) {
+        var oc = w.countries[ov - 1];
+        var row2 = doc.createElement('div');
+        row2.className = 'aocwar';
+        var indep = Math.round((c.aoc.indep || 0) * 100);
+        row2.innerHTML = '<b>宗主：' + (oc ? oc.name : '#' + ov) + '</b><em>独立欲望 ' + indep + '%</em>';
+        vb.appendChild(row2);
+      }
+      for (var vi = 0; vi < mineV.length; vi++) {
+        (function (vid) {
+          var vc = w.countries[(vid | 0) - 1];
+          if (!vc) return;
+          var r3 = doc.createElement('div');
+          r3.className = 'aocwar';
+          var rel = AO.aoc2.rel(c, vid | 0);
+          r3.innerHTML = '<b>' + vc.name + '</b><em>关系 ' + rel + '</em>';
+          var b1 = doc.createElement('button');
+          b1.type = 'button';
+          b1.textContent = '吞并';
+          b1.disabled = rel < 100;
+          b1.title = rel < 100 ? '关系要拉到 100（现 ' + rel + '）' : '必定接受';
+          b1.addEventListener('click', function () { dipRun(c, vid | 0, 'annex'); });
+          r3.appendChild(b1);
+          var b2 = doc.createElement('button');
+          b2.type = 'button';
+          b2.textContent = '放它独立';
+          b2.addEventListener('click', function () {
+            AO.aoc2.dip.dropVassal(w, vid | 0);
+            toast(vc.name + ' 独立了', 2600);
+            showCountry(c.id);
+          });
+          r3.appendChild(b2);
+          vb.appendChild(r3);
+        })(mineV[vi]);
+      }
+    }
+
+    /* ---- 邻国：点一行选中它 ---- */
     var tb = $('cWarTargets');
     if (!tb) return;
     tb.innerHTML = '';
     var nbs = (c.neighbors || []).slice();
-    if (!nbs.length) { tb.innerHTML = '<div class="hint">没有陆上邻国</div>'; return; }
+    if (!nbs.length) { tb.innerHTML = '<div class="hint">没有陆上邻国</div>'; renderAocDipActs(c, 0); return; }
+    if (!state.dipTarget || nbs.indexOf(state.dipTarget) < 0) state.dipTarget = nbs[0];
     for (var k = 0; k < nbs.length; k++) {
       (function (nid) {
         var n = w.countries[nid - 1];
@@ -6138,29 +6378,31 @@
         var at = AO.aoc2.atWar(w, c.id, nid);
         var tl = AO.aoc2.truceLeft(w, c.id, nid);
         var row = doc.createElement('div');
-        row.className = 'aocwar';
-        row.innerHTML = '<b>' + n.name + '</b><em>' + (at ? '交战中' :
-          tl > 0 ? '停战 ' + tl + ' 回合' : '关系 ' + AO.aoc2.rel(c, nid)) + '</em>';
-        var b = doc.createElement('button');
-        b.type = 'button';
-        b.textContent = at ? '已交战' : '宣战';
-        var why = '';
-        if (!mine) why = '不是你的国家';
-        else if (at) why = '已经在交战';
-        else if (tl > 0) why = '停战期内';
-        else if ((w.turn || 1) <= AO.AOC2.WAR_BAN_TURNS) why = '开局 ' + AO.AOC2.WAR_BAN_TURNS + ' 回合内不能宣战';
-        else if (c.aoc.dip < AO.AOC2.WAR_DIP_COST) why = '外交点不够';
-        b.disabled = !!why;
-        b.title = why || ('花 ' + AO.AOC2.WAR_DIP_COST + ' 外交点');
-        if (!why) b.addEventListener('click', function () {
-          var r = AO.aoc2.declareWar(w, c.id, nid);
-          toast(r.msg, 3200);
-          if (r.ok) showCountry(c.id);
+        row.className = 'aocwar' + (state.dipTarget === nid ? ' on' : '');
+        row.style.cursor = 'pointer';
+        var tags = [];
+        if (at) tags.push('交战中');
+        else if (tl > 0) tags.push('停战 ' + tl);
+        if (AO.aoc2.dip) {
+          if (AO.aoc2.dip.has(w, c.id, nid, 'ally')) tags.push('同盟');
+          if (AO.aoc2.dip.has(w, c.id, nid, 'defpact')) tags.push('防御');
+          if (AO.aoc2.dip.has(w, c.id, nid, 'nap')) tags.push('互不侵犯');
+          if (AO.aoc2.dip.has(w, c.id, nid, 'access')) tags.push('通行');
+          if (AO.aoc2.dip.isVassal(w, nid, c.id)) tags.push('我的附庸');
+          if (AO.aoc2.dip.isVassal(w, c.id, nid)) tags.push('我的宗主');
+        }
+        row.innerHTML = '<b>' + n.name + '</b><em>' +
+          (tags.length ? tags.join(' · ') + ' · ' : '') + '关系 ' + AO.aoc2.rel(c, nid) + '</em>';
+        row.title = '点一下：下面的动作作用在 ' + n.name + ' 身上';
+        row.addEventListener('click', function () {
+          state.dipTarget = nid;
+          renderAocWar(c);
         });
-        row.appendChild(b);
         tb.appendChild(row);
       })(nbs[k]);
     }
+    renderAocDipActs(c, state.dipTarget);
+    renderAocTrade(c, state.dipTarget);
   }
 
   function showInfo(id) {
@@ -10750,12 +10992,16 @@
         applyGroups();
       });
     }
-    /* ③ 国家卡三个页签：只切类名，内容由各 renderXXX 写好了 */
+    /* ③ 国家卡三个页签：切类名 + 重画一次。
+     * 只切类名的话，页签里的内容还是"上次 showCountry 时"的那一份 ——
+     * 关系、国库、附庸这些被别处改过之后，切回来看到的是旧数。 */
     var ctabs = $('cTabs') ? $('cTabs').querySelectorAll('.itab') : [];
     for (var ci = 0; ci < ctabs.length; ci++) {
       ctabs[ci].addEventListener('click', function () {
         lsSet(LS.countryTab, this.getAttribute('data-ctab') || 'ov');
         applyCountryTab();
+        var cid = state.renderer ? state.renderer.selectedCountry : 0;
+        if (cid && $('country').classList.contains('on')) showCountry(cid);
       });
     }
     /* ④ ☰ 菜单：点钮开合，点外面 / ESC 关。菜单项自己照旧走原来的绑定 ——

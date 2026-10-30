@@ -292,6 +292,15 @@
         mp: AOC2.MP_BASE, mpMax: AOC2.MP_BASE,
         dip: AOC2.DIP_BASE, dipMax: AOC2.DIP_MAX,
         rel: {},                   // 关系值（-100 = 战争；阶段四扩成 21 种外交动作）
+        pacts: {},                 // 条约：cid -> { nap, defpact, guarantee, access, ally }
+        vassalOf: 0,               // 宗主 cid（0 = 不是附庸）
+        vassals: {},               // 附庸集合 cid -> 1
+        indep: 0,                  // 独立欲望 0~1（第十四章）
+        cool: {},                  // 侮辱冷却：cid -> 到期回合（期间不能改善关系）
+        guarBy: {},                // 谁保障了我的独立（反向索引）
+        prepare: null,             // 备战：{ target, turns }
+        supported: null,           // 被支持叛军：{ by, until }
+        great: false,              // 大国（人口前 10）
         truce: {},                 // 停战期：cid -> 到哪一回合为止不许宣战
         warStart: {},              // 这一场仗从哪回合开始（算厌战/战报用）
         wear: 0,                   // 厌战 0~1（军费膨胀 + 幸福降）
@@ -391,7 +400,8 @@
        * 这样科技升完不用等读档就能看到池子变大。 */
       if (AO.aoc2.court) A.mpMax = AO.aoc2.court.mpMaxOf(c);
       A.mp = A.mpMax;
-      A.dip = Math.min(A.dipMax, A.dip + AOC2.DIP_BASE);
+      A.dip = Math.min(A.dipMax, A.dip + AOC2.DIP_BASE +
+        (AO.aoc2.dip ? AO.aoc2.dip.greatDipOf(c) : 0));
 
       var gross = 0, devSum = 0, provN = 0;
       var soldiers = armyBy[c.id] || 0;
@@ -421,6 +431,8 @@
 
       /* 占领省的直接收入：约 10 金/省/回合〔社区〕（第一章） */
       gross += occupiedN * AOC2.OCCUPY_INCOME;
+      /* 大国加成（第十四章：人口前 10 的国家自动获得该身份与加成） */
+      if (AO.aoc2.dip) gross *= AO.aoc2.dip.taxMulOf(c);
 
       /* ② 国库汇总：四条预算滑条把总收入切开 -------------------------
        * 税收 → 国库；物资 → 当回合消耗掉（换满意度）；科研 → 研究点；
@@ -506,7 +518,7 @@
 
         /* 革命风险（第九章）：低幸福 / 低稳定 / 异族 / 厌战 / 被占领，驻军压一点。
          * 用本回合刚算出来的幸福与稳定 —— 顺序反过来玩家看到的因果就晚一回合。 */
-        var rTarget = revoltTargetOf(p, c.id, A.wear || 0);
+        var rTarget = revoltTargetOf(p, c.id, A.wear || 0, world);
         p.aoc.revolt = clamp((p.aoc.revolt || 0) + (rTarget - (p.aoc.revolt || 0)) * 0.35, 0, 100);
 
         /* ⑦ 增长：人口 / 经济 / 发展度 ---------------------------------
@@ -610,6 +622,19 @@
         var ac = world.countries[ci];
         if (!ac || !ac.aoc || !ac.aoc.alive) continue;
         AO.aoc2.court.aiTick(world, ac, opts);
+      }
+    }
+
+    /* ⑦b 外交段（第十三、十四章）：附庸税 → 独立欲望 → 备战 → 大国身份。
+     * 放在国家循环之后：附庸税要读"这一回合刚算完"的入库收入。 */
+    if (AO.aoc2.dip) {
+      AO.aoc2.dip.settle(world, opts);
+      if (opts.ai !== false) {
+        for (ci = 0; ci < world.countries.length; ci++) {
+          var dc = world.countries[ci];
+          if (!dc || !dc.aoc || !dc.aoc.alive) continue;
+          AO.aoc2.dip.aiTick(world, dc, opts);
+        }
       }
     }
 
@@ -729,7 +754,7 @@
 
   /* ---------------- 革命风险（第九章） ---------------- */
   /* 驱动：低幸福、低稳定、异族人口、厌战、被占领；驻军能压一点（权宜） */
-  function revoltTargetOf(p, cid, wear) {
+  function revoltTargetOf(p, cid, wear, world) {
     var tp = totalPop(p), share = natShareOf(p, cid);
     var r = 0;
     r += Math.max(0, AOC2.REVOLT_HAPPY_LINE - p.aoc.happy) * AOC2.REVOLT_HAPPY_K;
@@ -738,6 +763,9 @@
     r += (wear || 0) * AOC2.REVOLT_WEAR;
     if (p.aoc.occupied) r += AOC2.REVOLT_OCCUPIED;
     r -= Math.min(AOC2.REVOLT_GARRISON_MAX, (p.aoc.army || 0) / 1000 * AOC2.REVOLT_GARRISON_K);
+    /* 外国资助叛军（第十三章"支持叛军"）：目标国全国革命风险抬高 */
+    var oc = world && world.countries ? world.countries[cid - 1] : null;
+    if (oc && oc.aoc && oc.aoc.supported) r += AO.aoc2.dip ? AO.aoc2.dip.D.SUPPORT_REVOLT : 12;
     return clamp(r, 0, 100);
   }
 
@@ -747,7 +775,7 @@
     var p = world.provinces[pid - 1];
     if (!p || !p.aoc) return 0;
     var c = world.countries[p.owner - 1];
-    return revoltTargetOf(p, p.owner, c && c.aoc ? (c.aoc.wear || 0) : 0);
+    return revoltTargetOf(p, p.owner, c && c.aoc ? (c.aoc.wear || 0) : 0, world);
   };
 
   /* ---------------- 叛军国 / 内战 ---------------- */
@@ -999,6 +1027,26 @@
     AO.aoc2.setRel(world, a, b, -100);
     ca.aoc.warStart[b] = world.turn || 1;
     cb.aoc.warStart[a] = world.turn || 1;
+    /* opts.noJoin：只开这一场，不触发"盟友依约参战"。
+     * 连带参战本身要触发一次，但**只能一层** —— 盟友的盟友不该跟着进来，
+     * 否则一个 52 对同盟的世界里，一次宣战会连锁成全世界大战
+     * （实测 100 回合 283 次宣战、263 对同时交战）。 */
+    if (AO.aoc2.dip && !opts.noJoin) {
+      AO.aoc2.dip.clearPact(world, a, b, 'nap');
+      AO.aoc2.dip.clearPact(world, a, b, 'defpact');
+      /* 防御条约 / 保障独立 / 附庸：被攻方把盟友拉进来（第十三章） */
+      var joined = AO.aoc2.dip.onWarDeclared(world, a, b);
+      var msg = ca.name + ' 向 ' + cb.name + ' 宣战';
+      if (joined && joined.length) {
+        var nm = [];
+        for (var ji = 0; ji < joined.length; ji++) {
+          var jc = world.countries[joined[ji].cid - 1];
+          if (jc) nm.push(jc.name);
+        }
+        msg += '（' + nm.join('、') + ' 依约参战）';
+      }
+      return { ok: true, msg: msg, joined: joined };
+    }
     return { ok: true, msg: ca.name + ' 向 ' + cb.name + ' 宣战' };
   };
 
@@ -1149,7 +1197,10 @@
     if (!a.neighbors || a.neighbors.indexOf(toPid) < 0) return { ok: false, msg: '只能移到相邻省' };
     var toOwner = b.aoc.occupied || b.owner;
     var hostile = toOwner !== cid && AO.aoc2.atWar(world, cid, toOwner);
-    if (toOwner !== cid && !hostile) return { ok: false, msg: '要先宣战才能进入对方领土' };
+    if (toOwner !== cid && !hostile &&
+      !(AO.aoc2.dip && AO.aoc2.dip.canEnter(world, cid, toOwner))) {
+      return { ok: false, msg: '要先宣战才能进入对方领土（或先拿到军事通行权）' };
+    }
     var cost = AO.aoc2.moveCost(world, cid, toPid);
     if (c.aoc.mp < cost) return { ok: false, msg: '移动点不够（需 ' + cost + '，剩 ' + c.aoc.mp + '）' };
     c.aoc.mp -= cost;
@@ -1288,10 +1339,20 @@
      *           除非赢家自己也打疲了（厌战 ≥70%）。
      *   割地  ：全境被占（100）必接受；60 分以上且对方厌战 ≥70% 也认。
      *   赔款  ：50 分以上，或 30 分 + 对方厌战 ≥80%。 */
+    /* 战争分 ↔ 条款的换算（附录 A 明说这是缺口，这里是实测标定的）：
+     * 战争分的上限在实战里是"占掉对方一半的省"（=50），因为全境被占之前
+     * 对方早就求和了。所以门槛不能定在 100 —— 实测 300 回合 0 次割地、
+     * 全世界版图一动不动。改成按"占了几成"给条款：
+     *   割地 30 分 / 附庸 45 分 / 赔款 20 分 / 白和平 40 分（输家开不了白和平） */
     var accept;
     if (terms === 'white') accept = score >= 40 || foeWear >= 0.7;
-    else if (terms === 'land') accept = score >= 100 || (score >= 50 && foeWear >= 0.7);
-    else if (terms === 'reparations') accept = score >= 50 || (score >= 30 && foeWear >= 0.8);
+    else if (terms === 'land') accept = score >= 30 || (score >= 20 && foeWear >= 0.7);
+    else if (terms === 'reparations') accept = score >= 20 || (score >= 12 && foeWear >= 0.8);
+    /* 附庸化（第十四章"打赢战争在和约里附庸化"）：和割地同一道门槛。
+     * 规则书没给"分数 ↔ 条款"的换算（附录 A 明确说是缺口），所以两条都
+     * 按"全境被占 / 半境被占且对方打疲"来判 —— 附庸要的地更少、控制更强，
+     * 不该比割地更难谈。 */
+    else if (terms === 'vassal') accept = score >= 45 || (score >= 30 && foeWear >= 0.7);
     else accept = false;
     if (opts.force) accept = true;
     if (!accept) {
@@ -1310,6 +1371,10 @@
       for (i = 0; i < list.length; i++) {
         if (AO.aoc2.transferProvince(world, list[i], a)) out.ceded++;
       }
+    } else if (terms === 'vassal') {
+      /* 附庸化：地不动，人归你。占领省先还回去，再挂上宗主关系 */
+      if (AO.aoc2.dip) AO.aoc2.dip.setVassal(world, b, a);
+      out.vassal = true;
     } else if (terms === 'reparations') {
       var grossB = (cb.aoc.last && cb.aoc.last.gross) || 0;
       out.gold = Math.min(Math.round(cb.aoc.treasury), Math.round(grossB * 3));
@@ -1342,6 +1407,7 @@
     ca.aoc.wear = Math.max(0, (ca.aoc.wear || 0) - 0.3);
     cb.aoc.wear = Math.max(0, (cb.aoc.wear || 0) - 0.3);
     out.msg = (terms === 'white' ? '白和平' : terms === 'land' ? '割让 ' + out.ceded + ' 省' :
+      terms === 'vassal' ? '附庸化' :
       '赔款 ' + out.gold.toLocaleString() + ' 金') + '：' + ca.name + ' × ' + cb.name +
       '（停战 ' + AOC2.PEACE_TRUCE + ' 回合）';
     return out;
@@ -1472,7 +1538,16 @@
       var foeWear = (world.countries[worst - 1] || { aoc: {} }).aoc.wear || 0;
       /* 赢了就割地：全境占领必割；打到 60 分且对方厌战 ≥70% 也能割。
        * 只有"自己快撑不住且没占到便宜"才白和平。 */
-      if (!worstIsPlayer && (worstScore >= 100 || (worstScore >= 50 && foeWear >= 0.7))) {
+      /* 先要附庸（地不动、人归你），要不到再割地 */
+      if (!worstIsPlayer && AO.aoc2.dip &&
+        (worstScore >= 45 || (worstScore >= 30 && foeWear >= 0.7)) &&
+        !AO.aoc2.dip.overlordOf(world, worst) && !AO.aoc2.dip.overlordOf(world, c.id) &&
+        world.countries[worst - 1] && world.countries[worst - 1].provinces.length <=
+          Math.max(6, c.provinces.length * 0.5)) {
+        var pv = AO.aoc2.peace(world, c.id, worst, 'vassal');
+        if (pv.ok) return;
+      }
+      if (!worstIsPlayer && (worstScore >= 30 || (worstScore >= 20 && foeWear >= 0.7))) {
         var pr = AO.aoc2.peace(world, c.id, worst, 'land');
         if (pr.ok) return;
       }
@@ -1564,6 +1639,12 @@
       if (!nc || !nc.aoc || !nc.aoc.alive || nc.id === c.id) continue;
       if (AO.aoc2.atWar(world, c.id, nc.id)) continue;
       if (AO.aoc2.truceLeft(world, c.id, nc.id) > 0) continue;
+      /* 盟友 / 互不侵犯：AI 不撕约（规则书只说"玩家实际可违约硬打"） */
+      if (AO.aoc2.dip) {
+        if (AO.aoc2.dip.has(world, c.id, nc.id, 'ally')) continue;
+        if (AO.aoc2.dip.has(world, c.id, nc.id, 'nap')) continue;
+        if (AO.aoc2.dip.has(world, c.id, nc.id, 'defpact')) continue;
+      }
       var theirArmy = armyOf(world, nc.id);
       var ratio = theirArmy / Math.max(1, total);
       if (ratio < bestRatio) { bestRatio = ratio; best = nc.id; }
@@ -1686,6 +1767,16 @@
     for (k in o) if (Object.prototype.hasOwnProperty.call(o, k)) r[k] = o[k];
     return r;
   }
+  /* 两层：pacts 的内层是 { nap, defpact, ... } 对象，浅拷贝会让快照和现场
+   * 共享同一个内层 —— 存完之后清一条条约，快照里那条也跟着没了。 */
+  function cloneNested(o) {
+    var r = {}, k;
+    for (k in o) {
+      if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+      r[k] = (o[k] && typeof o[k] === 'object') ? cloneMap(o[k]) : o[k];
+    }
+    return r;
+  }
 
   AO.aoc2.save = function (world) {
     var out = { t: world.turn || 1, p: {}, c: {}, own: [], reb: [] }, i, p, c;
@@ -1727,6 +1818,15 @@
         ip: Math.round(c.aoc.investPool),
         al: c.aoc.alive ? 1 : 0,
         rel: cloneMap(c.aoc.rel || {}),
+        pacts: cloneNested(c.aoc.pacts || {}),
+        vo: c.aoc.vassalOf | 0,
+        vs: cloneMap(c.aoc.vassals || {}),
+        idp: Math.round((c.aoc.indep || 0) * 1000) / 1000,
+        cool: cloneMap(c.aoc.cool || {}),
+        gb: cloneMap(c.aoc.guarBy || {}),
+        gt: c.aoc.great ? 1 : 0,
+        prep: c.aoc.prepare || null,
+        sup: c.aoc.supported || null,
         truce: cloneMap(c.aoc.truce || {}),
         wear: Math.round((c.aoc.wear || 0) * 1000) / 1000,
         era: c.aoc.era | 0,
@@ -1844,6 +1944,15 @@
       c.aoc.lowHappy = s.low | 0;
       c.aoc.rebel = !!s.reb;
       c.aoc.rel = s.rel || {};
+      c.aoc.pacts = s.pacts || {};
+      c.aoc.vassalOf = s.vo | 0;
+      c.aoc.vassals = s.vs || {};
+      c.aoc.indep = s.idp || 0;
+      c.aoc.cool = s.cool || {};
+      c.aoc.guarBy = s.gb || {};
+      c.aoc.great = !!s.gt;
+      c.aoc.prepare = s.prep || null;
+      c.aoc.supported = s.sup || null;
       c.aoc.truce = s.truce || {};
       c.aoc.wear = s.wear || 0;
       c.aoc.rq = s.rq || [];
@@ -1905,5 +2014,7 @@
   };
   AO.aoc2.totalPop = totalPop;
   AO.aoc2.govOf = govOf;
+  /* 释放附庸（第十四章）要建国：叛军和附庸走同一把刀，别写两份 */
+  AO.aoc2.makeCountry = makeCountry;
 
 })(typeof window !== 'undefined' ? window : globalThis);
