@@ -832,6 +832,10 @@
   #country.ctab-dip .cpane-dip { display: block; }
   /* 页签里的第一节不要再顶一条线出来（页面已经换了，间距得重算） */
   #country .cpane > .sec:first-child { margin-top: 2px; }
+  /* 战争迷雾三个钮要挤在一行（阶段五）：.aocrow 的 min-width 92px 会把
+   * 第三个挤到下一行，单独一行很难看 —— 这一行放宽到三等分。 */
+  #cFogRow { flex-wrap: nowrap; }
+  #cFogRow button { min-width: 0; flex: 1 1 0; padding: 6px 2px; font-size: 11.5px; }
 
   .ch { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; padding-right: 22px; }
   .ch .flag {
@@ -2729,6 +2733,7 @@
         <div class="kv"><span>增长</span><span id="iGrowth" title="人口每回合自然增长率（地形 × 政体 × 幸福）"></span></div>
         <div class="kv"><span>国籍</span><span id="iNat" title="人口按国籍构成；本国占比 = 同化程度"></span></div>
         <div class="kv"><span>革命</span><span id="iRevolt" title="革命风险 0~100：低幸福 / 低稳定 / 异族 / 厌战 / 被占领驱动，驻军能压"></span></div>
+        <div class="kv"><span>疫病</span><span id="iDis" title="患病期间稳定度下降；治愈率 0.1%~10%/回合；发展度与科技减少死亡（规则书第十六章）"></span></div>
         <div class="kv"><span>核心</span><span id="iCore" title="这省是谁的核心领土（历史主张）"></span></div>
         <div class="kv"><span>价值</span><span id="iValue" title="省份价值：贸易定价用（购省价 = 40000 × 价值）"></span></div>
       </div>
@@ -2749,10 +2754,10 @@
     </div>
     </div>
     <!-- 军务（第十一、十二章）：驻军就是一个数字，征兵扣金扣人口 -->
-    <div class="sec">军务<span class="st2" id="iArmyInfo"></span></div>
+    <div class="sec" id="iArmySec">军务<span class="st2" id="iArmyInfo"></span></div>
     <div class="aocrow" id="iArmy"></div>
     <!-- 建筑（规则书第五章）：八种 + 大学；在建的不计入造价递增 -->
-    <div class="sec">建筑<span class="st2" id="iBldInfo"></span></div>
+    <div class="sec" id="iBldSec">建筑<span class="st2" id="iBldInfo"></span></div>
     <div class="aocrow" id="iBld"></div>
     <!-- 敕令（规则书第二十一章）：都花移动点 -->
     <div class="sec">敕令<span class="st2" id="iMP"></span></div>
@@ -2788,6 +2793,7 @@
   </div>
   <div class="cpane cpane-ov">
     <div class="kv"><span>政体</span><span id="cGov"></span></div>
+    <div class="kv"><span>国策</span><span id="cPersona" title="AI 性格（阶段五）：经营 / 扩张 / 外交 / 殖民 —— 只影响它的决策倾向，不影响规则"></span></div>
     <div class="kv"><span>人口</span><span id="cPop"></span></div>
     <div class="kv"><span>经济</span><span id="cEcon" title="全国经济值合计；每省上限 = 该省人口"></span></div>
     <div class="kv"><span>发展度</span><span id="cDev" title="全国各省平均发展度"></span></div>
@@ -2798,6 +2804,7 @@
     <div class="kv"><span>面积</span><span id="cArea"></span></div>
     <div class="kv"><span>首都</span><span id="cCapital"></span></div>
     <div class="kv"><span>省份</span><span id="cProv"></span></div>
+    <div class="kv"><span>时代</span><span id="cGolden" title="黄金时代（第十九章）：随机触发的限时加成 —— 科技型研究点 ×1.5、繁荣型收入 ×1.15 且幸福 +5"></span></div>
     <div class="sec">地形构成</div>
     <div class="bar" id="cBar"></div>
     <div class="legend" id="cLegend"></div>
@@ -2822,6 +2829,9 @@
     <div class="kv"><span>投资款</span><span id="cIP" title="投资滑条那一份攒成投资款（投资敕令用）"></span></div>
     <div class="sec" title="全国已完工的建筑合计（在建的不算）">建筑</div>
     <div class="hint" id="cBldSum"></div>
+    <div class="sec" title="只影响你自己看得见什么，不影响任何国家的真实数据">战争迷雾</div>
+    <div id="cFogRow" class="aocrow"></div>
+    <div class="hint" id="cFogTip"></div>
   </div>
   <!-- 外交（第十三、十四章）：交战 / 附庸 / 21 种动作 / 贸易 -->
   <div class="cpane cpane-dip">
@@ -2918,6 +2928,7 @@
 <script src="js/15-aoc2.js"></script>
 <script src="js/16-aoc2-court.js"></script>
 <script src="js/16b-aoc2-diplo.js"></script>
+<script src="js/16c-aoc2-world.js"></script>
 <script src="js/17-chrono.js"></script>
 <script src="js/13-main.js"></script>
 <script src="js/14-labels.js"></script>

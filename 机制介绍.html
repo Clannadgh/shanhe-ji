@@ -218,14 +218,14 @@ footer a:hover{text-decoration:underline}
     </div>
     <h1>《山河纪》<em>机制介绍</em></h1>
     <p class="sub">浏览器里跑的程序化世界生成器 + 回合制大战略沙盒：选一个种子，生成一个世界；选一个国家，活过一百年；最后得到一本只属于你的编年史。</p>
-    <p class="sub2">纯前端 · 零依赖 · 零构建 · 不联网 —— 双击 index.html 就能玩</p>
+    <p class="sub2">纯前端 · 零依赖 · 零构建 · 不联网 —— 双击 index.html 就能玩 · <b>规则 = 《文明时代2》</b></p>
     <div class="chips">
       <div class="chip"><b>80–3000</b><span>省 · 滑杆任调</span></div>
       <div class="chip"><b>4–140</b><span>国 · 滑杆任调</span></div>
-      <div class="chip"><b>7</b><span>种资源</span></div>
-      <div class="chip"><b>20</b><span>节点科技树</span></div>
-      <div class="chip"><b>63</b><span>个敌国 AI 各有性格</span></div>
-      <div class="chip"><b>1</b><span>位可拜的宰相</span></div>
+      <div class="chip"><b>9</b><span>种政体</span></div>
+      <div class="chip"><b>21</b><span>种外交动作</span></div>
+      <div class="chip"><b>17</b><span>种疾病</span></div>
+      <div class="chip"><b>3</b><span>档战争迷雾</span></div>
     </div>
   </div>
 </header>
@@ -236,28 +236,28 @@ footer a:hover{text-decoration:underline}
 <section class="block" id="loop">
   <div class="wrap">
     <div class="sechead"><h2>一回合 = 一年</h2><span class="en">TURN PIPELINE</span></div>
-    <p class="secintro">点一次「下一回合」（或按空格），全世界按固定顺序结算一遍。顺序本身就是设计：先付维护费再谈产出，先吃粮再谈民心，打完仗才轮到情报和事件。</p>
+    <p class="secintro">点一次「下一回合」（或按空格），全世界按固定顺序结算一遍。顺序本身就是规则：收入要先进国库才谈得上分配，幸福要等物资到手才谈得上稳定，稳定又要等幸福算完才谈得上叛乱；疫病与殖民排在最后 —— 它们改的是"下一回合的世界"。</p>
     <div class="pipe">
-      <span class="step"><i>①</i>维护费</span><span class="arr">→</span>
-      <span class="step"><i>②</i>工地推进</span><span class="arr">→</span>
-      <span class="step"><i>③</i>资源产出</span><span class="arr">→</span>
-      <span class="step"><i>④</i>抽税 · 俸禄</span><span class="arr">→</span>
-      <span class="step"><i>⑤</i>人口吃粮</span><span class="arr">→</span>
-      <span class="step hot"><i>⑥</i>民心</span><span class="arr">→</span>
-      <span class="step"><i>⑦</i>科研 · 产线</span><span class="arr">→</span>
+      <span class="step"><i>①</i>省收入</span><span class="arr">→</span>
+      <span class="step"><i>②</i>国库汇总</span><span class="arr">→</span>
+      <span class="step"><i>③</i>行政 · 军费 · 利息</span><span class="arr">→</span>
+      <span class="step"><i>④</i>物资满意度</span><span class="arr">→</span>
+      <span class="step hot"><i>⑤</i>幸福度</span><span class="arr">→</span>
+      <span class="step hot"><i>⑥</i>稳定度</span><span class="arr">→</span>
+      <span class="step"><i>⑦</i>人口 · 经济 · 发展度</span><span class="arr">→</span>
       <span class="step hot"><i>⑧</i>战争段落</span><span class="arr">→</span>
-      <span class="step"><i>⑨</i>情报署</span><span class="arr">→</span>
-      <span class="step"><i>⑩</i>事件 · 归档</span>
+      <span class="step hot"><i>⑨</i>人心（叛乱 · 内战）</span><span class="arr">→</span>
+      <span class="step"><i>⑩</i>山海（疫病 · 殖民 · 黄金时代）</span>
     </div>
-    <p class="pipe-note">红色两格是玩家盯得最紧的地方：民心决定税能不能收下去，战争段落里行军、会战、围城、占领一次性走完。<br>
-    流水线上还有三个<b>幕后工位</b>（虚线格，每回合跟着跑、但不弹任何提示条）：</p>
+    <p class="pipe-note">红色四格是玩家盯得最紧的地方：幸福定稳定、稳定定叛乱，战争段落里行军、战斗、占领一次性走完。<br>
+    流水线上还有四个<b>幕后工位</b>（虚线格，每回合跟着跑、但不弹提示条）：</p>
     <div class="pipe">
-      <span class="step ghost"><i>幕</i>官员资历与怨气</span><span class="arr">→</span>
-      <span class="step ghost"><i>幕</i>敌国 AI（内政 · 吏部 · 战争决策）</span><span class="arr">→</span>
-      <span class="step ghost"><i>幕</i>宰相代劳</span><span class="arr">→</span>
-      <span class="step ghost"><i>幕</i>世界纪要按情报档送达</span>
+      <span class="step ghost"><i>幕</i>建筑工地推进</span><span class="arr">→</span>
+      <span class="step ghost"><i>幕</i>敌国 AI（经营 · 研究 · 盖楼）</span><span class="arr">→</span>
+      <span class="step ghost"><i>幕</i>敌国 AI（外交 · 附庸税 · 备战）</span><span class="arr">→</span>
+      <span class="step ghost"><i>幕</i>敌国 AI（征兵 · 行军 · 宣战 · 和谈）</span>
     </div>
-    <p class="pipe-note">宰相排在敌国 AI 之后 —— 同一回合世界先动、你家宰相后动，他读到的已经是打完之后的版图。其余几十个国家（默认局 63 个对手）同一回合也各走各的这套流程 —— 你挂机，世界自己会动。</p>
+    <p class="pipe-note">其余 63 个国家同一回合也各走各的这套流程 —— 你挂机，世界自己会动。存档只存<b>状态</b>（谁有多少钱、省归谁、谁在生病），地图按种子重建。</p>
   </div>
 </section>
 
@@ -267,10 +267,11 @@ footer a:hover{text-decoration:underline}
     <div class="sechead"><h2>十分钟上手</h2><span class="en">QUICK START</span></div>
     <div class="quick">
       <div class="qcard"><div class="qn">壹</div><b>生成世界</b><p>世界工坊里直接点「生成新世界」—— 种子已填好，也可以换一个，或调省份 / 国家 / 陆地三个滑杆。</p></div>
-      <div class="qcard"><div class="qn">贰</div><b>选一个国家</b><p>点右上「开始游戏」。地图立刻按你的眼睛重画：只有自己的领土清晰，其余全是空白羊皮纸。</p></div>
-      <div class="qcard"><div class="qn">叁</div><b>推进几个回合</b><p>连点 5 次「下一回合」→ 打开「治理 → 情报署」调到「常规」→ 对邻国点「定向探测」。</p></div>
-      <div class="qcard"><div class="qn">肆</div><b>看情报变旧</b><p>刚探到的地方从羊皮纸变成「已探」，再等几个回合会慢慢泛黄 —— 地图上那块地方停在了你上次看到的那一天。</p></div>
-      <div class="qcard"><div class="qn">伍</div><b>打一场围城</b><p>省卡里盖一座兵营 → 征兵 → 对邻国宣战 → 下一回合看围城：先磨城墙，再断粮，最后占领。</p></div>
+      <div class="qcard"><div class="qn">贰</div><b>选一个国家</b><p>点右上「开始游戏」。地图立刻按你的眼睛重画：自己的领土与邻省清晰，远处的边地只剩羊皮纸。</p></div>
+      <div class="qcard"><div class="qn">叁</div><b>调预算</b><p>国卡「内政」页：四条预算滑条（税收 / 物资 / 科研 / 投资）+ 一条税率滑条。物资常年 65%~85%，税率一抬幸福就掉。</p></div>
+      <div class="qcard"><div class="qn">肆</div><b>下三条敕令</b><p>点自己的省 →「节日」（幸福）·「投资经济」（上限 = 人口）·「投资发展」（≥1.0 的唯一手段）。都花移动点。</p></div>
+      <div class="qcard"><div class="qn">伍</div><b>打一场仗</b><p>省卡「征兵」→「移动」→ 点邻省 → 外交页「宣战」→ 下一回合看战斗与占领：占领省会画上斜线，原主收入归零。</p></div>
+      <div class="qcard"><div class="qn">陆</div><b>去殖民</b><p>找地图上土黄色的无主边地（军队进不去）→ 省卡「殖民者」1,000 金移 1,000 人 → 占比过 10% 后自然殖民接手，过半就归你。</p></div>
     </div>
   </div>
 </section>
@@ -288,281 +289,255 @@ footer a:hover{text-decoration:underline}
           <div><h3>世界生成</h3><div class="tag">种子即世界 · 逐字节可复现</div></div>
         </div>
         <ul>
-          <li>噪声 + 加权 Voronoi 切分 + 邻接图，约 1 秒生成一张完整世界 —— 默认 <span class="n">2400×1200</span>、<b>约 1100 省、64 国</b></li>
-          <li>世界工坊任调：<b>省份 <span class="n">80–3000</span> · 国家 <span class="n">4–140</span> · 陆地占比 <span class="n">18–60%</span></b> 三个滑杆，外加 标准（1600×800）/ 大（2400×1200）/ 超大（3200×1600）三档尺寸</li>
-          <li>每省有地形、人口、<b>七种资源储量</b>、信仰；河网、海岸、政体、君主、国旗色全部算法生成</li>
-          <li>同一个种子永远得到同一个世界 —— 换浏览器、重开一局都对得上，适合分享与复现问题</li>
+          <li>噪声 + 加权 Voronoi 切分 + 邻接图，约 1.5 秒生成一张完整世界 —— 默认 <span class="n">2400×1200</span>、<b>约 1100 省、64 国</b></li>
+          <li>世界工坊任调：<b>省份 <span class="n">80–3000</span> · 国家 <span class="n">4–140</span> · 陆地占比 <span class="n">18–60%</span></b>，外加 标准 / 大 / 超大 三档尺寸</li>
+          <li>每省有地形、人口、经济、发展度；河网、海岸、政体、君主、国旗色全部算法生成</li>
+          <li>同一个种子永远得到同一个世界 —— 换浏览器、重开一局都对得上</li>
         </ul>
         <div class="more">详情 → DESIGN.md</div>
       </div>
 
-      <div class="mcard c-green">
+      <div class="mcard c-purple">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><rect x="4" y="5" width="24" height="18" rx="3" fill="#5b7a46"/><path d="M4 20l7-6 5 4 6-7 6 5" stroke="#fdf8ee" stroke-width="2" fill="none" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.2" fill="#f0c86a"/></svg></div>
-          <div><h3>五种视图 · 地图即界面</h3><div class="tag">能看多少，由你知道多少决定</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><rect x="4" y="6" width="24" height="20" rx="3" fill="#6b5b8a"/><path d="M8 12h16M8 17h11" stroke="#efe9f5" stroke-width="1.8"/><circle cx="24" cy="22" r="4" fill="#f0c86a"/></svg></div>
+          <div><h3>省份 = 一群人加一个数</h3><div class="tag">人口按国籍 · 经济是岗位 · 发展度 0.01~2.0</div></div>
         </div>
         <ul>
-          <li>政治 / 地形 / 宗教 / 资源 / <b>迷雾</b>五种视图，外加小地图、省份卡、国家卡</li>
-          <li>所有决策都在图上下：点省出省卡（左栏信息 / 右栏建筑），点国出国卡</li>
-          <li>同一个省，未知时只有一句「尚无测绘资料」；探过但过时给你「上回所见」的建筑与驻军；实时才全透明 —— <b>建造按钮在过时情报上直接禁用</b></li>
+          <li><b>人口按国籍构成</b>：本国占比就是同化程度，直接决定稳定与革命风险；打下来的省还是原国籍</li>
+          <li><b>经济 = 岗位</b>：上限 = 该省人口，超出人口的经济学不到钱；投资经济越富越贵</li>
+          <li><b>发展度 0.01~2.0</b>：自然增长到 <span class="n">1.0</span> 封顶，再往上只能靠「投资发展」；高发展度省驻军更省钱、疫病死得更少</li>
+          <li><b>稳定 1~100% · 幸福 0~100% · 革命风险 0~100</b>：三个数连成一条链，幸福低 → 稳定掉 → 风险涨 → 举旗</li>
         </ul>
-        <div class="more">详情 → DESIGN-FOG.md</div>
+        <div class="more">详情 → DESIGN-WORLD.md · DESIGN-PEOPLE.md</div>
       </div>
 
       <div class="mcard c-gold">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="11" cy="11" r="6.5" fill="#c08a2d"/><circle cx="11" cy="11" r="3" fill="#f4e8cf"/><path d="M20 22l4-4 5 5-4 4z" fill="#b0492f"/><path d="M17 15l3 3" stroke="#f4e8cf" stroke-width="2.4"/></svg></div>
-          <div><h3>资源与经济</h3><div class="tag">铁 · 金 · 粮 · 畜 · 木 · 鱼 · 盐</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="#c08a2d"/><path d="M16 8v16M12 12h6a3 3 0 010 6h-4" stroke="#fdf3d8" stroke-width="2" fill="none"/></svg></div>
+          <div><h3>国库与四条滑条</h3><div class="tag">税收 · 物资 · 科研 · 投资 · 税率</div></div>
         </div>
         <ul>
-          <li><b>中央国库 vs 省库两本账</b>：建造先扣本省、再扣中央、再同国调拨（有损耗，驿道科技 −5%）</li>
-          <li>建筑要吃<b>维护费（铁 + 金）</b>，付不起就停产；铁和金是唯二不可再生资源 —— 铁还是唯一的维护货币</li>
-          <li><b>两重人口天花板</b>：粮是短期的，<b>承载力</b>是长期的（地形 + 建筑决定这块地最多住多少人，v18.2）；超载每回合 −1% 人口、民心「人满为患」−2</li>
-          <li>铁矿采空 → <b>深层休眠 48 回合</b>回满复产；枯矿可改建「熔旧坊 / 淘金场」续命，改建走<b>快速通道</b>（不占建造格）</li>
-          <li>市场每省一座、<b>以物易物</b>（任何两种资源互换，5 单位一手）；买货走世界市场 —— 国库不是商店，金沉没不扣中央</li>
-          <li><b>省库上解</b>：省库金 &gt; 80 的部分每回合上解 25%，把散在省里的钱聚回中央（只走金不走铁，玩家与 AI 同一条）</li>
+          <li>毛收入 = 省税收（经济 × 税率 × 发展度加成）+ 生产收入 + 附庸上缴 + 占领省 ~10 金</li>
+          <li>四条滑条把毛收入切开，合计不超过 100%；没分配的部分自动进国库</li>
+          <li><b>税率上限由政体决定</b>（民主 24% / 君主 25% / 共产 28% / 部族 30%）；抬税降幸福、压人口增长</li>
+          <li>固定支出 = 行政费（收入比例 + 省数 + 发展度）+ 军费（按兵员 0.5 金/兵）+ 贷款利息；国库见底会自动借债，借满就不再借</li>
         </ul>
-        <div class="more">详情 → DESIGN-RESOURCES.md / DESIGN-LIFELINE.md</div>
+        <div class="more">详情 → DESIGN-WORLD.md</div>
+      </div>
+
+      <div class="mcard c-green">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M6 26V14l10-8 10 8v12z" fill="#5b7a46"/><path d="M13 26v-7h6v7" stroke="#eef4e6" stroke-width="1.8" fill="none"/></svg></div>
+          <div><h3>敕令与投资</h3><div class="tag">花移动点，当场生效</div></div>
+        </div>
+        <ul>
+          <li><b>节日</b>：每 2 万人口 +0.1 幸福，每人 0.02 金 —— 一次性，之后每回合衰减 80%</li>
+          <li><b>投资经济</b>：只能投到人口那条线，花费随现有经济递增</li>
+          <li><b>投资发展</b>：0.02 一级，花费随现有发展度平方递增；这是 ≥1.0 的唯一手段</li>
+          <li><b>征兵</b>（即时 ×2 价）· <b>同化</b>（转国籍）· <b>掠夺</b>（占领省换金）· <b>解散</b>（回填 1/20 人口）</li>
+        </ul>
+        <div class="more">详情 → DESIGN-WORLD.md</div>
       </div>
 
       <div class="mcard c-ink">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M6 27V9l10-4 10 4v18" fill="#e8e6e1" stroke="#24292e" stroke-width="2"/><path d="M11 27v-8h4v8M18 27V13h4v14" fill="#b0492f"/><path d="M6 27h20" stroke="#24292e" stroke-width="2"/><circle cx="16" cy="8" r="2" fill="#c08a2d"/></svg></div>
-          <div><h3>建造与经营</h3><div class="tag">建造坊加速 · 档位 · 保留座数</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><rect x="5" y="12" width="8" height="14" fill="#4b565f"/><rect x="19" y="7" width="8" height="19" fill="#4b565f"/><path d="M5 12l4-5 4 5M19 7l4-4 4 4" stroke="#2b3238" stroke-width="1.6" fill="none"/></svg></div>
+          <div><h3>建筑八种</h3><div class="tag">造价随拥有量递增 · 在建不计入</div></div>
         </div>
         <ul>
-          <li>造价必含金；<b>建造坊</b>是第一座该盖的建筑 —— 什么倒计时都能加速</li>
-          <li>每类建筑有 <b>Lv2 可选升级</b>，独立图标、独立效果</li>
-          <li><b>保留座数</b>三规则：停掉的座不缴维护、不产出、也<b>不失修</b>；同样维护费先保 Lv2；通用设施（学校 / 兵营 / 工厂）只有开 / 停两态 —— 「留半所学校」没有意义</li>
-          <li>维修费两段：先吃本省库存，不够中央拨款</li>
-          <li><b>实时推演</b>：省卡上的未来 8 回合数字不是直线外推，是受控分项 + 残差的干跑估算</li>
-          <li><b>建造参谋</b>给一条目标带：下限 = 口粮余量 +3（最快涨档）或预测净额 ≥ 0；上限 = 顶仓 / 维护占比 &gt; 55% / 矿寿不足 8 回合就停手</li>
+          <li>农场（人口 +5%/级，只能建在平原 / 草原 / 森林）· 工坊（收入 +5%/级）· 图书馆 → 大学（研究点）· 城堡（防御 +10%/级）· <b>瞭望塔</b>（+4% 防御，<b>揭开邻省迷雾</b>）· 港口（沿海）· 军械库（募兵 −1 金）· 补给营地（本地军费 −20%）</li>
+          <li><b>造价随你已拥有的同种建筑数量递增，在建的不计入</b> —— 一口气排队批量建更便宜，这是规则书明说的特性</li>
+          <li>地形另收维护费 / 建造费：山地驻军比平原贵 10%、造价也高 5%</li>
         </ul>
-        <div class="more">详情 → DESIGN-BALANCE.md / DESIGN-FORECAST.md</div>
+        <div class="more">详情 → DESIGN-COURT.md</div>
       </div>
 
       <div class="mcard c-purple">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M8 4h13a3 3 0 013 3v21H8z" fill="#ebe5f2" stroke="#6e5a86" stroke-width="2"/><path d="M12 10h9M12 14h9M12 18h6" stroke="#6e5a86" stroke-width="1.8" stroke-linecap="round"/><circle cx="24" cy="23" r="4.5" fill="#c08a2d"/><text x="24" y="25.6" font-size="6.5" text-anchor="middle" fill="#fdf8ee" font-weight="bold">仕</text></svg></div>
-          <div><h3>治理与吏治</h3><div class="tag">三科抽卡 · 官员是活人</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="none" stroke="#6b5b8a" stroke-width="2.4"/><path d="M16 9v7l5 3" stroke="#6b5b8a" stroke-width="2.2" fill="none"/></svg></div>
+          <div><h3>科技</h3><div class="tag">0.01~50 级 · 越升越贵</div></div>
         </div>
         <ul>
-          <li><b>三档税率</b>；民心不是一根数字 —— <b>六项 drivers</b> 逐项可查（税负、信仰、战争、人满为患……悬停见明细）</li>
-          <li><b>开科取士</b>共用人才点，三张池子：<b>文科</b>抽官（7 条普通词条 + 4 条宰相级，宰相级出现率 <span class="n">3.8%</span>）；<b>武科</b>抽将（14 条词条，直接解锁战术：猛将战力 ×1.25、铁壁免夜袭、闪袭跨两省……）；<b>工科</b>抽匠（装备线钥匙）</li>
-          <li>匠人四级：学徒 50 / 巧手 30 / 名师 15 / 宗师 5 —— 产能 +0/10/20/40%，<b>珍品只有宗师出得来</b>；一省没匠人，装备三线直接锁死</li>
-          <li>官员是活人：<b>资历</b>（初任→柱国，每 24 回合掷去留）会升、<b>怨气</b>会积（每回合 +1/12，欠饷 +2；≥90 每回合侵吞省库 1 金）</li>
-          <li>俸禄按资历 ×[1, 1.25, 1.5, 2]；「赏」钮 −15 金压 25 怨；老臣荣休进纪要</li>
+          <li>研究点来自科研滑条（花钱买）+ 图书馆 +0.01 / 大学 +0.02；<b>每攒满 100 进度 = 1 科技点</b></li>
+          <li>每级：+1% 收入 · +1% 战力 · +0.5 省防御 · 每 5 级 +1 移动点 · 疫病死得更少</li>
+          <li>图书馆另按人口给研究速度（封顶 +60%），所以大城才养得起科研</li>
         </ul>
-        <div class="more">详情 → DESIGN-RESOURCES.md §治理</div>
-      </div>
-
-      <div class="mcard c-sea">
-        <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="14" cy="14" r="9" fill="#dee9f0" stroke="#3d6883" stroke-width="2"/><path d="M14 8v12M8 14h12M10 10l8 8M18 10l-8 8" stroke="#3d6883" stroke-width="1.4"/><circle cx="14" cy="14" r="2.2" fill="#b0492f"/><path d="M21 21l6 6" stroke="#24292e" stroke-width="3" stroke-linecap="round"/></svg></div>
-          <div><h3>科技树</h3><div class="tag">20 个节点 · 三条枝</div></div>
-        </div>
-        <ul>
-          <li><b>11 资源/全局 + 6 制造工艺 + 3 军工</b>（皮革工艺是免费根，开局已点亮）</li>
-          <li>全局科技直改经营：复式账簿 税 +1 / 标准工料 维护 −25% / 驿道 损耗 −5% / 学徒制 工期 −1；铁犁深耕还把人口承载力 ×1.25</li>
-          <li>学校产科研点与人才点；队列可排、可冲刺；<b>点错不白花钱</b>（只入队不扣费，AI 同规）</li>
-          <li>v19 起科技树上<b>没有一件兵器</b> —— 科技只卖材质：皮革 → 青铜 → 铁器 → 火器 → 精密 → 工业（见下方「数值与公式」节）</li>
-        </ul>
-        <div class="more">详情 → DESIGN-CRAFT.md</div>
+        <div class="more">详情 → DESIGN-COURT.md</div>
       </div>
 
       <div class="mcard c-red">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M7 5l9 4v18l-9-4z" fill="#a8402e"/><path d="M25 5l-9 4v18l9-4z" fill="#7d2f21"/><path d="M16 9L7 5" stroke="#f4ded8" stroke-width="1.4"/><circle cx="16" cy="22" r="3.4" fill="#c08a2d"/></svg></div>
-          <div><h3>战争</h3><div class="tag">会战 · 围城 · 城墙 · 傀儡</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M6 24L24 8M6 8l18 16" stroke="#a8402e" stroke-width="2.6" stroke-linecap="round"/><circle cx="16" cy="16" r="3" fill="#a8402e"/></svg></div>
+          <div><h3>军队与战争</h3><div class="tag">军队 = 省上一个数字</div></div>
         </div>
         <ul>
-          <li>征兵三消耗：<b>人口 1000 / 金 2 / 该代军械 1 件</b>（骑兵另扣战马、炮兵扣炮）；省库存军械不足不可征 —— 成建制门槛</li>
-          <li>命令 × 战术：<b>进攻 / 围城 / 轰击 / 封锁 / 运输</b>等命令，配<b>九种战术</b>（强攻人人会用，其余要将领词条解锁，见数值节）</li>
-          <li><b>两相位自动会战</b>：射击 → 接触；将领、地形、骰子全进算式，战报每个乘数都写出来、可以复算伤亡</li>
-          <li><b>城墙是会战第一条血条</b>：轰击远程磨墙、围城断粮、失修掉防、「营造」词条回血</li>
-          <li><b>不打垮军队也能赢</b>：断粮（战力 ×0.85）、压制（被轰击 ×0.8）、<b>群龙无首</b>（首都陷落：战力 ×0.8 · 税 ×0.7 · 民心 −10）</li>
-          <li>战争结局不止灭国：收成<b>傀儡</b>（每回合上贡中央金收入的两成 · 兵随宗主 · 外交锁 · 可并入 · 会揭竿而起）；简化版海军（封锁 / 运输）</li>
+          <li><b>没有单位、没有将领编制</b>：省上一个数字，征兵同时扣金与人口，单省上限人口 1/10~1/5</li>
+          <li>全国共享一条<b>移动点</b>池，每回合刷新；移动按地形倍率花点（山地 ×3）</li>
+          <li>战斗按兵力结算，<b>守方吃地形 + 建筑 + 政体防御加成</b>；空省 ≥10 兵即占</li>
+          <li>占领省：画斜线阴影、原主收入归零、占领者 ~10 金/回合、不能募兵下敕令、大军会损毁当地人口经济</li>
         </ul>
         <div class="more">详情 → DESIGN-WAR.md</div>
       </div>
 
-      <div class="mcard c-ink">
+      <div class="mcard c-red">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M16 4l9 3v8c0 6-4 10-9 12-5-2-9-6-9-12V7z" fill="#e8e6e1" stroke="#24292e" stroke-width="2"/><path d="M16 8v14M12 12l4 4 4-4" stroke="#b0492f" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg></div>
-          <div><h3>军工与制造</h3><div class="tag">三坊产能 · 订单制 · 装备</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M7 25V7h9l2 4h7v14z" fill="#a8402e" opacity=".85"/><path d="M9 20h14" stroke="#f7ece8" stroke-width="1.8"/></svg></div>
+          <div><h3>宣战 · 和谈 · 厌战</h3><div class="tag">战争分 = 占领比例</div></div>
         </div>
         <ul>
-          <li>三坊是<b>产能中心</b>：全国三池 20 条产线，点数自己分 —— 打剑还是打鞋、造投石机还是重炮、四条快船还是一条铁甲舰</li>
-          <li>兵器 = <b>类型 × 材质 × 品质 × 词条</b>；品质四级 凡 / 良 / 上 / 珍，珍品只有宗师出得来</li>
-          <li><b>订单制</b>生产：满速 / 等料 / 溢出三态；两道库存闸 —— 装备够用、兵刃攒够，产线自动归零不白烧铁</li>
-          <li><b>武库统一发配</b>，盔 / 甲 / 靴三槽装备永久叠在部队上；材质换代自动回收旧装备折算存档五项</li>
-          <li>军工科技三件：制式装备（产能 +1/座）· 淬火工艺（品质整体上移一档）· 量产工艺（兵刃线工作量 5→4 点）</li>
+          <li>宣战耗外交点、<b>开局 5 回合禁战</b>、关系打到 −100 即战争态</li>
+          <li>和谈条款：白和平 / 割让被占省 / 赔款 / 附庸化；<b>战争分 30 能割地、45 能附庸</b>，偏向到 100 全接受</li>
+          <li>和约后停战 <span class="n">30</span> 回合；<b>厌战</b>战时涨、和平落，把军费撑大、幸福压低</li>
         </ul>
-        <div class="more">详情 → DESIGN-MILL.md / DESIGN-CRAFT.md</div>
-      </div>
-
-      <div class="mcard c-gold">
-        <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M17 3l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z" fill="#c08a2d"/><path d="M23 22l2 7M9 22l-2 7" stroke="#f4e8cf" stroke-width="2.4" stroke-linecap="round"/><path d="M7 27h18" stroke="#b0492f" stroke-width="2.4" stroke-linecap="round"/></svg></div>
-          <div><h3>事件与信仰</h3><div class="tag">十条事件池 · 国教两档 · 传教</div></div>
-        </div>
-        <ul>
-          <li>事件池十条随机触发：可以<b>自动选结果，也可以亲自处置</b>（小卡弹窗）；带冷却 / 一次性 / 产量 buff 状态</li>
-          <li>信仰是民心的一项 driver；<b>国教两档</b>：强制（异信仰省幸福 −6，可派传教）/ 宽容（−2，不能传教）</li>
-          <li><b>传教</b>：20 金 · 3 回合一省；未整合省不能传教、不产科研</li>
-          <li>事件效果走白名单执行器，不会出现失控脚本</li>
-        </ul>
-        <div class="more">详情 → js/16-events.js</div>
-      </div>
-
-      <div class="mcard c-sea">
-        <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M4 22a8 8 0 0114-5 6 6 0 018 5z" fill="#3d6883"/><path d="M4 22h24" stroke="#24292e" stroke-width="2"/><path d="M10 16q3-4 8-4t8 4" stroke="#dee9f0" stroke-width="1.8" fill="none" stroke-dasharray="3 3"/><circle cx="21" cy="9" r="3.2" fill="#f0c86a"/><path d="M18 9h-3M27 9h3M21 6V3M23.2 6.8l2-2M18.8 6.8l-2-2" stroke="#f0c86a" stroke-width="1.6" stroke-linecap="round"/></svg></div>
-          <div><h3>战争迷雾与情报署</h3><div class="tag">情报会过时 · 预算即反谍</div></div>
-        </div>
-        <ul>
-          <li>地图三态：<b>未测绘羊皮纸 / 已探旧情报（泛黄做旧）/ 实时</b> —— 情报越旧越黄</li>
-          <li>情报署预算三档（无 / 常规 / 重金），<b>预算同时是反谍等级</b>：你花钱看别人，也花钱防别人看你</li>
-          <li>定向探测：花 10 金派密探看指定邻省；密探被抓会掉关系、双方纪要都记一笔</li>
-          <li><b>世界消息也走情报渠道</b>：别国的宣战 / 灭国 / 都城易手按情报档延迟 5~8 / 3~4 / 1 回合送达，低档还有 15% 走样风闻，实讯会追一条更正 —— 每回合最多放行 2 条防刷屏</li>
-        </ul>
-        <div class="more">详情 → DESIGN-FOG.md</div>
+        <div class="more">详情 → DESIGN-WAR.md</div>
       </div>
 
       <div class="mcard c-green">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M12 5a5 5 0 015 5c3 0 5 2 5 5s-2 5-5 5H9a5 5 0 01-1-9.9A5 5 0 0112 5z" fill="#e8eedd" stroke="#5b7a46" stroke-width="2"/><path d="M9 24l-2 4M16 24l-2 4M23 24l-2 4" stroke="#5b7a46" stroke-width="2" stroke-linecap="round"/></svg></div>
-          <div><h3>外交</h3><div class="tag">关系值 · 条约 · 谈判桌</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="11" cy="12" r="4" fill="#5b7a46"/><circle cx="21" cy="12" r="4" fill="#8aa86f"/><path d="M3 26q3-6 8-6t8 6M13 26q3-6 8-6t8 6" stroke="#5b7a46" stroke-width="2" fill="none"/></svg></div>
+          <div><h3>人心：同化 · 叛乱 · 政体</h3><div class="tag">打下来不等于吃得下</div></div>
         </div>
         <ul>
-          <li>与每国一个<b>关系值</b>：宣战、边境、贸易、密探被抓都会推它，每回合向 0 缓释</li>
-          <li>可签<b>同盟 / 互不侵犯</b>；停战后有 20 回合冷却</li>
-          <li>打仗攒<b>战争分</b>，端上谈判桌议和：要价、赔款、条款皆可谈</li>
-          <li><b>跨国贸易</b>：资源见底时从外国货源买货（AI 也会买，铁也在交易清单里）</li>
+          <li>人口按国籍构成，<b>同化敕令</b>渐进转国籍（旧核心不删）；异族越多越贵越慢</li>
+          <li>革命风险 = 低幸福 + 低稳定 + 异族 + 厌战 + 被占领 − 驻军；风险 ≥80 每回合 10% 举旗 → <b>叛军国</b>（与所有人敌对）</li>
+          <li>全国幸福连续 20 回合低位 → <b>内战</b>，国家一分为二</li>
+          <li><b>政体九种</b>全表：税上限 / 物资 / 投资 / 行政费 / 研究成本 / 移动 / 募兵 / 军费 / 防御；换政体花金、受时代门槛限制，系数当场生效</li>
         </ul>
-        <div class="more">详情 → DESIGN-WAR.md §外交和谈</div>
+        <div class="more">详情 → DESIGN-PEOPLE.md</div>
+      </div>
+
+      <div class="mcard c-sea">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M6 22c6-8 14-8 20 0" stroke="#3d6883" stroke-width="2.2" fill="none"/><circle cx="10" cy="18" r="2.4" fill="#3d6883"/><circle cx="22" cy="18" r="2.4" fill="#3d6883"/><path d="M16 6v8" stroke="#3d6883" stroke-width="2"/></svg></div>
+          <div><h3>外交与附庸</h3><div class="tag">21 种动作 · 关系 −100~+100</div></div>
+        </div>
+        <ul>
+          <li>改善 / 侮辱 / 送礼 / 宣战 / 备战 / 和谈 / 同盟 / 互不侵犯 / 防御条约 / 保障独立 / 通行权 / 贸易 / 索取附庸 / 索取吞并 / 释放附庸 / 支持叛军 / 联合统治 / 迁都 / 最后通牒 …</li>
+          <li><b>最后通牒</b>：关系 ≤ −10 才发，对方三选一（同意 / 拒绝 / 应战）</li>
+          <li><b>附庸</b>三途径（和约 / 最后通牒 / 释放复国）；附庸税 20%；独立欲望随宗主战时加速，满 100% 起兵；关系拉到 100 吞并必成</li>
+          <li><b>贸易</b>七类：金币 / 省份（购省价 40000 × 价值，AI 永不卖核心省）/ 条约 / 拉人参战</li>
+        </ul>
+        <div class="more">详情 → DESIGN-COURT.md</div>
+      </div>
+
+      <div class="mcard c-gold">
+        <div class="mhead">
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M16 26V10" stroke="#c08a2d" stroke-width="2"/><path d="M16 14l8-5-1 9-7-4" fill="#c08a2d"/><path d="M16 20l-8-4 1 7 7-3" fill="#dcae4f"/></svg></div>
+          <div><h3>殖民：地图上的空白</h3><div class="tag">无主边地 · 军队进不去</div></div>
+        </div>
+        <ul>
+          <li>开局 <b>4.5%</b> 的省是<b>无主边地</b>（苔原 / 沙漠 / 沼泽那一圈），土著记在人口表 0 号位 —— 军队进不去</li>
+          <li><b>殖民者 1,000 金</b> → 移入 1,000 人（抬占比）· <b>殖民地 10,000 金</b> → 立即归你（要先有 10% 本国人口）</li>
+          <li><b>自然殖民</b>：本国占比 ≥10% 后每回合自己长人（越高越快），<b>过半即并入</b> —— 并入之后土著成了少数民族，该同化了</li>
+        </ul>
+        <div class="more">详情 → DESIGN-WORLD.md</div>
       </div>
 
       <div class="mcard c-purple">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M16 5C10 5 6 9 6 14c0 4 3 7 6 8v4h8v-4c3-1 6-4 6-8 0-5-4-9-10-9z" fill="#ebe5f2" stroke="#6e5a86" stroke-width="2"/><path d="M16 5v6M11 13l5-2 5 2" stroke="#b0492f" stroke-width="2" fill="none"/><path d="M12 26h8" stroke="#6e5a86" stroke-width="2" stroke-linecap="round"/></svg></div>
-          <div><h3>安定与整合</h3><div class="tag">叛乱链 · 占领整合 · 安抚金</div></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><circle cx="16" cy="16" r="9" fill="none" stroke="#6b5b8a" stroke-width="2.2"/><circle cx="13" cy="14" r="1.6" fill="#6b5b8a"/><circle cx="19" cy="14" r="1.6" fill="#6b5b8a"/><path d="M12 21q4 -3 8 0" stroke="#6b5b8a" stroke-width="1.8" fill="none"/><path d="M6 6l3 3M26 6l-3 3" stroke="#6b5b8a" stroke-width="1.6"/></svg></div>
+          <div><h3>疫病 · 黄金时代 · 迷雾</h3><div class="tag">没人下命令也会发生的事</div></div>
         </div>
         <ul>
-          <li>每省一个<b>不安值</b>（0~100），六项驱动：苛税、占领、战乱、信仰冲突……</li>
-          <li>不安爆表有<b>三种叛乱结果</b>，可以武力平定、可以招安</li>
-          <li>新占的省走<b>整合链</b>（0~100）：未整合不产科研、不能传教；发安抚金加速归心，整合完才算真正的国土</li>
+          <li><b>十七种病</b>：每回合按"<b>该病已感染省占比 + 1%</b>"向邻省传播；感染那一下永久掉人（发展度 / 科技减伤），患病期间稳定 −18，治愈率 0.1%~10%/回合</li>
+          <li><b>黄金时代</b>：随机降临 24 回合 —— 科技型研究点 ×1.5、繁荣型收入 ×1.15 且幸福 +5</li>
+          <li><b>战争迷雾三档</b>：1 全图可见 / 2 边境可见（默认）/ 3 只本国；瞭望塔揭开一圈邻省，探过的地方留"最后一次看见的样子"，越旧越黄</li>
         </ul>
-        <div class="more">详情 → DESIGN-WAR.md §安定与整合</div>
+        <div class="more">详情 → DESIGN-WORLD.md · DESIGN-FOG.md</div>
       </div>
 
-      <div class="mcard c-red">
+      <div class="mcard c-ink">
         <div class="mhead">
-          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><path d="M7 28V7a2 2 0 012-2h10a2 2 0 012 2v21zM7 28h18" fill="#f4ded8" stroke="#a8402e" stroke-width="2"/><path d="M11 10h7M11 14h7M11 18h4" stroke="#a8402e" stroke-width="1.8" stroke-linecap="round"/><path d="M23 12l2 2-2 2M26 12l-2 2 2 2" stroke="#c08a2d" stroke-width="1.6" fill="none"/></svg></div>
+          <div class="micon"><svg width="30" height="30" viewBox="0 0 32 32"><rect x="6" y="6" width="20" height="22" rx="2" fill="#4b565f"/><path d="M10 11h12M10 16h12M10 21h7" stroke="#e8e6e1" stroke-width="1.7"/></svg></div>
           <div><h3>编年史</h3><div class="tag">一局一本 · 只属于你</div></div>
         </div>
         <ul>
-          <li>每回合归档、年终出年表；<b>统一 / 灭亡时定稿成史书并授称号</b></li>
-          <li>年表里不止你的国：<b>「别处的历史」按事件年份归位</b> —— 但那是史官事后修订、带着时滞与风闻的那一版</li>
+          <li>年表按回合自动归档：谁宣战、谁灭国、谁割地、谁举旗、哪天疫起、哪块边地易主</li>
+          <li>定稿快照与称号：一百年后这本书就是这一局唯一的"正史"</li>
+          <li>存档只存状态 + 编年史，不存地图</li>
         </ul>
-        <div class="more">详情 → js/17-chrono.js</div>
+        <div class="more">详情 → DESIGN.md</div>
       </div>
 
     </div>
   </div>
 </section>
 
-<!-- ================= 数值与公式 ================= -->
+<!-- ================= 数值 ================= -->
 <section class="block" id="nums">
   <div class="wrap">
     <div class="sechead"><h2>数值与公式</h2><span class="en">NUMBERS THAT MATTER</span></div>
-    <p class="secintro">把最容易问「到底怎么算的」的五组机制摊开。全部来自 js/15-resources.js 的定义区与设计文档，战报里的每个乘数都可以照着复算。</p>
+    <p class="secintro">把最容易问「到底怎么算的」的五组机制摊开。全部来自 js/15-aoc2.js、16-aoc2-court.js、16b-aoc2-diplo.js、16c-aoc2-world.js 的定义区，面板上的每个数都可以照着复算。</p>
 
-    <!-- 会战 -->
     <div class="aibox">
-      <h3><span class="no">甲</span>会战怎么算</h3>
-      <div class="asub">两相位自动会战（AO.BATTLE）—— 战报把每个乘数都写出来</div>
-      <div class="formula">每方战力 = Σ(兵数/1000 × 兵种战力) × 将领 × 地形(守方)<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; × 压制(<em>被轰击 0.8</em>) × 断粮(<em>0.85</em>) × 群龙无首(<em>0.8</em>) × 骰子(<em>0.85~1.15</em>)<br>
-      合围：同省同国 ≥ 2 军 → 各 <em>×1.15</em></div>
+      <h3><span class="no">甲</span>一回合的钱怎么走</h3>
+      <div class="asub">省收入 → 四条滑条切开 → 行政 / 军费 / 利息 → 剩下才是国库</div>
+      <div class="formula">省税收 = 经济 × 税率% × <em>0.2</em> × (1 + 发展度 × 0.5) × (1 + 政体税收修正)<br>
+      生产收入 = 经济 × <em>0.02</em> × (0.5 + 物资滑条%) × (1 + 政体生产修正) × 建筑与科技倍率<br>
+      行政费 = 毛收入 × <em>20%</em> + 省数 × <em>50</em> + 发展度合计 × <em>200</em>（再乘政体系数）<br>
+      军费 = Σ 驻军 × <em>0.5</em> × 地形维护 × (1 + 政体) × (1 + 厌战) × (1 − 补给营地 20%)</div>
       <ul>
-        <li><b>两相位</b>：先射击（双方射程 &gt; 0 的战力先互杀伤）→ 再接触（余部互殴，炮兵接触段 ×0.5）</li>
-        <li>每相位损失率 = <code>0.26 × 我方战力 / 双方战力之和</code>，摊到各军头上</li>
-        <li>判定：战后兵力 &lt; 对方 70% 判负，僵持时兵多的算赢；败方退向最近己方省，<b>无路可退则全歼</b></li>
-        <li>阵亡兵<b>从人口里扣</b>；装备按「每死 1000 人损 1 件」从驻省库存扣</li>
+        <li><b>四条滑条</b>：税收（进国库）· 物资（当回合吃掉换满意度）· 科研（换研究点）· 投资（攒成投资款）</li>
+        <li>物资满意度 = 物资滑条% ÷ <em>70%</em>，封顶 1.3；每差 10% 幸福差 3 点</li>
+        <li>国库见底自动借债，额度 = 每回合收入 × 3；借满就不再借 —— 欠饷但不爆负</li>
       </ul>
-      <h4>城墙数值（会战第一条血条）</h4>
-      <table class="t">
-        <tr><th>等级</th><th>耐久</th><th>造价</th><th>关键数</th></tr>
-        <tr><td><b>土木</b> Lv1</td><td class="n">30</td><td>18 木 10 金</td><td rowspan="3">满耐久守方战力 ×1.25 · 1 点城防 ≈ 100 人份伤亡<br>轰击削墙 = 攻城值 × 兵数/1000 × 0.5 · 破城锤 = 攻城值合计 ×2<br>无战事 +2/回合 · 维护欠费 −5/回合 · 「营造」词条 +8/回合、守城胜利回充 15%</td></tr>
-        <tr><td><b>砖石</b> Lv2</td><td class="n">60</td><td>36 木 20 金</td></tr>
-        <tr><td><b>棱堡</b> Lv3</td><td class="n">100</td><td>72 木 40 金</td></tr>
-      </table>
-      <p style="font-size:12.5px;color:var(--ink2)">每国首都开局自动砌到 Lv1。耐久上限只有 30~100 而一场会战伤亡几百上千 —— 所以要有「1 点城防 ≈ 100 人」这个换算：Lv1 大约顶一场半，既不是纸糊的，也不至于让没有攻城器械的军队永远啃不动。</p>
+      <div class="callout">这三条曲线是<b>实测标定</b>的：行政费按"毛收入比例"而不是纯按省数，是因为纯按省数收，穷省第一回合就付不出、只能靠借债续命（实测 20 省穷国每回合 −44 金）。</div>
     </div>
 
-    <!-- 九战术 -->
     <div class="aibox">
-      <h3><span class="no">乙</span>九种战术</h3>
-      <div class="asub">「强攻」人人可用，其余八种全靠将领词条解锁 —— 武科抽到谁，决定你会打什么仗</div>
-      <table class="t">
-        <tr><th>战术</th><th>需要词条</th><th>效果</th></tr>
-        <tr><td><b>强攻</b></td><td>—（人人可用）</td><td>正面会战，没有额外加成 —— 没有对应词条时的唯一选择</td></tr>
-        <tr><td><b>闪袭</b></td><td>闪袭 / 急行军</td><td>一回合跨两省，可直扑敌首都，首战先手 +10%</td></tr>
-        <tr><td><b>围城</b></td><td>围城</td><td>围而不打：敌省产出归零，守军吃存粮，粮尽每回合 −10% —— <b>完全无视城墙</b></td></tr>
-        <tr><td><b>铁壁</b></td><td>铁壁</td><td>防御 ×1.25，免疫一次夜袭</td></tr>
-        <tr><td><b>夜袭</b></td><td>夜战</td><td>跳过守方射击相位</td></tr>
-        <tr><td><b>劫掠</b></td><td>游骑</td><td>抢 30% 存粮与金，该省民心 −15</td></tr>
-        <tr><td><b>设伏</b></td><td>设伏（只防）</td><td>山地 / 森林防御 ×1.3</td></tr>
-        <tr><td><b>坚壁清野</b></td><td>坚壁（只防）</td><td>敌军进入前把 70% 存粮运往内陆省</td></tr>
-        <tr><td><b>合围</b></td><td>—（自动判定）</td><td>同省同国 ≥2 军，各 +15%</td></tr>
-      </table>
-      <div class="callout">武科池里还有两条特殊词条：<b>练兵使</b>（本省征兵快 1 回合，驻军每回合自动补员 2%）、<b>营造</b>（驻防省城墙回复 +8/回合）。也有坑：<b>贪墨</b>将战力 +10% 但驻省民心 −6，抽到是喜是忧自己掂量。金边词条「治世军神」（权重 3，全场最稀）闪袭 + 围城双解锁、战力 +15%。</div>
-    </div>
-
-    <!-- 工艺链 -->
-    <div class="aibox">
-      <h3><span class="no">丙</span>制造工艺链</h3>
-      <div class="asub">科技只卖材质，不卖兵器名 —— 六档工艺一路点上去，兵种三维跟着换装</div>
-      <table class="t">
-        <tr><th>工艺</th><th>研究点 · 工期</th><th>材质乘数</th><th>顺带解锁</th></tr>
-        <tr><td><b>皮革工艺</b></td><td>免费根（开局点亮）</td><td class="n">皮 ×1.00</td><td>投石机 · 桨帆船</td></tr>
-        <tr><td><b>青铜工艺</b></td><td class="n">20 · 2 回合</td><td class="n">青铜 ×1.15</td><td>青铜炮 · 盖伦帆船</td></tr>
-        <tr><td><b>铁器工艺</b></td><td class="n">30 · 3 回合</td><td class="n">铁 ×1.30</td><td>野战炮 · 风帆战列</td></tr>
-        <tr><td><b>火器工艺</b></td><td class="n">45 · 3 回合</td><td class="n">火器 ×1.55</td><td>重炮（弓显示为「铳」）</td></tr>
-        <tr><td><b>精密工艺</b></td><td class="n">60 · 4 回合</td><td>材质不升</td><td><b>全兵种三维 +15%</b></td></tr>
-        <tr><td><b>工业工艺</b></td><td class="n">80 · 4 回合</td><td>材质不升</td><td><b>再 +15%</b>（加算合计 +30%）· 铁甲舰</td></tr>
-      </table>
+      <h3><span class="no">乙</span>幸福 → 稳定 → 叛乱</h3>
+      <div class="asub">三个 0~100 的数连成一条链，每一环都只朝目标慢慢靠（不能一夜翻盘）</div>
+      <div class="formula">幸福目标 = <em>55</em> + (物资满意度 − 1) × <em>30</em> − 税率 × <em>0.6</em> + 节日 − 厌战 × <em>12</em><br>
+      稳定目标 = <em>30</em> + 本国占比 × <em>40</em> + (幸福 − 50) × <em>0.4</em> − 疾病 <em>18</em> − 占领 <em>20</em> − 革命风险 × 0.15 + 驻军(≤20)<br>
+      革命风险目标 = max(0, 45 − 幸福) × 1.2 + max(0, 55 − 稳定) × 1.0 + (1 − 本国占比) × 35 + 厌战 × 15 + 15(被占领) − 驻军压</div>
       <ul>
-        <li>兵器 = <b>类型（刀/剑/矛/斧/弓）× 材质 × 品质 × 词条</b>；品质凡 / 良 / 上 / 珍四级，宗师的珍品份额 20%，学徒为 0</li>
-        <li>品质 roll 表随匠人等级整体上移，「淬火工艺」再上移一档 —— 同一个工匠，科技前后出的货不一样</li>
-        <li>AI 只追材质不玩花活：默认刀 + 驽马，但会跟着工艺链换代自动换装</li>
+        <li>每个数都按 25%~35% 的比例朝目标走 —— 所以"加了税"当回合税就涨、幸福下回合才掉，先甜后苦</li>
+        <li>风险 ≥<b>80</b> 每回合 <b>10%</b> 概率举旗；全国幸福连续 <b>20</b> 回合 &lt; 25 → 内战</li>
+        <li>驻军只能压风险（每千兵 1 点，最多 12）—— 权宜；<b>同化</b>才是根治</li>
       </ul>
     </div>
 
-    <!-- 经济续命 -->
     <div class="aibox">
-      <h3><span class="no">丁</span>经济续命五通道</h3>
-      <div class="asub">铁和金是唯二不可再生的资源，而铁还是唯一的维护货币 —— 缺了怎么办，五条路都通</div>
+      <h3><span class="no">丙</span>一场仗怎么算</h3>
+      <div class="asub">军队就是省上一个数字 —— 所以战斗只有一个比较式</div>
+      <div class="formula">攻方战力 = 兵数 × (1 + 抖动 ±12%) × 科技战力倍率<br>
+      守方战力 = 兵数 × (1 + 地形防御 + 政体防御 + 城堡 10%/级 + 瞭望塔 4%) × (1 + 抖动)<br>
+      攻方胜 → 守军全歼，攻方按对方战力 × <em>0.7</em> 折损；剩不到 <em>10</em> 兵守不住（残兵退回）</div>
       <ul>
-        <li><b>淘金场</b>：枯金矿改建，<b>1 金 = 2 木</b>（没木不出金、不倒扣），每省封顶 2 座 —— 伐木场从此有了新去处</li>
-        <li><b>熔旧坊</b>：枯铁矿改建，教育 ≥ 15、每省 2 座；休眠中的矿也能改，不用干等 48 回合</li>
-        <li><b>改建快速通道</b>（v18.1b）：改建<b>不占每回合的建造格</b>、每回合 1 座、先铁后金 —— 改建不是「盖一座新建筑」，是「把睡着的矿脉换个活法」，不该跟学校排队</li>
-        <li><b>市场以物易物</b>：任何两种资源互换，5 单位一手；买货走世界市场（供给无限、金沉没、不扣中央），AI 比价后也会买</li>
-        <li><b>省库上解</b>：省库金 &gt; 80 的部分每回合搬 25% 给中央（150 → 搬 17 → 剩 133），只走金不走铁 —— 铁的家在矿脉和熔旧坊</li>
+        <li>地形防御：山地 <span class="n">+50%</span> · 森林 +20% · 丘陵 +15% · 苔原 +10% · 其余 0</li>
+        <li>移动花费按地形：山地 ×3 · 丘陵 ×2 · 苔原 ×2 · 森林 ×1.5 · 其余 ×1，再乘政体（游牧 ×0.6）</li>
+        <li>空省（无守军）≥<b>10 兵</b>即可占领；占领当回合幸福 −10，并按"兵/人口"损毁当地经济人口（上限 25%）</li>
+        <li>所有抖动走 <code>hash(种子, 回合, 省, 双方)</code> —— 同种子同回合永远同一场仗，禁 Math.random</li>
       </ul>
-      <div class="callout blue">AI 侧同样有反应：库存破线就<b>找未采矿脉开新矿</b>（战时不开）；有市场就<b>卖余货</b> —— 卖粮 / 鱼 / 木 / 盐 / 铁 / 马，安全线是粮 / 鱼 &gt; 口粮 ×4 + 30、马 &gt; 20、铁与其余 &gt; 40，只出手余量不卖家底。</div>
     </div>
 
-    <!-- 人口承载力 -->
     <div class="aibox">
-      <h3><span class="no">戊</span>人口承载力（POPCAP）</h3>
-      <div class="asub">地能养多少人，人就在哪里停 —— 粮是短期天花板，承载力是长期天花板</div>
-      <div class="formula">承载力 = 地形基数 ×（首都省 <em>×1.5</em>）+ Σ建筑加成&nbsp;&nbsp;<span class="cm">// 「铁犁深耕」科技再 ×1.25</span><br>
-      超载：人口每回合 <em>−1%</em>（往承载力回落）· 民心 driver「人满为患」<em>−2</em></div>
-      <p><b>地形基数（万人/省）</b>：平原 40 · 海岸 35 · 草原 30 · 岛屿 28 · 森林 20 · 丘陵 18 · 山地 12 · 沼泽 10 · 沙漠 8 · 冻土 6</p>
-      <p><b>建筑加成（万人/座）</b>：农场 Lv1 +10 · Lv2 +20 · 渔港 +8 · 粮仓 +6 · 驯马场 +4</p>
-      <div class="callout">岛屿 28 是「海岸 35 打八折」：岛小、耕地碎，但也靠海吃海，不该比山地（12）还低 —— 一个连任务书都没列的地形，给了一条讲得出道理的数。</div>
+      <h3><span class="no">丁</span>殖民三方式</h3>
+      <div class="asub">三种方式回答三个不同的问题：占个位 / 加速 / 买断</div>
+      <table class="t">
+        <tr><th>方式</th><th>花费</th><th>效果</th><th>什么时候用</th></tr>
+        <tr><td><b>殖民者</b></td><td class="n">1,000 金</td><td>移入 1,000 人</td><td>边地人口只有几千，一次就是 10%+ —— 用它打开自然殖民的开关</td></tr>
+        <tr><td><b>殖民地</b></td><td class="n">10,000 金</td><td>立即归你</td><td>已经占到 10% 以上、不想等自然增长</td></tr>
+        <tr><td><b>自然殖民</b></td><td class="n">0</td><td>每回合按"超出 10% 的部分 × 2%"长人，过半并入</td><td>长期持有 —— 越占越快，急不来</td></tr>
+      </table>
+      <p style="font-size:12.5px;color:var(--ink2)">AI 的门槛比玩家紧一档：手里要有四倍钱、每回合只派一次、占比过 12% 就不再派（交给自然增长）、买断要等占比过 25% 且手里有八倍钱。规则书的叙述本来就是"殖民者的作用是触发/加速自然殖民"——连派十次等于把船票当传送门。</p>
+    </div>
+
+    <div class="aibox">
+      <h3><span class="no">戊</span>瘟疫怎么走</h3>
+      <div class="asub">传播率只看"已经有多少省病了"—— 所以瘟疫要么早灭，要么一发不可收</div>
+      <div class="formula">某个未感染省每回合被传染的概率 = <em>该病已感染省占比 + 1%</em><br>
+      感染瞬间掉人 = 人口 × 该病杀伤% × (1 − 发展度 × 0.5) × (1 − 科技 × 1%)<br>
+      治愈：每回合按该病的 1%~10% 掷一次（麻风 0.1%~5%，狂犬 0.1%~2%）</div>
+      <table class="t">
+        <tr><th>病</th><th>省数上限</th><th>杀伤</th><th>治愈率/回合</th></tr>
+        <tr><td><b>瘟疫</b></td><td class="n">1200</td><td class="n">10%</td><td>1%~10%</td></tr>
+        <tr><td>黑死病 · 天花</td><td class="n">700</td><td class="n">7.5%</td><td>2.5%~10% / 1%~10%</td></tr>
+        <tr><td>西班牙流感</td><td class="n">400</td><td class="n">3%</td><td>5%~10%</td></tr>
+        <tr><td>埃博拉 … 伤寒（10 种）</td><td class="n">20~100</td><td class="n">0.1%~0.5%</td><td>0.1%~10%</td></tr>
+        <tr><td>营养不良（人口 &lt; 1 万）</td><td class="n">—</td><td class="n">1%</td><td>0.1%~2%</td></tr>
+      </table>
+      <div class="callout">省数上限按 AoH2 的口径（地球 3,988 省）折算到本世界，再乘 0.5 的"气候折扣"——照抄的话一场瘟疫能吃掉全图三成人口。爆发时按该病规模一次播 1~6 个省：只播一个的话，1% 的传播率会被 1%~10% 的治愈率碾死，瘟疫等于没发生（实测 500 回合峰值只有 3 省）。</div>
     </div>
 
   </div>
@@ -572,162 +547,71 @@ footer a:hover{text-decoration:underline}
 <section class="block" id="ai">
   <div class="wrap">
     <div class="sechead"><h2>AI 都有什么功能</h2><span class="en">THE AI STACK</span></div>
-    <p class="secintro">《山河纪》的 AI 不是调参数陪玩的光杆野蛮人：地图上所有国家共用一套「决策核心」，各自带着性格、怪癖、账本和纪律过日子、打仗、治官、造装备；玩家自己还能拜一位宰相，把同一套脑子雇回家。敌国 AI 的三条历史约束 —— 不动经济 / 不主动进攻 / 敌国之间不打 —— 已经<b style="color:#f0c86a">全部解除</b>。</p>
+    <p class="secintro">《山河纪》的 AI 不是调参数陪玩的光杆野蛮人：地图上所有国家共用同一套规则、同一套阈值，各自带着性格过日子。玩家能按的每一个钮，AI 都走同一道闸门 —— 它不写新的经济或战争代码。</p>
 
-    <!-- AI 0：总纲 -->
     <div class="aibox">
-      <h3><span class="no">〇</span>一套决策核心，两拨用户</h3>
-      <div class="asub">敌国 AI 与你的宰相跑的是同一段代码 —— AI 与玩家不可能各有一套账</div>
-      <div class="formula">aiDecide(owner, perms, opt)<br>&nbsp;&nbsp;perms = { build, research, tax, officials }&nbsp;&nbsp;<span class="cm">// 四布尔：不许可的格子直接跳过</span><br>&nbsp;&nbsp;opt&nbsp;&nbsp;&nbsp;= { slots, taxMul, smartTax, forceMax, noMaxTax }</div>
+      <h3><span class="no">〇</span>四条纪律</h3>
+      <div class="asub">AI 不作弊，是因为它根本没有那条路径</div>
       <ul>
-        <li><b>AI 国</b>：全权限调用，行为与设计逐格一致；<b>玩家宰相</b>：同一段代码，权限由等级与开关决定</li>
-        <li>护栏（中央金够不够、同省同 kind 只建一座、教育门槛、矿脉不枯）全在原函数里 —— <b>AI 走的和玩家点的是同一道闸门</b>，AI 不写新的战斗或建造代码</li>
+        <li><b>同一套函数</b>：AI 的征兵 / 宣战 / 和谈 / 殖民 / 盖楼全部调玩家按钮背后那几个函数（`AO.aoc2.recruit` / `declareWar` / `peace` / `court.build`），闸门（钱够不够、移动点够不够、停战期、上限）一视同仁</li>
+        <li><b>同一份随机</b>：所有掷骰走 <code>hash(种子, 回合, 国家)</code>，所以同一局重跑结果一致，调试可以复现</li>
+        <li><b>一律静默</b>：不弹提示条；几十个国家一回合上百个动作，件件报信就废了</li>
+        <li><b>只读自己的数据</b>：AI 不看你的国库，也不看迷雾之外的省（它也没有"眼睛"这一层 —— 迷雾是玩家视角的事）</li>
       </ul>
-      <div class="callout">三条纪律：① <b>只在游戏模式跑</b>（世界工坊里涂色时不该有国家趁机动土）；② <b>只看自己的省</b>（别国数据一个不读，迷雾框架下那是偷看）；③ <b>一律静默</b>（不弹提示条、不推纪要 —— 几十个国一回合上百个动作，件件都报纪要就废了）。</div>
     </div>
 
-    <!-- AI 1：内政 -->
     <div class="aibox">
-      <h3><span class="no">一</span>敌国内政 AI —— 会过日子</h3>
-      <div class="asub">学校一座座盖起来、科研条在涨、官员一个个派下去、税率跟着国情自己调</div>
-
-      <h4>三型性格 + 政体底色</h4>
+      <h3><span class="no">一</span>国策：四种性格</h3>
+      <div class="asub">按国固定（种子决定），权重乘在既有的门槛上 —— 不新开一套 AI</div>
       <div class="tagline">
-        <span class="pill econ">经营 econ · 权重 30</span>
-        <span class="pill bal">均衡 balanced · 权重 50</span>
-        <span class="pill mil">军国 mil · 权重 20</span>
+        <span class="pill econ">经营 · 宣战 ×0.4</span>
+        <span class="pill mil">扩张 · 宣战 ×1.6</span>
+        <span class="pill bal">外交 · 宣战 ×0.5</span>
+        <span class="pill gold">殖民 · 殖民 ×1.8</span>
       </div>
-      <table class="t">
-        <tr><th>性格</th><th>建造顺序（底表）</th><th>调税风格</th></tr>
-        <tr><td><b>经营</b></td><td>学校（全国 &lt; 省数/3）→ 市场 → 建造坊 → 粮仓 → 大学 → 工厂 → 军械坊</td><td>民心 &lt;45 降档；<b>永不横征暴敛</b></td></tr>
-        <tr><td><b>均衡</b></td><td>学校 → 市场 → 建造坊 → 兵营（<b>交战中提到最前</b>）→ 工厂 → 军械坊</td><td>同经营，阈值 × 手松手紧</td></tr>
-        <tr><td><b>军国</b></td><td>兵营 → 军械坊 → 工厂 → 学校 → 市场</td><td>民心 &lt;35 保命降档；缺钱时<b>拉满横征</b></td></tr>
-      </table>
       <ul>
-        <li>政体会加权性格：王国 35% 出军国、共和 48% 出经营 —— 「军事政体更好战」是<b>规则保证</b>，不是运气</li>
-        <li>每国再掷 <b>4 个怪癖系数</b>（营造 / 税赋 / 科研 / 好战，各 0.8~1.2）：手松的国加税晚、偏执的国硬啃贵的科技 —— 同性格的国家也各有各的活法（bench 用两条方差线 σ&gt;0 验收）</li>
-        <li>性格和怪癖由「种子 + 国家 id」哈希掷定：<b>同一个国永远同一个性格</b>，换浏览器重开一局都对得上</li>
+        <li><b>经营</b>：很少主动开战，钱都投进经济与建筑</li>
+        <li><b>扩张</b>：最爱宣战（1.6 倍阈值），军队目标定得更高</li>
+        <li><b>外交</b>：走条约路线 —— 改善关系、结盟、互不侵犯</li>
+        <li><b>殖民</b>：优先派殖民者，边地被它先看到</li>
       </ul>
-
-      <h4>每回合两个动作格</h4>
-      <ul>
-        <li><b>格一：建造</b>（每回合最多 1 座）。三道硬门：中央金 ≥ 造价+5（不抽干国库）、同省同 kind 只一座、门槛矿脉与玩家同规。选省「库存最富 / 人口最多优先」</li>
-        <li><b>格二：研究 → 调税 → 人事</b>，按需取第一个可执行的 —— 建造几乎永远可执行，不给研究调税留格的话国家就成了只会砌墙的僵尸</li>
-        <li><b>研究</b>：从「没研完 / 前置满足 / 买得起」的池子里按科研偏执掷最便宜的两条；只入队不扣费，「点错不白花钱」对 AI 同样成立</li>
-        <li><b>人事</b>：撤贪墨 → 派官 → 开科。贪墨官上任 3 回合内每回合 30% 概率自己认错撤换；文官派去人口最多的无官省；武科抽出来的将必须用上；开科要攒 1.5 倍人才点</li>
-      </ul>
-
-      <h4>不占动作格的幕后活（挂在每回合的治国流程边上）</h4>
-      <ul>
-        <li><b>枯矿改建快速通道</b>：独立结算、不占建造格，每回合 1 座、先铁后金；两道额外的钱闸 —— 门槛比普通建造多垫 30 金（不然改建会把下回合学校 / 市场的预算吃光），以及<b>扫盲闸</b>（学校数量不达标的国一律不动土：实测没有这道闸，30 回合里 AI 的学校从 7 座掉到 4 座、第一位官员永远考不出来）</li>
-        <li><b>缺矿开矿</b>：铁 / 金库存破线就找未采矿脉开新矿，储量大的优先（这个吃建造格，饿着肚子先找吃的，比按表盖学校要紧）；战时不开</li>
-        <li><b>卖余货</b>：有市场就出手余粮余铁，安全线内绝不卖 —— 每省每回合 1 手、每国 2 手</li>
-      </ul>
-      <div class="callout blue">挂机 30 回合实测：市场 0→61 座、粮仓 0→8、科研点 0→5195、官员 0→49；枯竭矿的省自发改建熔旧坊、教育够了自己盖大学 —— <b>玩家不需要做任何事，只看得到世界在动</b>。</div>
+      <div class="callout">国卡的「国策」行就写着它是哪一种。侵略度仍按规则书默认 <b>75%</b>：性格是在这 75% 上乘一个系数，不是另设一套。</div>
     </div>
 
-    <!-- AI 2：战争 -->
     <div class="aibox">
-      <h3><span class="no">二</span>AI 战争 —— 会打仗，也会认怂</h3>
-      <div class="asub">宣战 / 进攻 / 回撤 / 求和 / 贸易，每国每回合按固定顺序走一遍</div>
-      <div class="formula">每回合六步：<em>军费护栏 → 回撤 → 求和 → 进攻 → 宣战 → 贸易</em><br><span class="cm">// 护栏排第一：先算清自己养不养得起兵，再决定打不打</span><br><span class="cm">// 宣战排最后：这回合宣的战，下回合才出兵，不然像瞬移</span></div>
-
-      <h4>宣战决策（每 6 回合评估一次，按国错峰）</h4>
-      <div class="formula">宣战分 = 好战怪癖 × 20 + 性格权重(<em>军国 +15 / 均衡 0 / 经营 −15</em>)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; + (关系 &lt; −40 ? +10) + (对方正陷战争 ? +10)&nbsp;&nbsp;≥ <em>30</em> 则宣战</div>
+      <h3><span class="no">二</span>经营：钱怎么花</h3>
+      <div class="asub">缺钱先加税，有钱先盖楼，剩下的投进最落后的省</div>
       <ul>
-        <li>经营型满分 <b>29，正好比阈值低 1 分</b> —— 「经营太平」是规则保证的：哪怕关系烂到底、对方正在挨打，也永远不主动开战</li>
-        <li>五道硬约束：不打盟友 / 互不侵犯对象 → 不打停战冷却中的（20 回合）→ <b>军力比 ≥ 0.7</b> 一票否决 → 已在打 2 场不开新战场 → 目标只限接壤邻国</li>
-      </ul>
-
-      <h4>吃迷雾的军力比（对等原则）</h4>
-      <p>算「我打不打得过他」时：自己的兵全算，<b>别人的兵只算我探过的省里那些</b>，再加「每省 300 人」的国家级规模估计。看不见的兵不进算式 —— 重金情报的 AI 目标选择天然更优。行军 / 围城目标也只能从自己的已探集里挑，运行时断言 <code>badTarget</code> 必须永远为 0。</p>
-
-      <h4>进攻 · 回撤 · 求和</h4>
-      <ul>
-        <li>机动军比例按好战怪癖归一化取档（0% / 15% / 30%）；<b>军国强攻、均衡围城、经营不进攻</b>；一国最多 2 支机动军防抽空边防</li>
-        <li><b>回撤</b>：兵损过半或仗打完 → 停止推进，自己省里转「练兵」补员（+2%/回合），敌省里转「驻防」</li>
-        <li><b>求和</b>：落后 ≥ 30 分且连续 5 回合 → 主动求和，赔款从全境出、按绝望分档（50 / 100 / 150 金）；胜方的胃口有封顶（45 分），否则打崩的局只能以灭国收场</li>
-        <li><b>阻尼防雪球</b>：任一国灭亡后 10 回合内，若全球战争 ≥ 6 场，所有 AI 宣战门槛 +15 —— 打完一个大国，世界该喘口气</li>
-      </ul>
-      <div class="callout">bench 策略 H（520 省 · 36 国 · 挂机 150 回合）实测：宣战 40 次、进攻 131 次、求和 19 次、灭国 8 个；军国平均 3.75 场/国 vs 经营 0 场；好战怪癖最高的一档开了 28 场仗，最低的一档 0 场 —— 分化全部来自规则，不是剧本。</div>
-    </div>
-
-    <!-- AI 3：吏部与战时经济 -->
-    <div class="aibox">
-      <h3><span class="no">三</span>AI 吏部与战时经济 —— 会当家</h3>
-      <div class="asub">派下去的官不是棋子：会升、会怨、会被赏、会被换；一打仗，钱袋子自己换挡</div>
-
-      <h4>吏部巡查（治官不是治国，不吃内政动作格）</h4>
-      <table class="t">
-        <tr><th>官员资历</th><th>赏赐线（花 15 金压 25 怨）</th><th>撤换线（认赔换人）</th></tr>
-        <tr><td><b>初任</b> rank 0</td><td>永不赏（不值得救）</td><td>怨气 70</td></tr>
-        <tr><td><b>干吏 / 能臣</b> rank 1–2</td><td>50（经营心软 −10 / 军国心硬 +10）</td><td>80</td></tr>
-        <tr><td><b>柱国</b> rank 3</td><td>45</td><td>90</td></tr>
-      </table>
-      <ul>
-        <li>赏赐有 12 回合冷却；中央金 &lt; 30 一律不赏 —— 国库比面子要紧</li>
-        <li>战时只保 rank ≥ 2 的老臣；撤换后立刻从池里补人，优先人口最多的省</li>
-        <li>官的效果倍率是连续的：资历加成 × 怨气折损（<code>m = (1+rank×0.15)×(1−griev×0.005)</code>），<b>没有死区</b> —— 若做成分档，最优解永远是「卡在 59」</li>
-      </ul>
-
-      <h4>战时经济换挡（宣战后一回合内，停战原样还回去）</h4>
-      <table class="t">
-        <tr><th>类</th><th>建筑</th><th>战时档位</th></tr>
-        <tr><td><b>军备</b></td><td>兵营 / 军械坊 / 造船厂 / 驯马场 / 城墙</td><td>高（p1）</td></tr>
-        <tr><td><b>资源</b></td><td>农场 / 渔港 / 盐场 / 伐木场 / 牧场 / 矿场</td><td>中（p2，断口粮会掉人口，不能一刀切停）</td></tr>
-        <tr><td><b>民用</b></td><td>市场 / 建造坊 / 学校 / 大学 / 粮仓 / 工厂</td><td>低（p3，只吃本省库存）</td></tr>
-      </table>
-      <ul>
-        <li>战时建造只留军备类；俸禄照付不欠，中央只剩 20 金保底时一分不补</li>
-        <li><b>军费护栏（优先级最高，能盖掉换挡）</b>：名义军费 &gt; 60% 岁入 → 停进攻 + 非军备降档 + <b>不再征兵</b>；&gt; 90% → 连军备一起降；每 20 回合最多报一次世界纪要，护栏要可见但不刷屏</li>
+        <li><b>加税</b>：国库低于"上回合毛收入 × 0.6"就每回合 +1%，到政体上限为止（代价是幸福）</li>
+        <li><b>盖楼</b>：按缺口选——没图书馆先图书馆、边境先城堡、沿海先港口；造价吃"同种建筑数量"所以批量排队更便宜</li>
+        <li><b>投资</b>：超过"两回合毛收入"的部分，一半投进"经济 / 人口比例最低"的省（岗位最缺的地方最该投）</li>
+        <li><b>研究</b>：钱够就升科技，科技给收入、战力、防御、移动点</li>
       </ul>
     </div>
 
-    <!-- AI 4：军工与后勤 -->
     <div class="aibox">
-      <h3><span class="no">四</span>AI 军工与后勤 —— 会造装备</h3>
-      <div class="asub">管炉子不是治国：产线分配、工科开科、装备配发三件事都不吃内政动作格</div>
+      <h3><span class="no">三</span>战争：会打，也会认怂</h3>
+      <div class="asub">一条能解释的决策链：招兵 → 行军 → 打 → 谈 → 宣战</div>
       <ul>
-        <li><b>产线分配</b>一次写全国分配表：交战 <b>兵刃 7 : 装备 3</b>，和平 <b>装备 6 : 兵刃 4</b>；炮线交战开、和平归零；马厩只养驽马；船坞交战时造最高档舰 —— 档位是状态，不是每回合重掷</li>
-        <li><b>工科开科</b>：军国 / 均衡 + 累计教育 ≥ 15 + 国内有坊才开；<b>宗师优先派给驻军最多的省</b> —— 装备是配给机动军的，不是摆给和平年代看的</li>
-        <li><b>装备配发</b>：主力军发最优（兵刃 / 马 / 炮 / 盔甲靴），驻防军只发够用的兵刃；<b>裸兵只驻防</b> —— 没有兵刃的部队连进攻的门槛都进不去</li>
-        <li>AI 不玩类型 / 形制 / 品种（默认刀 + 驽马），但<b>跟着工艺链换代自动换装</b> —— 材质一升，全军下一单就是新料</li>
-      </ul>
-      <div class="callout">bench 策略 N 把「产能怎么分」当变量跑了两遍：爆兵流（全产能砸兵刃、不配装）100 回合战力 138.6；精兵流（2 点兵刃 + 其余装备、每支配齐）同样 99,000 人，战力 <b>205.1、装备倍率 ×1.480</b> —— 装备线不是锦上添花，是第二支军队。</div>
-    </div>
-
-    <!-- AI 5：迷雾与外交 -->
-    <div class="aibox">
-      <h3><span class="no">五</span>AI 与迷雾、外交 —— 守规矩的对手</h3>
-      <div class="asub">AI 不偷看、不耍赖，和你玩同一套规则</div>
-      <ul>
-        <li><b>对等吃迷雾</b>：AI 只看自己省的实时数据；目标只从自己的已探集（AIKNOW）里挑 —— 已探集来自开局邻省一圈、军队踩过的地方、情报署自动织网</li>
-        <li><b>AI 也有情报署</b>：自动织网 + 手动定向探测同规则跑，反谍预算档同样防着你</li>
-        <li><b>性格也是情报</b>：国家卡的「性格」行吃你的情报档 —— 0 档显示 ？？，1 档给性格词（经营 / 均衡 / 军国），2 档再给主导怪癖（如「军国 · 苛税」）。识人也是情报战</li>
-        <li><b>外交</b>：AI 不主动提案，但会按关系与性格评估你的提议 —— 军国多疑（−10），但「共同敌人 +15」的加成它吃得最多：敌人的敌人，再可疑也能坐下来谈</li>
-        <li><b>贸易</b>：资源全国见底、手里有金、有市场才买货；看货的频次按性格分 —— 经营每 3 回合、均衡 6、军国 12</li>
-        <li><b>世界消息走情报渠道</b>：AI 之间的宣战 / 灭国 / 都城易手不当回合直推，按你的情报档延迟 5~8 / 3~4 / 1 回合送达，低档还有 15% 的走样风闻，实讯会追一条更正 —— 年表里「别处的历史」是史官事后修订的那一版</li>
+        <li><b>招兵</b>：目标兵力 = 人口 × 1%，优先招在<b>边境省</b>（招在内陆要一跳一跳往前挪，移动点根本不够）</li>
+        <li><b>行军</b>：一次 BFS 算出每个自省到前线的跳数，后方的兵每回合往跳数更小的邻省走一步</li>
+        <li><b>打</b>：相邻敌省、兵够就打；一回合最多推三次</li>
+        <li><b>谈</b>：战争分 30+ 割地、45+ 附庸；自己厌战 ≥75% 且没占到便宜就白和平；对面是玩家就只打不谈（谈判桌留给你）</li>
+        <li><b>宣战</b>：只打"兵力不到我 70%"的邻国，且不撕同盟 / 互不侵犯 / 防御条约</li>
+        <li><b>复员</b>：和平时期还欠着债，就裁掉两成兵 —— 军费是最大的固定支出</li>
       </ul>
     </div>
 
-    <!-- AI 6：宰相 -->
     <div class="aibox">
-      <h3><span class="no">六</span>宰相 —— 玩家自己的 AI 政府</h3>
-      <div class="asub">开科有 3.8% 概率抽到宰相之才；拜相后每回合代劳你还没做的事</div>
+      <h3><span class="no">四</span>外交与殖民：会算账的对手</h3>
+      <div class="asub">附庸税、独立欲望、最后通牒、殖民者 —— 四个"钱以外的账"</div>
       <ul>
-        <li>文科卡池里混着四条超稀有词条（合计出现率 <b>3.8%</b>），它们既是省官也是宰相候选人 —— AI 抽到照用当省官，拜相的机会本身就是一次抽卡</li>
-        <li>头衔随政体：王国 <b>宰相</b> / 帝国 <b>摄政</b> / 共和 <b>副总统</b> / 联邦 <b>总理</b> / 城邦联盟 <b>执政官</b> / 汗国 <b>断事官</b></li>
-        <li><b>你手动做的他绝不推翻</b>：手动改税后 3 回合内不碰税率；营造 / 科研 / 人事都是追加动作，闸门天然不覆盖你刚做的事</li>
-        <li>俸禄从中央出，欠一次饷就停摆，补上才复工；罢相随时可点，罢完致仕不回池</li>
+        <li><b>附庸</b>：和约里能附庸就附庸（地不动、人归你），要不到再割地；附庸每回合上缴 20% 入库收入</li>
+        <li><b>独立欲望</b>：附庸的独立欲望随时间涨、宗主打仗时涨更快，满 100% 起兵</li>
+        <li><b>最后通牒</b>：关系压到 ≤ −10 就敢发；对方三选一</li>
+        <li><b>殖民</b>：只在"接壤且有四倍钱"时派殖民者，占稳 25% 以上、手里有八倍钱才买断 —— 所以边地是被慢慢吃掉的，不是一回合被买空</li>
       </ul>
-      <table class="t">
-        <tr><th>等级</th><th>动作/回合</th><th>权限</th><th>代价</th><th>俸禄</th></tr>
-        <tr><td><b>守成之才</b></td><td>1</td><td>只有营造 + 科研（税赋/人事开关点了也不生效 —— 是「这个人不会」，不是按钮坏了）</td><td>—</td><td>×1</td></tr>
-        <tr><td><b>干练能臣</b></td><td>2</td><td>四项全能；降税线 ×0.8 更耐得住</td><td>—</td><td>×2</td></tr>
-        <tr><td><b>一代贤相</b></td><td>3</td><td>四项全能 + 会看账调税；每 10 回合进言</td><td>国民幸福 &lt; 40 撂挑子（回 45 复工）</td><td>×4</td></tr>
-        <tr><td><b>权倾朝野</b></td><td>3</td><td><b>无视权限开关</b>（面板红字「他自作主张」）+ 可横征</td><td>每回合偷国库 3 金 · 全国幸福 −3 · 每回合 10% 被弹劾</td><td>×1（他不靠俸禄吃饭）</td></tr>
-      </table>
-      <div class="callout red">权臣的设计目的就是让你<b>想罢他</b>：他最强（3 动作 + 全权限 + 敢横征），但代价是持续的 —— 偷金、伤民心、随时弹劾。用不用他，是你自己的宫廷剧。</div>
+      <div class="callout">500 回合挂机实测（<code>node diag/aoc2-500.js 500</code>）：64 国全存活、无一国国库爆负、宣战 115 次 / 和谈 71 次、边地在前 200 回合被瓜分完、疫病爆发 4 场、黄金时代 137 次。</div>
     </div>
 
   </div>
@@ -737,29 +621,27 @@ footer a:hover{text-decoration:underline}
 <section class="block" id="data">
   <div class="wrap">
     <div class="sechead"><h2>技术与测试</h2><span class="en">UNDER THE HOOD</span></div>
-    <p class="secintro">纯前端、零依赖、零构建、零后端、零遥测 —— 所有数值集中在 js/15-resources.js 的定义区，改平衡只动一处。</p>
+    <p class="secintro">纯前端、零依赖、零构建、零后端、零遥测 —— 所有数值集中在四份定义区（15 / 16 / 16b / 16c），规则书没给的占位值都标了 <code>占位</code>，改平衡只动一处。</p>
     <div class="techgrid">
-      <div class="tcard"><b>23 个</b><span>原生 JS 模块 · 共 3.2 万行</span></div>
+      <div class="tcard"><b>22 个</b><span>原生 JS 模块 · 共 3.4 万行</span></div>
       <div class="tcard"><b>0</b><span>外部依赖 / 构建步骤 / 网络请求</span></div>
-      <div class="tcard"><b>45 个</b><span>测试脚本 · 回归断言上千项</span></div>
-      <div class="tcard"><b>v6</b><span>存档版本：存状态不存地图，按种子重建</span></div>
+      <div class="tcard"><b>40+ 个</b><span>测试脚本 · 回归断言上千项</span></div>
+      <div class="tcard"><b>v7</b><span>存档版本：存状态不存地图，按种子重建</span></div>
     </div>
     <div class="doclist">
       <h4>每一层的「数值为什么是这些数」都写成了设计文档：</h4>
       <ol>
+        <li><a href="规则书-文明时代2.md">规则书-文明时代2.md</a> — 唯一口径：23 章 + 数值缺口附录 + 来源标注</li>
         <li><a href="DESIGN.md">DESIGN.md</a> — 总纲：从地图到游戏</li>
-        <li><a href="DESIGN-RESOURCES.md">DESIGN-RESOURCES.md</a> — 资源 / 科技 / 治理数值</li>
-        <li><a href="DESIGN-BUILDINGS.md">DESIGN-BUILDINGS.md</a> — 建筑与图标</li>
-        <li><a href="DESIGN-WAR.md">DESIGN-WAR.md</a> — 战争 / 城墙 / 外交 / 安定</li>
-        <li><a href="DESIGN-FOG.md">DESIGN-FOG.md</a> — 战争迷雾与情报署</li>
-        <li><a href="DESIGN-AI.md">DESIGN-AI.md</a> — 敌国内政 AI（v7 → v12 全程）</li>
-        <li><a href="DESIGN-MILL.md">DESIGN-MILL.md</a> — 军工产线</li>
-        <li><a href="DESIGN-CRAFT.md">DESIGN-CRAFT.md</a> — 制造工艺</li>
-        <li><a href="DESIGN-LIFELINE.md">DESIGN-LIFELINE.md</a> — 经济续命五件套</li>
-        <li><a href="DESIGN-BALANCE.md">DESIGN-BALANCE.md</a> — 保留座数与平衡面板</li>
-        <li><a href="DESIGN-FORECAST.md">DESIGN-FORECAST.md</a> — 实时推演与建造参谋</li>
-        <li><a href="README.md">README.md</a> — 跑法与测试一览</li>
+        <li><a href="DESIGN-WORLD.md">DESIGN-WORLD.md</a> — 山海层：殖民 / 疾病 / 地形 / 黄金时代 / 迷雾 / AI 性格</li>
+        <li><a href="DESIGN-WAR.md">DESIGN-WAR.md</a> — 战争层：军队 = 数字 / 战斗 / 占领 / 和谈</li>
+        <li><a href="DESIGN-PEOPLE.md">DESIGN-PEOPLE.md</a> — 人心层：国籍 / 同化 / 革命风险 / 叛军 / 内战 / 政体</li>
+        <li><a href="DESIGN-COURT.md">DESIGN-COURT.md</a> — 庙堂层：建筑 / 科技 / 21 种外交 / 附庸 / 贸易</li>
+        <li><a href="DESIGN-FOG.md">DESIGN-FOG.md</a> — 战争迷雾（含 §11 世界消息的延迟送达）</li>
+        <li><a href="README.md">README.md</a> — 跑法、测试与探针一览</li>
       </ol>
+      <h4 style="margin-top:14px">旧制（v19 自研规则）的设计文档仍留在仓库里，供 <code>git checkout legacy-v19</code> 对照：</h4>
+      <p style="font-size:12.5px;color:var(--ink2)">DESIGN-RESOURCES / BUILDINGS / MILL / CRAFT / LIFELINE / BALANCE / FORECAST / AI</p>
     </div>
   </div>
 </section>

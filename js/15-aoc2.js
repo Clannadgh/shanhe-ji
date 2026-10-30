@@ -260,6 +260,10 @@
         army: 0,                   // 驻军人数（规则书第十一章：军队 = 省上一个数字）
         armyOf: 0,                 // 这支兵属于谁（占领军的归属方；空省为 0）
         disease: 0,                // 疾病压低稳定的量（阶段五）
+        dis: '',                   // 正在患的病（阶段五；空串 = 没病）
+        disT: 0,                   // 感染回合（UI 显示病程）
+        mal: 0,                    // 营养不良（人口 < 1 万的省；与传染病并存）
+        ind: 0,                    // 中立省的殖民进度 0~1（阶段五，UI 用）
         fest: 0,                   // 节日带来的临时幸福（每回合衰减）
         /* 建筑（阶段四，规则书第五章）：bld = 已完工等级，queue = 在建。
          * 在建的不计入"同种建筑数量"—— 所以一口气排队批量建更便宜，
@@ -319,6 +323,9 @@
     /* 岸线画像（coastDirs）：港口的前置、省卡"岸线"那一行的数据源。
      * 这一段原来由已退役的模块计算，换血时被删掉了 —— 在这里补回来。 */
     if (AO.aoc2.court && AO.aoc2.court.profileCoast) AO.aoc2.court.profileCoast(world);
+    /* 中立省（阶段五）：殖民的前提。放在最后 —— 它要读"每国几省 / 谁是首都"
+     * 这两件已经算完的事，割完还要把原主的汇总值重算一遍。 */
+    if (AO.aoc2.world) AO.aoc2.world.initNeutral(world);
     return world;
   };
 
@@ -423,6 +430,8 @@
         var inc = taxIncome + prodIncome;
         /* 建筑与科技：工坊 +5%/级、港口 +3%、科技每级 +1%（规则书第五、六章） */
         if (AO.aoc2.court) inc *= AO.aoc2.court.incomeMul(c, p);
+        /* 黄金时代（第十九章）：繁荣型全境收入 +15% */
+        if (AO.aoc2.world) inc *= AO.aoc2.world.incomeMul(c);
         /* 占领省：原主收入归零，占领者拿固定 ~10 金（阶段二才可能有占领） */
         if (p.aoc.occupied && p.aoc.occupied !== c.id) inc = 0;
         p.aoc.income = inc;
@@ -457,7 +466,8 @@
 
       A.treasury += net;
       /* 研究点（第六章）：科研滑条那一份买进度，图书馆/大学每回合白给一点。
-       * 每攒满 100 进度 = 1 科技点。 */
+       * 每攒满 100 进度 = 1 科技点。科技型黄金时代（第十九章）×1.5。 */
+      if (AO.aoc2.world) researchMoney *= AO.aoc2.world.researchMul(c);
       if (AO.aoc2.court) AO.aoc2.court.gainRp(world, c, researchMoney);
       else A.rp += researchMoney * 0.1;
       A.investPool += investMoney;
@@ -496,7 +506,9 @@
           (goodsSat - 1) * AOC2.GOODS_HAPPY -
           A.taxRate * AOC2.TAX_HAPPY +
           (p.aoc.fest || 0) -
-          (A.wear || 0) * AOC2.WEAR_HAPPY;
+          (A.wear || 0) * AOC2.WEAR_HAPPY +
+          /* 繁荣型黄金时代（第十九章）：全境 +5 幸福 */
+          (AO.aoc2.world ? AO.aoc2.world.happyAdd(c) : 0);
         p.aoc.happy = clamp(p.aoc.happy + (hTarget - p.aoc.happy) * AOC2.HAPPY_STEP,
           AOC2.HAPPY_MIN, AOC2.HAPPY_MAX);
         /* 节日是一次性的：加到幸福里之后每回合衰减 80%，几回合就散掉 */
@@ -642,6 +654,10 @@
     settleWar(world, opts);
     /* ⑨ 人心（第九、十章）：革命风险 → 叛军国；全国幸福低位 → 内战 */
     settleUnrest(world, opts);
+    /* ⑩ 山海（第十五、十六、十九、二十章）：疫病 → 殖民 → 黄金时代 → AI 殖民。
+     * 放在最后：疾病要按"这一回合的人口"结算，殖民长出来的人和黄金时代
+     * 都是"下一回合才吃到"的东西 —— 排在收入前面就会让玩家看到一回合的假象。 */
+    if (AO.aoc2.world) AO.aoc2.world.tick(world, opts);
     return world;
   };
 
@@ -1196,6 +1212,10 @@
     if (!(n > 0) || n > a.aoc.army) return { ok: false, msg: '兵数不对' };
     if (!a.neighbors || a.neighbors.indexOf(toPid) < 0) return { ok: false, msg: '只能移到相邻省' };
     var toOwner = b.aoc.occupied || b.owner;
+    /* 无主之地（阶段五）：军队进不去 —— 规则书第一章把"中立 / 荒地"定义为
+     * 只能殖民的地块。让兵能开进去的话，殖民那条线（1000 金换 1000 人）
+     * 立刻变成"派 10 个人走一趟"，三种殖民方式全部作废。 */
+    if (!toOwner) return { ok: false, msg: '无主之地军队进不去：要先殖民（省卡「殖民」）' };
     var hostile = toOwner !== cid && AO.aoc2.atWar(world, cid, toOwner);
     if (toOwner !== cid && !hostile &&
       !(AO.aoc2.dip && AO.aoc2.dip.canEnter(world, cid, toOwner))) {
@@ -1631,7 +1651,11 @@
     if (realEnemies.length) return;
     if (A.dip < AOC2.WAR_DIP_COST) return;
     if (total < Math.max(200, target * 0.6)) return;
-    if (hashRoll(world, c.id, 'war') > AOC2.AI_WAR_CHANCE * AOC2.AI_AGGRO) return;
+    /* 性格（阶段五，第二十章"AI 按性格分工"）：扩张型更爱开战、外交型更不爱。
+     * 乘在阈值上而不是乘决策本身 —— 这样"侵略度 75%"那条规则还在原位，
+     * 只是每个国家有自己的系数。 */
+    var wmul = AO.aoc2.world ? AO.aoc2.world.warMul(c) : 1;
+    if (hashRoll(world, c.id, 'war') > AOC2.AI_WAR_CHANCE * AOC2.AI_AGGRO * wmul) return;
 
     var best = 0, bestRatio = 1;
     for (var ni = 0; ni < (c.neighbors || []).length; ni++) {
@@ -1786,6 +1810,8 @@
       /* 归属必须存：世界读档时是按种子重生成的，不存 owner 的话
        * 所有征服、割地、叛军占的地都会还原成开局版图。 */
       out.own[p.id - 1] = p.owner;
+      /* 阶段五的环境字段（病 / 殖民进度）由山海层自己打包，本文件不猜它的形状 */
+      var env = AO.aoc2.world ? AO.aoc2.world.saveProv(p) : null;
       out.p[p.id] = {
         e: Math.round(p.aoc.econ * 100) / 100,
         d: Math.round(p.aoc.dev * 1000) / 1000,
@@ -1800,7 +1826,12 @@
         n: p.aoc.pop,
         k: p.aoc.core,
         b: p.aoc.bld || {},
-        q: (p.aoc.queue || []).map(function (x) { return { k: x.k, t: x.t, cost: x.cost }; })
+        q: (p.aoc.queue || []).map(function (x) { return { k: x.k, t: x.t, cost: x.cost }; }),
+        /* 阶段五：病名 / 病程 / 殖民进度（只加字段，不升版本号） */
+        dz: env ? env.dz : '',
+        dzt: env ? env.dzt : 0,
+        ind: env ? env.ind : 0,
+        mal: env ? env.mal : 0
       };
     }
     for (i = 0; i < world.countries.length; i++) {
@@ -1831,6 +1862,10 @@
         wear: Math.round((c.aoc.wear || 0) * 1000) / 1000,
         era: c.aoc.era | 0,
         low: c.aoc.lowHappy | 0,
+        /* 阶段五：黄金时代（第十九章）—— 只加字段，不升版本号 */
+        gd: c.aoc.gd || '',
+        gdt: c.aoc.gdt || 0,
+        gd0: c.aoc.gd0 || 0,
         reb: c.aoc.rebel ? 1 : 0,
         rq: (c.aoc.rq || []).map(function (x) { return { pid: x.pid, n: x.n }; })
       };
@@ -1921,6 +1956,8 @@
       p.aoc.core = s.k || p.aoc.core;
       p.aoc.bld = s.b || {};
       p.aoc.queue = s.q || [];
+      /* 阶段五的环境字段（病 / 殖民进度）：由山海层还原，缺字段时它自己补默认 */
+      if (AO.aoc2.world) AO.aoc2.world.loadProv(p, s);
       p.aoc.value = AO.aoc2.provValue(p);
       p.population = Math.round(totalPop(p));
     }
@@ -1942,6 +1979,10 @@
       c.aoc.alive = s.al !== 0;
       c.aoc.era = s.era | 0;
       c.aoc.lowHappy = s.low | 0;
+      /* 阶段五：黄金时代。缺字段（旧档）就是"没有黄金时代"，不用补默认值以外的东西 */
+      c.aoc.gd = s.gd || '';
+      c.aoc.gdt = s.gdt || 0;
+      c.aoc.gd0 = s.gd0 || 0;
       c.aoc.rebel = !!s.reb;
       c.aoc.rel = s.rel || {};
       c.aoc.pacts = s.pacts || {};

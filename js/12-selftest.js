@@ -194,7 +194,10 @@
     add('同国相邻省之间无分界线', internal === 0 && cls.border.length > 0,
       '同国相邻对被画线的数量 ' + internal + '；可见省界 run ' + cls.border.length + '；海岸 run ' + cls.coast.length);
 
-    /* 7. 归属双向一致 */
+    /* 7. 归属双向一致
+     * 阶段五起"无主之地"是合法状态（规则书第一章：中立 / 荒地只能殖民），
+     * 所以分母要减掉它们 —— 断言的是"有主的省与成员表一一对应"，
+     * 而不是"每一寸地都属于某个国家"。 */
     var bad = 0;
     for (i = 0; i < world.countries.length; i++) {
       var c = world.countries[i];
@@ -203,11 +206,15 @@
         if (!pv || pv.owner !== c.id) bad++;
       }
     }
-    var listed = 0;
-    for (i = 0; i < world.provinces.length; i++) if (world.provinces[i]) listed++;
+    var listed = 0, unowned = 0;
+    for (i = 0; i < world.provinces.length; i++) {
+      if (!world.provinces[i]) continue;
+      listed++;
+      if (!world.provinces[i].owner) unowned++;
+    }
     var totalMembers = world.countries.reduce(function (a, c2) { return a + c2.provinces.length; }, 0);
-    add('省份归属与国家成员表双向一致', bad === 0 && totalMembers === listed,
-      '省份 ' + listed + ' / 成员条目 ' + totalMembers + ' / 冲突 ' + bad);
+    add('省份归属与国家成员表双向一致', bad === 0 && totalMembers === listed - unowned,
+      '省份 ' + listed + '（无主 ' + unowned + '）/ 成员条目 ' + totalMembers + ' / 冲突 ' + bad);
 
     /* 8. 同 seed 可复现 & 不同 seed 有差异 */
     if (opts && typeof AO.generate === 'function') {

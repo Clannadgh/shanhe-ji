@@ -161,15 +161,18 @@
   }
   C.ownedLevels = ownedLevels;
 
-  /* 下一级的造价 */
+  /* 下一级的造价。
+   * 地形建造费修正（第十八章萌娘表的"建造费"列）由山海层给 —— 维基表没这一列，
+   * 所以它是可选乘数：山海层没加载时按 1 走。 */
   C.cost = function (world, c, p, k) {
     var def = BLD[k];
     if (!def) return 0;
     var owned = ownedLevels(world, c, k);
     var cur = lv(p, k);
     var size = 0.25 + (p.aoc.econ || 0) / T.BLD_COST_ECON;
+    var tmul = AO.aoc2.world ? AO.aoc2.world.terrainBuild(p) : 1;
     return Math.round(def.base * size * (1 + owned * T.BLD_COST_INFLATE) *
-      (1 + cur * T.BLD_COST_LEVEL));
+      (1 + cur * T.BLD_COST_LEVEL) * tmul);
   };
 
   /* 能不能建：把"为什么不能"一次说清（UI 与 AI 共用同一套判断） */
@@ -263,7 +266,8 @@
     return 1 + techOf(c) * T.TECH_GOODS;
   };
 
-  /* 军费：按"兵属于谁"逐省算，补给营地只降本地驻军 */
+  /* 军费：按"兵属于谁"逐省算，补给营地只降本地驻军；
+   * 地形维护费（第十八章萌娘表"维护"列）逐省乘，山地贵、平原便宜。 */
   C.upkeepOf = function (world, c, g, A) {
     var base = AOC2.UPKEEP_PER_SOLDIER * (1 + g.upkeep / 100) *
       (1 + (A.wear || 0) * AOC2.WEAR_UPKEEP);
@@ -272,7 +276,8 @@
       p = world.provinces[i];
       if (!p || !p.aoc || !(p.aoc.army > 0)) continue;
       if ((p.aoc.armyOf || p.owner) !== c.id) continue;
-      sum += p.aoc.army * base * (1 - T.CAMP_UPKEEP * lv(p, 'camp'));
+      var tm = AO.aoc2.world ? AO.aoc2.world.terrainUpkeep(p) : 1;
+      sum += p.aoc.army * base * tm * (1 - T.CAMP_UPKEEP * lv(p, 'camp'));
     }
     return sum;
   };

@@ -43,6 +43,10 @@ for (const f of fs.readdirSync(dl)) fs.unlinkSync(path.join(dl, f));
           }
         }
         if (!solid) continue;
+        /* 阶段五起有"无主之地"（规则书第一章）：涂色那条用例要改归属，
+         * 所以挑一个**有主**的省，别让 countries[owner-1] 是 undefined。 */
+        const pv = w.provinces[l - 1];
+        if (!pv || !pv.owner) continue;
         const s = R.toScreen(x + 0.5, y + 0.5);
         return { x, y, id: l, sx: s.x, sy: s.y };
       }

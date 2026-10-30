@@ -1441,6 +1441,14 @@
     if (nc.provinces.indexOf(id) < 0) nc.provinces.push(id);
     p.ownerName = nc.name;
     p.ownerColor = nc.color;
+    /* 涂色也要给名分（阶段五）：省的核心表里得有新主人，否则自检的
+     * "AoC2 省模型（核心 / 可复现）"会在改完之后报"无核心 1"——
+     * 那条检查读的是 core[p.owner]，涂色只改 owner 就漏了这一格。 */
+    if (p.aoc) {
+      p.aoc.core = p.aoc.core || {};
+      p.aoc.core[target] = 1;
+      if (p.aoc.core[0]) delete p.aoc.core[0];
+    }
 
     /* 两个国家的派生量都要重算（人口 / 面积 / 地形 / 信仰 / 邻国 / 首都 / 资源汇总）。
      * 只搬 id 不重算的话，国家卡上的数字会一直停在改之前 ——

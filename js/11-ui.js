@@ -1498,6 +1498,11 @@
     }
     /* 编年史归档（平台层，保留） */
     if (AO.chronoArchive) AO.chronoArchive();
+    /* 迷雾快照（阶段五）：把"这一回合亲眼看见的东西"记进记忆，
+     * 下一回合它们就变成"旧情报"（LASTSEEN）。放在结算之后 ——
+     * 结算会改归属与驻军，先拍快照就永远慢一回合。 */
+    if (fogOn()) fogSnapshot();
+    if (state.renderer && state.renderer.fogRefresh) state.renderer.fogRefresh();
   }
 
   /* ---------------- ④ 人口税 + 俸禄 ----------------
@@ -6016,6 +6021,45 @@
     el.textContent = total + ' 座：' + parts.join(' · ');
   }
 
+  /* =============================================================
+   * 战争迷雾三档（阶段五，规则书第十九章）
+   *
+   * 这是**视角设置**，不是国家的属性 —— 所以它放在国家卡上、只影响你自己
+   * 看得见什么。换档立刻重画底图（缓存按 fogVersion 失效）。
+   * ============================================================= */
+  function renderAocFog() {
+    var box = $('cFogRow');
+    if (!box) return;
+    box.innerHTML = '';
+    for (var i = 0; i < FOGC.cn.length; i++) {
+      (function (lv) {
+        var b = doc.createElement('button');
+        b.type = 'button';
+        b.dataset.ib = String(lv);
+        /* 只写档名，不写"第 N 档" —— 三个钮要挤进 300px 的国卡，
+         * 带上序号就会折成两行（第 3 个钮自己一行，很难看）。 */
+        b.textContent = FOGC.cn[lv];
+        if (lv === FOGC.level) b.className = 'on';
+        b.title = '第 ' + (lv + 1) + ' 档：' + FOGC.desc[lv];
+        b.addEventListener('click', function () {
+          setFogLevel(lv);
+          renderAocFog();
+          toast('战争迷雾：' + (lv + 1) + ' 档「' + FOGC.cn[lv] + '」—— ' + FOGC.desc[lv], 3000);
+        });
+        box.appendChild(b);
+      })(i);
+    }
+    var tip = $('cFogTip');
+    if (tip) {
+      tip.innerHTML = AO.fogOn()
+        ? '已探 <b>' + (PLAYER ? Object.keys(EXPLORED[PLAYER] || {}).length : 0) +
+          '</b> 省 / 全图 ' + (state.world ? state.world.provinces.length : 0) +
+          ' 省　·　泛黄两档：' + FOGC.staleMid + ' / ' + FOGC.staleOld + ' 回合' +
+          '<br>瞭望塔（建筑）会揭开它周围一圈；派兵过去也算"亲眼看见"。'
+        : '工坊模式（未选国）：迷雾整层关掉，全图可见。';
+    }
+  }
+
   function renderAocGov(c) {
     var box = $('cGovBox');
     if (!box) return;
@@ -6432,6 +6476,15 @@
     } else if (state.moveFrom === id) {
       state.moveFrom = 0;
     }
+    /* 迷雾（阶段五）：看不见就别装作看得见。
+     * 放在移动分支**之后** —— 点了「移动」再点一个没探过的敌省，
+     * 那一下是下命令（去打），不是"查看它"，不能在这里被拦掉。 */
+    if (fogOn() && visCode(id) !== VIS_REAL) {
+      state.infoId = id;
+      showFogInfo(p);
+      if (state.renderer) state.renderer.selected = id;
+      return;
+    }
     /* 换省份时收起上一省的问号面板；同一省重绘（计时器刷新）则保持展开 */
     if (state.infoId !== id) {
       state.infoId = id;
@@ -6455,9 +6508,15 @@
     $('iName').textContent = p.name;
     $('iNameEn').textContent = p.name_en;
     var occBy = p.aoc.occupied ? w.countries[p.aoc.occupied - 1] : null;
-    $('iOwner').textContent = p.ownerName + ' (#' + p.owner + ')' +
-      (occBy ? ' · 被 ' + occBy.name + ' 占领' : '');
-    $('iOwner').style.color = occBy ? '#a8523b' : '';
+    /* 无主省（阶段五）：没有国名可写。这片地只能殖民，军队也进不去 */
+    if (!p.owner) {
+      $('iOwner').textContent = '未殖民（无主之地）';
+      $('iOwner').style.color = '#8a7d63';
+    } else {
+      $('iOwner').textContent = p.ownerName + ' (#' + p.owner + ')' +
+        (occBy ? ' · 被 ' + occBy.name + ' 占领' : '');
+      $('iOwner').style.color = occBy ? '#a8523b' : '';
+    }
 
     var tp = AO.aoc2.totalPop(p);
     $('iPop').textContent = AO.formatPop(tp);
@@ -6470,18 +6529,32 @@
     $('iStab').textContent = p.aoc.stab.toFixed(0) + '%';
     $('iHappy').textContent = p.aoc.happy.toFixed(0) + '%';
     $('iGrowth').textContent = (p.aoc.growth * 100).toFixed(2) + '% / 回合';
-    /* 国籍构成：人数最多的两三个国籍 + 本国占比（同化程度） */
+    /* 国籍构成：人数最多的两三个国籍 + 本国占比（同化程度）。
+     * 无主省没有"本国"：那里的绝大多数是土著（0 号位）。 */
     var parts = AO.aoc2.popParts(w, p);
     var own = p.aoc.pop[p.owner] || 0;
     var ownPct = tp > 0 ? Math.round(own / tp * 100) : 100;
-    var natTxt = '本国 ' + ownPct + '%';
-    if (parts.length > 1) {
-      var others = [];
-      for (var pi = 0; pi < parts.length && others.length < 2; pi++) {
-        if (parts[pi].cid === p.owner) continue;
-        others.push(parts[pi].name + ' ' + Math.round(parts[pi].n / tp * 100) + '%');
+    var natTxt;
+    if (!p.owner) {
+      natTxt = '土著 ' + Math.round((p.aoc.pop[0] || 0) / Math.max(1, tp) * 100) + '%';
+      if (AO.aoc2.world) {
+        /* 已经在殖民的国家：谁占了几个百分点，玩家该看得见 */
+        for (var pk in p.aoc.pop) {
+          if ((pk | 0) === 0) continue;
+          var pc = w.countries[(pk | 0) - 1];
+          if (pc) natTxt += ' · ' + pc.name + ' ' + Math.round(p.aoc.pop[pk] / tp * 100) + '%';
+        }
       }
-      if (others.length) natTxt += ' · ' + others.join(' · ');
+    } else {
+      natTxt = '本国 ' + ownPct + '%';
+      if (parts.length > 1) {
+        var others = [];
+        for (var pi = 0; pi < parts.length && others.length < 2; pi++) {
+          if (parts[pi].cid === p.owner) continue;
+          others.push(parts[pi].name + ' ' + Math.round(parts[pi].n / tp * 100) + '%');
+        }
+        if (others.length) natTxt += ' · ' + others.join(' · ');
+      }
     }
     $('iNat').textContent = natTxt;
     $('iNat').title = parts.map(function (x) {
@@ -6492,6 +6565,30 @@
       '%）：≥' + AO.AOC2.REVOLT_TRIGGER + '% 每回合 ' +
       Math.round(AO.AOC2.REVOLT_CHANCE * 100) + '% 概率举旗';
     $('iRevolt').style.color = p.aoc.revolt >= AO.AOC2.REVOLT_TRIGGER ? '#a8523b' : '';
+
+    /* 疫病（第十六章）：患病期间稳定 −18，病死是永久的 */
+    var disEl = $('iDis');
+    if (disEl) {
+      var DW = AO.AOC2W;
+      if (p.aoc.dis) {
+        var ddef = AO.aoc2.world.DIS_BY_KEY[p.aoc.dis] || {};
+        disEl.textContent = (ddef.cn || p.aoc.dis) + '（第 ' + (p.aoc.disT || 0) + ' 回合起）' +
+          (p.aoc.mal ? ' · 饥荒' : '');
+        disEl.style.color = '#a8523b';
+        disEl.title = (ddef.cn || '') + '：稳定度 −' + DW.DIS_STAB +
+          '　·　感染时病亡 ' + (ddef.kill || 0) + '%（发展度 / 科技减免）' +
+          '　·　治愈率 ' + ((ddef.cure || [0, 0])[0]) + '%~' + ((ddef.cure || [0, 0])[1]) + '%/回合';
+      } else if (p.aoc.mal) {
+        disEl.textContent = '营养不良';
+        disEl.style.color = '#a8523b';
+        disEl.title = '人口 < ' + DW.DIS_MALNUT_POP.toLocaleString() +
+          ' 的省会闹饥荒：稳定度 −' + DW.DIS_STAB + '，人口慢慢掉（规则书第十六章）';
+      } else {
+        disEl.textContent = '无';
+        disEl.style.color = '';
+        disEl.title = '没病。疫病每回合按"已感染省占比 + 1%"传播（规则书第十六章）';
+      }
+    }
 
     $('iCore').textContent = coreText(w, p);
     $('iValue').textContent = p.aoc.value.toFixed(1);
@@ -6524,15 +6621,102 @@
       })(p.neighbors[i]);
     }
 
-    renderAocArmy(p);
-    renderAocBld(p);
-    renderAocDecree(p);
+    if (p.owner) {
+      renderAocArmy(p);
+      renderAocBld(p);
+      renderAocDecree(p);
+      if ($('iArmySec')) $('iArmySec').style.display = '';
+      if ($('iBldSec')) $('iBldSec').style.display = '';
+    } else {
+      /* 无主之地：没有敕令、没有军务、没有建筑 —— 只有"谁来殖民"。
+       * 三个小标题一起收起来：标题底下空着比没有更难看。 */
+      renderAocColony(p);
+      if ($('iMP')) $('iMP').textContent = '';
+      bldMsg('');
+      if ($('iArmy') ) $('iArmy').innerHTML = '';
+      if ($('iArmySec')) $('iArmySec').style.display = 'none';
+      if ($('iBldSec')) $('iBldSec').style.display = 'none';
+    }
 
-    /* 国家卡开着的时候，点省份也跟着换成该省所属国 */
-    if ($('country').classList.contains('on') && state.renderer) {
+    /* 国家卡开着的时候，点省份也跟着换成该省所属国（无主省不换） */
+    if (p.owner && $('country').classList.contains('on') && state.renderer) {
       state.renderer.selectedCountry = p.owner;
       showCountry(p.owner);
     }
+  }
+
+  /* =============================================================
+   * 殖民（规则书第十五章）：无主省上唯一的三个动作
+   *
+   *   殖民者  1,000 金 → 移入 1,000 人（抬占比，过 10% 就触发自然殖民）
+   *   殖民地 10,000 金 → 立即殖民（要求已有 10% 本国人口）
+   *   自然殖民        → 占比 ≥10% 后每回合自己长，过半就归你
+   *
+   * 为什么把 10% 写成"门槛"而不是"按钮"：规则书原文就是"占比 ≥10% 时开始
+   * 缓慢殖民" —— 它不是一个动作，是一个开关。玩家该看懂"我现在推到几成了"。
+   * ============================================================= */
+  function renderAocColony(p) {
+    var box = $('iDecree');
+    if (!box) return;
+    box.innerHTML = '';
+    var w = state.world;
+    var Wd = AO.AOC2W;
+    /* 谁有资格：玩家国；玩家国不行时退回"接壤的那个国"（上帝模式看地） */
+    var cid = PLAYER || 0;
+    if (!cid) {
+      for (var ni = 0; ni < p.neighbors.length; ni++) {
+        var q = w.provinces[p.neighbors[ni] - 1];
+        if (q && q.owner) { cid = q.owner; break; }
+      }
+    }
+    var c = w.countries[cid - 1];
+    var tp = AO.aoc2.totalPop(p);
+    var share = tp > 0 ? (p.aoc.pop[cid] || 0) / tp : 0;
+    var why = c && c.aoc ? AO.aoc2.world.colonizeWhy(w, cid, p.id) : '没有国家';
+
+    var head = doc.createElement('div');
+    head.className = 'hint';
+    head.innerHTML = '无主之地 · 土著 ' + Math.round(tp).toLocaleString() + ' 人' +
+      (c ? '　·　' + c.name + ' 已占 <b>' + Math.round(share * 100) + '%</b>' : '');
+    box.appendChild(head);
+
+    function mk(label, sub, ok, fn, title) {
+      var b = doc.createElement('button');
+      b.type = 'button';
+      b.innerHTML = '<b>' + label + '</b>' + (sub ? '<em>' + sub + '</em>' : '');
+      b.disabled = !ok;
+      if (title) b.title = title;
+      if (ok) b.addEventListener('click', fn);
+      box.appendChild(b);
+    }
+    var rich1 = c && c.aoc && c.aoc.treasury >= Wd.COLONIST_GOLD;
+    mk('殖民者', Wd.COLONIST_GOLD.toLocaleString() + ' 金 · +' + Wd.COLONIST_POP.toLocaleString() + ' 人',
+      !why && rich1,
+      function () {
+        var r = AO.aoc2.world.colonist(w, cid, p.id);
+        toast(r.msg, 2800);
+        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+      },
+      why || '向这块无主之地移入人口，把本国占比推向 10% 的自然殖民门槛');
+
+    var needCol = share >= Wd.COLONY_NEED_SHARE;
+    var rich2 = c && c.aoc && c.aoc.treasury >= Wd.COLONY_GOLD;
+    mk('殖民地', Wd.COLONY_GOLD.toLocaleString() + ' 金 · 立刻归你',
+      !why && needCol && rich2,
+      function () {
+        var r = AO.aoc2.world.colony(w, cid, p.id);
+        toast(r.msg, 3000);
+        if (r.ok) { AO.aoc2.recomputeCountry(w, c); showInfo(p.id); if ($('country').classList.contains('on')) showCountry(c.id); }
+      },
+      why || (!needCol ? '先要有 ' + Math.round(Wd.COLONY_NEED_SHARE * 100) + '% 本国人口（现 ' +
+        Math.round(share * 100) + '%）' : '一次买断这块地'));
+
+    var foot = doc.createElement('div');
+    foot.className = 'hint';
+    foot.textContent = '自然殖民：占比 ≥' + Math.round(Wd.COLON_NAT_TRIGGER * 100) +
+      '% 后每回合自己长人（越高越快），过 ' + Math.round(Wd.COLON_TAKE_SHARE * 100) + '% 就归你。' +
+      '军队进不来 —— 无主之地只能殖民（规则书第一章）。';
+    box.appendChild(foot);
   }
 
   /* ---------------- 国家卡片 ---------------- */
@@ -7387,7 +7571,7 @@
     renderGovPool(cid);
     renderArtSec(cid);              // 工匠（v17）：候选池 + 派驻（装备线的钥匙）
     renderCabinet(c);               // 内阁（v12）：拜相 / 罢相 / 四项权限
-    renderIntelSection(c);          // 情报署（v6）：预算三档 + 已知国家 + 定向探测
+    /* 情报署（v6）已随旧制退役：迷雾改成国家卡上的「战争迷雾」三档 */
     renderGovRows(c);
     $('gpProvN').textContent = '· ' + c.provinces.length + ' 省';
 
@@ -7406,7 +7590,7 @@
       '全省税入 <b>+' + taxSum + ' 金</b>／回合　·　平均民心 <b>' + Math.round(avgH) + '</b>' +
       '　·　在任 <b>' + withOff + ' / ' + nProv + '</b> 省　·　省库金合计 <b>' +
       Math.floor(goldSum) + '</b>　·　税率「' + G.rateCn[taxRateOf(cid)] + '」' +
-      '　·　情报「' + FOG.cn[budgetOf(cid)] + (budgetOf(cid) ? ' ' + FOG.cost[budgetOf(cid)] + ' 金/回合' : '') + '」';
+      '　·　迷雾「' + (FOGC.level + 1) + ' 档 ' + FOGC.cn[FOGC.level] + '」';
   }
 
   function govOwnerGuess() { return techOwnerGuess(); }
@@ -8025,6 +8209,26 @@
 
     var g = AO.aoc2.govOf(c);
     $('cGov').textContent = g.cn;
+    /* 国策（阶段五）：AI 的性格只影响它的决策倾向，不改变任何一条规则 */
+    var peEl = $('cPersona');
+    if (peEl) peEl.textContent = AO.aoc2.world ? AO.aoc2.world.personaCn(c) : '';
+    /* 黄金时代（第十九章）：科技型 / 繁荣型，限时 */
+    var geEl = $('cGolden');
+    if (geEl) {
+      var gdTxt = AO.aoc2.world ? AO.aoc2.world.goldenCn(c) : '';
+      if (gdTxt) {
+        geEl.textContent = gdTxt + '（余 ' + AO.aoc2.world.goldenLeft(c, turnNo) + ' 回合）';
+        geEl.style.color = '#2f7a6b';
+        geEl.title = c.aoc.gd === 'tech'
+          ? '科技型：研究点 ×' + AO.AOC2W.GOLDEN_TECH
+          : '繁荣型：收入 ×' + AO.AOC2W.GOLDEN_INCOME + '，幸福 +' + AO.AOC2W.GOLDEN_HAPPY;
+      } else {
+        geEl.textContent = '平常';
+        geEl.style.color = '';
+        geEl.title = '黄金时代每回合 ' + (AO.AOC2W.GOLDEN_CHANCE * 100).toFixed(1) +
+          '% 概率降临，持续 ' + AO.AOC2W.GOLDEN_TURNS + ' 回合';
+      }
+    }
     $('cPop').textContent = AO.formatPop(c.aoc.pop) + '（' + c.provinces.length + ' 省）';
     $('cEcon').textContent = fmtGold(c.aoc.econ);
     $('cDev').textContent = c.aoc.dev.toFixed(2);
@@ -8099,6 +8303,7 @@
     renderAocTech(c);
     renderAocBldSum(c);
     renderAocWar(c);
+    renderAocFog();
     $('cMP').textContent = c.aoc.mp + ' / ' + c.aoc.mpMax;
     $('cDIP').textContent = c.aoc.dip + ' / ' + c.aoc.dipMax;
     var rp = c.aoc.rp || 0;
@@ -9083,7 +9288,7 @@
     var h = happyOf(pid);
     h.v = AO.clamp(h.v + B.plunderHappy, 0, 100);
     /* 劫掠留下的是恶名（v6）：关系 −10 —— 这一条是 REL 的四个变动源之一 */
-    if (p.owner && p.owner !== (by | 0)) addRel(by, p.owner, FOG.relPlunder);
+    if (p.owner && p.owner !== (by | 0)) addRel(by, p.owner, -15);
     var parts = [];
     for (var kk in got) parts.push(cnOf(kk) + ' ' + got[kk]);
     WARLOG.unshift({ turn: turnNo, cls: 'warn',
@@ -9549,7 +9754,7 @@
     warBaseOf(a, b);
     /* 宣战把关系打到谷底（v6）：交战国边境立刻降级为 seen/unknown ——
      * 昨天还能看见的邻居，今天隔着一道战线 */
-    setRel(a, b, FOG.relWar);
+    setRel(a, b, -100);
     var ca = coOf(a), cb = coOf(b);
     var txt = '📜 ' + (ca ? ca.name : '?') + ' 向 ' + (cb ? cb.name : '?') + ' 宣战' +
       (wasAlly ? '（撕毁同盟 —— 背信）' : wasNap ? '（撕毁互不侵犯条约 —— 背信）' : '');
@@ -9864,11 +10069,48 @@
    * 反谍不另开系统：**同一笔预算**就是反谍等级。别人对你下手时，
    * 按你的 INTELB 档掷暴露概率（0 / 15% / 30%）；你抓到他，双方各留一条纪要。
    * ============================================================= */
-  var FOG = AO.INTEL;
+  /* =============================================================
+   * 十八、战争迷雾（阶段五，规则书第十九章）
+   *
+   * 一句话原则：**迷雾只遮"你现在知道什么"，不遮"世界怎么运转"**。
+   * 版图、人口、军队、AI 决策全部照旧按真实数据跑；这一层只决定
+   *   ① 地图上哪块地方露纸纹（unknown）、哪块地方泛黄（seen 且旧）；
+   *   ② 省卡能给你看多少字段（遮蔽是接口层的事，和 canAct 权限无关）。
+   *
+   * 三档（新局规则，规则书第十九章："可选 3 档，第一档全图全军可见"）：
+   *   0 全图可见   工坊视角 / 老玩家。任何省都是 realtime
+   *   1 边境可见   **默认**。自国省 + 自国的陆上邻省 + 驻军所在 + 瞭望塔邻省
+   *   2 只本国     最严。只有自国省 + 驻军所在 + 瞭望塔邻省
+   *
+   * 探过的地方不会消失：LASTSEEN 里留着"最后一次看见的样子"，越旧越黄。
+   * 这一层是 v6 情报署唯一的继承物 —— 情报署（预算三档 / 反谍 / 定向探测）
+   * 已经随旧制整体退役，迷雾改成新局规则里的一个档位。
+   * ============================================================= */
+  var FOGC = {
+    level: 1,
+    cn: ['全图可见', '边境可见', '只本国'],
+    desc: ['一切尽收眼底（工坊视角）',
+      '自国与邻省实时；其余只留记忆',
+      '只有本国领土与驻军所在是实时的'],
+    staleMid: 8, staleOld: 20,          // 旧情报泛黄两档（回合）
+    look: 1                             // 档 1 时"邻省"算多远（1 = 一跳）
+  };
+  AO.FOGC = FOGC;
 
-  /* 迷雾三档是阶段五的事。这一阶段先整层关掉：否则选了国之后省卡会走
-   * "旧情报"分支（showFogInfo），而新卡没有那一套字段。 */
-  function fogOn() { return false; }
+  function fogOn() { return FOGC.level > 0 && !!PLAYER && !!state.world; }
+
+  /* 换档：只改视角，不碰世界数据。改完立刻重画（底图缓存跟着版本号失效）。 */
+  function setFogLevel(n) {
+    n = n | 0;
+    if (n < 0 || n > 2) return FOGC.level;
+    FOGC.level = n;
+    fogInvalidate();
+    if (state.renderer) { state.renderer._needBase = true; state.renderer.fogRefresh(); }
+    if (state.infoId) showInfo(state.infoId);
+    return n;
+  }
+  AO.setFogLevel = setFogLevel;
+
   /* 迷雾版本号：渲染层拿它做缓存键（建 Path2D 很贵，只在真的变了时重建）。
    * 任何"可见性可能变了"的操作都要走 fogInvalidate —— 它顺手把版本 +1。 */
   var FOGVER = 0;
@@ -9891,58 +10133,84 @@
 
   function visOf(pid) { return visName(visCode(pid)); }
 
-  /* 重建可见性表：一次扫全图，只在迷雾可能变化时跑（每回合一次 + 探索/REL 变动）
+  /* 重建可见性表：一次扫全图，只在迷雾可能变化时跑（每回合一次 + 换档）
    *
    * 判定顺序（**顺序本身就是规则**，别随手交换）：
-   *   ① 自己的省                     → 实时
-   *   ② 本国军队脚下的省             → 实时（围城 / 交战 / 驻军，贴脸必然看得见）
-   *   ③ 没探过                       → unknown（哪怕就贴着边境）
-   *   ④ 交界 + 非交战 + REL≥0        → 实时（"邻居家的近况"）
-   *   ⑤ 其余探过的                   → seen（LASTSEEN 快照，越旧越黄）
+   *   ① 自国省 → 实时
+   *   ② 自国军队脚下的省 → 实时（兵在哪，眼睛就在哪）
+   *   ③ 自国省上有瞭望塔 → 它的一圈邻省实时（规则书第五章"可揭开战争迷雾"）
+   *   ④ 档 1：自国省的邻省 → 实时（"邻居家的近况"）
+   *   ⑤ 其余：探过 → seen（LASTSEEN 快照，越旧越黄）；没探过 → unknown
    *
-   * ③ 排在 ④ 前面是**故意的**：开局只有自国可见，其余全是空白羊皮纸。
-   * 邻省要"先探过"才谈得上实时 —— 否则选完国就能看到一圈邻国，
-   * 「战争迷雾」第一分钟就漏了。 */
+   * 为什么档 2 连邻省也不给：最严那一档的意义就是"你得派人过去"。
+   * 档 0 在 fogOn() 里就短路了，整张表全 REAL。 */
   function rebuildVis() {
     var w = state.world;
     VIS.dirty = false;
     if (!w) { VIS.arr = null; VIS.n = 0; return; }
-    var n = w.provinces.length, i;
+    var n = w.provinces.length, i, j, nb;
     var arr = new Uint8Array(n + 1);
     VIS.arr = arr; VIS.n = n;
     if (!fogOn()) { for (i = 1; i <= n; i++) arr[i] = VIS_REAL; return; }
     var E = EXPLORED[PLAYER] || {};
-    var border = Object.create(null);      // 与自国交界的省
-    /* ① 自己的省 */
+
+    /* ①② 自国省 + 驻军所在 */
     for (i = 0; i < n; i++) {
       var p = w.provinces[i];
-      if (p && p.owner === PLAYER) {
-        arr[p.id] = VIS_REAL;
-        var nb = p.neighbors || [];
-        for (var j = 0; j < nb.length; j++) {
-          var q = w.provinces[nb[j] - 1];
-          if (q && q.owner !== PLAYER) border[q.id] = 1;
+      if (!p || !p.aoc) continue;
+      if (p.owner === PLAYER) arr[p.id] = VIS_REAL;
+      if (p.aoc.army > 0 && (p.aoc.armyOf || p.owner) === PLAYER) arr[p.id] = VIS_REAL;
+    }
+    /* ③ 瞭望塔揭邻省迷雾（只管自己的塔） */
+    for (i = 0; i < n; i++) {
+      var t = w.provinces[i];
+      if (!t || !t.aoc || t.owner !== PLAYER) continue;
+      if (!(t.aoc.bld && t.aoc.bld.watchtower > 0)) continue;
+      nb = t.neighbors || [];
+      for (j = 0; j < nb.length; j++) arr[nb[j]] = VIS_REAL;
+    }
+    /* ④ 档 1：自国省的邻省实时 */
+    if (FOGC.level === 1) {
+      for (i = 0; i < n; i++) {
+        var q = w.provinces[i];
+        if (!q || !q.aoc || q.owner !== PLAYER) continue;
+        nb = q.neighbors || [];
+        for (j = 0; j < nb.length; j++) {
+          if (!arr[nb[j]]) arr[nb[j]] = VIS_REAL;
         }
       }
     }
-    /* ② 本国军队脚下的省 */
-    for (var aid in ARMY) {
-      var a = ARMY[aid];
-      if (a && a.owner === PLAYER && a.pid > 0) arr[a.pid] = VIS_REAL;
-    }
-    /* ③④⑤ 其余逐省判定 */
+    /* ⑤ 其余：探过 → seen，其余 unknown */
     for (i = 0; i < n; i++) {
       var p2 = w.provinces[i];
       if (!p2 || arr[p2.id]) continue;
-      if (!E[p2.id]) { arr[p2.id] = VIS_UNKNOWN; continue; }
-      if (border[p2.id] && !atWar(PLAYER, p2.owner) &&
-          relOf(PLAYER, p2.owner) >= FOG.relFriend) {
-        arr[p2.id] = VIS_REAL;
-      } else {
-        arr[p2.id] = VIS_SEEN;
-      }
+      arr[p2.id] = E[p2.id] ? VIS_SEEN : VIS_UNKNOWN;
     }
   }
+
+  /* 每回合末把"此刻看得见的东西"记进记忆（EXPLORED + LASTSEEN）。
+   * 为什么快照要存人口/经济/驻军这几个数：省卡在 seen 态下显示的就是它们 ——
+   * 只存归属的话，泛黄省点开是一张空卡，"旧情报"的体感就没了。 */
+  function fogSnapshot() {
+    if (!fogOn()) return;
+    var w = state.world, i, p, E = EXPLORED[PLAYER];
+    if (!E) E = EXPLORED[PLAYER] = Object.create(null);
+    var t = turnNo | 0;
+    for (i = 0; i < w.provinces.length; i++) {
+      p = w.provinces[i];
+      if (!p || !p.aoc) continue;
+      if (visCode(p.id) !== VIS_REAL) continue;
+      E[p.id] = 1;
+      LASTSEEN[PLAYER + '|' + p.id] = {
+        t: t, o: p.owner | 0,
+        pop: Math.round(AO.aoc2.totalPop(p)),
+        econ: Math.round(p.aoc.econ), dev: p.aoc.dev,
+        army: p.aoc.army | 0, occ: p.aoc.occupied | 0
+      };
+    }
+    fogInvalidate();
+  }
+  AO.fogSnapshot = fogSnapshot;
 
   /* ---------------- 关系值（极简外交） ---------------- */
   function relOf(a, b) {
@@ -10310,7 +10578,7 @@
     WSCORE[k] = { a: 0, b: 0 };
     delete TALKCD[k];
     warBaseOf(v, foe);
-    setRel(v, foe, FOG.relWar);
+    setRel(v, foe, -100);
     var rec = PUPPET[warKey(suz, v)];
     if (rec) rec.warT = turnNo;
     var txt = '⚑ ' + nameOf(v) + ' 随宗主 ' + nameOf(suz) + ' 出征，讨伐 ' + nameOf(foe);
@@ -10364,55 +10632,13 @@
 
 
 
-  /* ---------------- 预算档 ---------------- */
+  /* ---------------- 预算档 ----------------
+   * 情报署退役后这里只剩一个壳：世界消息（v15 的"耳目圈"）还按档位决定
+   * "听得见多远"。旧的三档预算（无 / 常规 / 重金）不再花钱，
+   * 恒返回 0 = 只听得见边境的事 —— 迷雾档位接管了"你知道多少"这件事。 */
   function budgetOf(owner) {
     var b = INTELB[owner];
     return (b === 1 || b === 2) ? b : 0;
-  }
-
-
-
-  /* ---------------- 探索：看见并记下来 ----------------
-   * deep=true 才写建筑摘要与驻军约数（重金情报 / 自己的省）。
-   * 旧的深度快照在同归属时保留（bt 记它自己的回合），免得一次路过就把细节洗掉。 */
-  function bldSummary(pid) {
-    var bag = SIM[pid], cnt = Object.create(null), order = [], key, i;
-    if (bag) {
-      for (key in bag) {
-        var s = bag[key], def = AO.RESOURCE_BY_KEY[key];
-        if (!def || !s) continue;
-        var nm = def.build || def.cn;
-        if (s.built > 0) {
-          if (cnt[nm] === undefined) order.push(nm);
-          cnt[nm] = (cnt[nm] || 0) + s.built;
-        }
-        if (s.site > 0) {
-          var sn = nm + '（在建）';
-          if (cnt[sn] === undefined) order.push(sn);
-          cnt[sn] = (cnt[sn] || 0) + 1;
-        }
-      }
-    }
-    for (i = 0; i < UNIV_KINDS.length; i++) {
-      var st = UNIV[UNIV_KINDS[i]][pid];
-      if (st && st.n > 0) {
-        var un = univDef(UNIV_KINDS[i]).cn;
-        if (cnt[un] === undefined) order.push(un);
-        cnt[un] = (cnt[un] || 0) + st.n;
-      }
-    }
-    var out = [];
-    for (i = 0; i < order.length; i++) {
-      out.push(order[i] + (cnt[order[i]] > 1 ? '×' + cnt[order[i]] : ''));
-    }
-    return out.slice(0, 8);
-  }
-  function troopEstimate(pid) {
-    var list = armiesIn(pid), men = 0, i;
-    for (i = 0; i < list.length; i++) men += list[i].men || 0;
-    if (!men) return 0;
-    /* 约数：500 人一档 —— 情报给的是"约 3200"，不是"3217" */
-    return Math.max(500, Math.round(men / 500) * 500);
   }
 
   function lastSeenOf(pid) {
@@ -10420,10 +10646,18 @@
     return LASTSEEN[PLAYER + '|' + (pid | 0)] || null;
   }
 
+  /* 旧情报有多旧（回合） */
+  function staleOf(pid) {
+    var r = lastSeenOf(pid);
+    if (!r) return 0;
+    return Math.max(0, (turnNo | 0) - (r.t || turnNo));
+  }
+  AO.fogStaleOf = staleOf;
+
   /* 泛黄档：0 微黄 / 1 中黄 / 2 深黄 */
   function staleBucket(pid) {
     var n = staleOf(pid);
-    return n < FOG.staleMid ? 0 : n < FOG.staleOld ? 1 : 2;
+    return n < FOGC.staleMid ? 0 : n < FOGC.staleOld ? 1 : 2;
   }
 
 
@@ -10440,19 +10674,25 @@
     fogInvalidate();
   }
 
-  /* 玩家开局：自国全探 + 实时，其余全 unknown */
+  /* 玩家开局：自国记进"探过"，并拍一张快照 —— 之后每回合 fogSnapshot 会跟上。
+   * 其余全是 unknown / 档 1 的邻省由 rebuildVis 现算。 */
   function initFogForPlayer(cid) {
     if (!state.world) return;
     var c = coOf(cid);
     if (!c) return;
     for (var k in LASTSEEN) delete LASTSEEN[k];
+    for (var kk in EXPLORED) delete EXPLORED[kk];
     var E = EXPLORED[cid] = Object.create(null);
     for (var i = 0; i < c.provinces.length; i++) {
       var pid = c.provinces[i], p = pOf(pid);
-      if (!p) continue;
+      if (!p || !p.aoc) continue;
       E[pid] = 1;
-      LASTSEEN[cid + '|' + pid] = { t: turnNo, o: p.owner, b: bldSummary(pid),
-        tr: troopEstimate(pid), bt: turnNo };
+      LASTSEEN[cid + '|' + pid] = {
+        t: turnNo, o: p.owner | 0,
+        pop: Math.round(AO.aoc2.totalPop(p)),
+        econ: Math.round(p.aoc.econ), dev: p.aoc.dev,
+        army: p.aoc.army | 0, occ: p.aoc.occupied | 0
+      };
     }
     if (INTELB[cid] === undefined) INTELB[cid] = 0;
     fogInvalidate();
@@ -10509,13 +10749,15 @@
 
 
 
-  /* 省卡的两条遮蔽路径。realtime 不走这里（照旧全透明）。 */
+  /* 省卡的两条遮蔽路径。realtime 不走这里（照旧全透明）。
+   *
+   * seen 态显示的是 **LASTSEEN 里的那份快照**，不是现在的世界 ——
+   * 泛黄省上那个"12 万人口"可能是二十回合前的人口，玩家要能感觉到这件事
+   * 在骗他（这正是迷雾的意义：情报会过时）。 */
   function showFogInfo(p) {
     var info = $('info'), body = $('infoBody'), empty = $('infoEmpty');
     var v = visCode(p.id);
-    /* 城防行在迷雾下不显示（耐久是真实数据，旧情报里不该有） */
     hideWallRow();
-    /* 安定 / 整合 / 安抚同理：不安是"这一刻的真实状态"，旧情报里没有 */
     hideUnrestRows();
     info.classList.add('on');
     if (v === VIS_UNKNOWN) {
@@ -10525,7 +10767,7 @@
       if (empty) {
         empty.style.display = '';
         empty.innerHTML = '<b>未知之地</b><span>尚无测绘资料</span>' +
-          '<em>派军队前往，或等情报署渗透 —— 地图上这块还只是羊皮纸</em>';
+          '<em>派人过去（军队 / 殖民），地图上这块还只是羊皮纸 —— 换「战争迷雾」档位可放宽</em>';
       }
       var fb0 = $('iFogBar');
       if (fb0) fb0.hidden = true;
@@ -10535,36 +10777,53 @@
     info.classList.add('fog-seen');
     if (empty) empty.style.display = 'none';
     if (body) body.style.display = '';
-    var ls = lastSeenOf(p.id) || { t: turnNo, o: p.owner };
+    var ls = lastSeenOf(p.id) || { t: turnNo, o: p.owner | 0 };
     var age = Math.max(0, turnNo - (ls.t || turnNo));
     var oc = coOf(ls.o);
     var fb = $('iFogBar');
     if (fb) {
       fb.hidden = false;
       fb.innerHTML = '⚠ 情报截止第 ' + (ls.t || turnNo) + ' 回合 · 陈旧 <b>' + age + '</b> 回合' +
-        (age >= FOG.staleMid ? '（已泛黄）' : '');
+        (age >= FOGC.staleMid ? '（已泛黄）' : '');
     }
     $('iSw').style.background = oc ? oc.color : '#b9b09a';
     $('iName').textContent = p.name;
     $('iNameEn').textContent = p.name_en;
-    $('iOwner').textContent = (oc ? oc.name : '无主') + '（第 ' + (ls.t || turnNo) + ' 回合所见）';
+    $('iOwner').textContent = (oc ? oc.name : '未殖民') + '（第 ' + (ls.t || turnNo) + ' 回合所见）';
     $('iTerrain').textContent = (AO.TERRAIN_CN[p.terrain] || p.terrain) + ' · ' + p.terrain;
     var wt = waterText(p);
     $('iWater').textContent = wt;
     $('iWater').title = wt;
     $('iArea').textContent = p.area.toLocaleString() + ' px²';
+    /* 信息区：能给的都从快照里给（没有的就写"未记录"） */
+    if ($('iPop')) $('iPop').textContent = ls.pop ? AO.formatPop(ls.pop) : '未记录';
+    if ($('iEcon')) $('iEcon').textContent = ls.econ ? fmtGold(ls.econ) : '未记录';
+    if ($('iDev')) $('iDev').textContent = ls.dev ? ls.dev.toFixed(2) : '未记录';
+    if ($('iStab')) $('iStab').textContent = '未记录';
+    if ($('iHappy')) $('iHappy').textContent = '未记录';
+    if ($('iGrowth')) $('iGrowth').textContent = '未记录';
+    if ($('iNat')) $('iNat').textContent = '未记录';
+    if ($('iRevolt')) $('iRevolt').textContent = '未记录';
+    if ($('iDis')) $('iDis').textContent = '未记录';
+    if ($('iCore')) $('iCore').textContent = coreText(state.world, p);
+    if ($('iValue')) $('iValue').textContent = p.aoc.value.toFixed(1);
     var snap = $('iFogSnap');
     if (snap) {
-      var h = '<div class="fsrow"><b>上回所见建筑</b><span>' +
-        (ls.b && ls.b.length ? escHtml(ls.b.join('、')) : '未记录（要重金情报或再探一次）') + '</span></div>' +
+      var h = '<div class="fsrow"><b>上回所见人口</b><span>' +
+        (ls.pop ? ls.pop.toLocaleString() : '未记录') + '</span></div>' +
         '<div class="fsrow"><b>据报驻军</b><span>' +
-        (ls.tr ? '约 ' + ls.tr.toLocaleString() + ' 人' : '未记录') + '</span></div>';
-      if (ls.bt && ls.bt !== ls.t) h += '<div class="fsrow dim"><b>建筑详查于</b><span>第 ' + ls.bt + ' 回合</span></div>';
-      h += '<div class="fsrow dim"><b>当下实况</b><span>需派军队进入或定向探测</span></div>';
+        (ls.army ? '约 ' + Math.max(500, Math.round(ls.army / 500) * 500).toLocaleString() + ' 人' : '无 / 未记录') +
+        '</span></div>';
+      if (ls.occl) h += '<div class="fsrow dim"><b>当时被占</b><span>是</span></div>';
+      h += '<div class="fsrow dim"><b>当下实况</b><span>要派兵过去，或建瞭望塔揭开邻省</span></div>';
       snap.innerHTML = h;
     }
     /* 邻国小签会泄露现状（别人的旗色 / 归属），seen 态下不给 */
     if ($('iNeighbors')) $('iNeighbors').innerHTML = '';
+    if ($('iDecree')) $('iDecree').innerHTML = '<div class="hint">旧情报：这里不能下敕令</div>';
+    if ($('iArmy')) $('iArmy').innerHTML = '';
+    if ($('iBld')) $('iBld').innerHTML = '';
+    if ($('iMP')) $('iMP').textContent = '';
   }
 
 
@@ -10574,80 +10833,6 @@
 
 
   /* ---------------- 治理面板的「情报署」节 ---------------- */
-  function renderIntelSection(c) {
-    var box = $('gpIntelB');
-    if (!box) return;
-    var cid = c.id, i;
-    var mine = !PLAYER || PLAYER === cid;
-    var b = budgetOf(cid), h = '';
-    for (i = 0; i < 3; i++) {
-      h += '<button type="button" data-ib="' + i + '"' + (i === b ? ' class="on"' : '') +
-        ' title="' + escHtml(FOG.desc[i] + '\n每回合 ' + FOG.cost[i] + ' 金') + '">' +
-        FOG.cn[i] + '</button>';
-    }
-    box.innerHTML = h;
-    if (!mine || !canAct(cid)) {
-      var bs = box.querySelectorAll('button');
-      for (i = 0; i < bs.length; i++) lockBtn(bs[i], cid);
-    }
-    var tip = $('gpIntelTip');
-    if (tip) {
-      /* v15：把"世界消息要不要钱"说清楚 —— 这是玩家第一次真正为情报档掏钱的理由 */
-      var NW = newsCfg().delay || [[5, 8], [3, 4], [1, 1]];
-      var nwTxt = [];
-      for (i = 0; i < 3; i++) {
-        var rr = NW[i] || [1, 1];
-        nwTxt.push(FOG.cn[i] + ' ' + (rr[0] === rr[1] ? rr[0] : rr[0] + '~' + rr[1]));
-      }
-      tip.innerHTML = '每回合开销 <b>' + FOG.cost[b] + ' 金</b>（国库扣）　·　反谍：抓到密探 ' +
-        Math.round(FOG.exposeP[b] * 100) + '%　·　自动织网 ' +
-        (FOG.autoEvery[b] ? ('每 ' + FOG.autoEvery[b] + ' 回合 ' + FOG.autoN[b] + ' 省' +
-          (FOG.deep[b] ? '（含建筑与驻军）' : '')) : '不织网') +
-        '<br>世界大事按情报档延迟送达：' + nwTxt.join(' / ') + ' 回合' +
-        (b === 0 ? '（只听得见边境的事，且会传来走样的风闻）' :
-          b === 1 ? '（已知国家的事）' : '（已知国家的事 + 战况一行）');
-    }
-    var nEl = $('gpIntelN');
-    if (nEl) nEl.textContent = mine ? ('· 定向探测 ' + FOG.probeCost + ' 金 / 冷却 ' + FOG.probeCd + ' 回合') : '';
-    var listEl = $('gpIntelList');
-    if (!listEl) return;
-    if (!mine) {
-      listEl.innerHTML = '<div class="pempty">情报署只对本国开放 —— 别国的预算与密探活动不对你公布。</div>';
-      return;
-    }
-    if (!PLAYER) {
-      listEl.innerHTML = '<div class="pempty">工坊模式（未选国）：没有迷雾，也没有情报署。<br>' +
-        '点顶栏「开始游戏」选一个国家，地图才会按你的眼睛来画。</div>';
-      return;
-    }
-    var st = fogStats(), html = '';
-    for (i = 0; i < st.known.length; i++) {
-      var kc = coOf(st.known[i]);
-      if (!kc) continue;
-      var key = PLAYER + '|' + kc.id, cd = PROBE_CD[key] | 0;
-      var msg = (INTELMSG[PLAYER] || {})[kc.id];
-      var poor = (ensureCentral(PLAYER).gold || 0) < FOG.probeCost;
-      var dis = cd > 0 || poor;
-      var knownN = exploredCount(kc.id);
-      html += '<div class="irowk">' +
-        '<span class="ikflag" style="background:' + kc.color + '"></span>' +
-        '<b class="ikname">' + escHtml(kc.name) + '</b>' +
-        '<span class="ikn">' + (knownN ? '已探 ' + knownN + ' 省' : '接壤未探') + '</span>' +
-        '<button type="button" class="iprobe" data-cid="' + kc.id + '"' + (dis ? ' disabled' : '') +
-        ' title="' + (cd > 0 ? '密探休整中：还要 ' + cd + ' 回合'
-          : poor ? '国库金不够 ' + FOG.probeCost + ' 金'
-            : '花 ' + FOG.probeCost + ' 金揭示它的 ' + FOG.probeN(budgetOf(PLAYER)) + ' 个省（有暴露风险）') +
-        '">' + (cd > 0 ? '冷却 ' + cd : '定向探测') + '</button>' +
-        '<em class="ikmsg ' + (msg ? (msg.ok ? 'ok' : 'bad') : '') + '">' +
-        (msg ? escHtml('第 ' + msg.turn + ' 回合：' + msg.text) : '尚未派出密探') + '</em>' +
-        '</div>';
-    }
-    if (!html) {
-      html = '<div class="pempty">没有接壤国家，也没有探到任何国家 —— ' +
-        '这是个岛国？派军队出海，或者等邻国的船先到。</div>';
-    }
-    listEl.innerHTML = html;
-  }
 
 
 
@@ -10664,6 +10849,7 @@
   AO.fogSeenColor = function (pid) {
     var r = lastSeenOf(pid);
     if (!r) return null;
+    if (!r.o) return '#b9b09a';            // 当时是无主之地
     var c = coOf(r.o);
     return c ? c.color : null;
   };
@@ -10725,6 +10911,14 @@
       turnNo: turnNo,
       player: PLAYER,
       aoc2: AO.aoc2.save(state.world),
+      /* 迷雾（阶段五）：档位 + 你探过哪些省 + 每次看见时的快照。
+       * 不存这些的话，读档等于"记忆清零"—— 玩家花了三十回合探开的地图
+       * 一读档全变回羊皮纸，那是 bug 不是难度。 */
+      fog: {
+        lv: FOGC.level,
+        ex: PLAYER ? (EXPLORED[PLAYER] || {}) : null,
+        ls: PLAYER ? lsnapshot() : null
+      },
       /* 编年史是平台层（不随规则退役）：年表 / 定稿快照 / 称号随档走 */
       CHRONO: AO.chronoState ? AO.chronoState() : null
     };
@@ -10746,11 +10940,35 @@
     if (AO.chronoLoad) AO.chronoLoad(d.CHRONO);
     turnNo = d.turnNo || 1;
     PLAYER = d.player | 0;
+    /* 迷雾：先落档位，再把"探过哪些省 / 最后一次看见的样子"接回来。
+     * 顺序不能反 —— 快照要靠 PLAYER 拼键。 */
+    if (d.fog) {
+      FOGC.level = (d.fog.lv | 0) >= 0 && (d.fog.lv | 0) <= 2 ? (d.fog.lv | 0) : 1;
+      if (PLAYER && d.fog.ex) {
+        EXPLORED[PLAYER] = d.fog.ex;
+        for (var lk in LASTSEEN) delete LASTSEEN[lk];
+        var ls = d.fog.ls || {};
+        for (var k2 in ls) LASTSEEN[k2] = ls[k2];
+      }
+    } else if (!d.fog && PLAYER) {
+      initFogForPlayer(PLAYER);
+    }
+    fogInvalidate();
+    if (state.renderer) { state.renderer._needBase = true; if (state.renderer.fogRefresh) state.renderer.fogRefresh(); }
     updateTurnLabel();
     refreshLocks();
     if (keepPid) { state.renderer.select(keepPid); showInfo(keepPid); }
     if (keepCid && $('country').classList.contains('on')) showCountry(keepCid);
-    toast('读档完成：第 ' + turnNo + ' 回合', 2200);
+    toast('读档完成：第 ' + turnNo + ' 回合（迷雾 ' + (FOGC.level + 1) + ' 档）', 2200);
+  }
+
+  /* 只把"我自己的那几条 LASTSEEN"打包（别国的记忆不存，那是运行时） */
+  function lsnapshot() {
+    var out = {}, k, pre = PLAYER + '|';
+    for (k in LASTSEEN) {
+      if (k.indexOf(pre) === 0) out[k] = LASTSEEN[k];
+    }
+    return out;
   }
 
   function loadGame() {
